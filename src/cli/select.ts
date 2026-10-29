@@ -374,6 +374,9 @@ async function arrowSelect(
       stdout.removeListener('resize', onResize);
       input.stop();
       leaveInteractiveScreen();
+      try {
+        while (stdin.read() !== null) {}
+      } catch {}
     };
     enterInteractiveScreen(true);
     render();

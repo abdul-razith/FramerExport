@@ -81,7 +81,11 @@ export async function detectTerminalImageSupport(
       const height = Number(cell?.[1]);
       const width = Number(cell?.[2]);
       const remaining = data.replace(/\x1b\[\?[0-9;]+c|\x1b\[6;[0-9]+;[0-9]+t/g, '');
-      if (remaining) input.unshift(Buffer.from(remaining, 'latin1'));
+      const sanitized = remaining.replace(
+        /\x1b\[<[0-9;]+[mM]|\x1b\[M[\s\S]{3}|\x1b\[[0-?]*[ -/]*[@-~]|[\r\n\x00-\x1f\x7f]/g,
+        ''
+      );
+      if (sanitized) input.unshift(Buffer.from(sanitized, 'latin1'));
       resolve(
         attributes?.includes('4') && width >= 1 && width <= 128 && height >= 1 && height <= 256
           ? { mode: 'sixel', cellWidth: width, cellHeight: height }

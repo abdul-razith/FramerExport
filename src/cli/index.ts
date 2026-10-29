@@ -79,7 +79,24 @@ async function showUpdateNotice(preferences: Preferences): Promise<void> {
       process.exit(0);
     }
 
-    console.log('\n  ' + result.message + '\n');
+    console.log(`\n  ${ui.warning('Update instructions:')}`);
+    console.log(`  ${result.message}\n`);
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const readline = (await import('node:readline/promises')).default;
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const answer = await rl.question(
+          `  ${ui.primary('>') } Press Enter to continue, or 'q' to exit: `
+        );
+        rl.close();
+        if (answer.trim().toLowerCase() === 'q') {
+          process.exit(0);
+        }
+      } catch {
+        rl.close();
+        process.exit(0);
+      }
+    }
   }
 }
 

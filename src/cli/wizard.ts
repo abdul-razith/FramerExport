@@ -1600,6 +1600,13 @@ export async function runWizard(options: WizardOptions): Promise<ExportDraft | n
     const depth = process.env.NO_COLOR !== undefined ? 1 : stdout.getColorDepth?.() || 8;
     const input = new RawInput((event) => {
       try {
+        if (
+          Date.now() - started < 150 &&
+          ((event.type === 'key' && (event.name === 'return' || event.name === 'escape')) ||
+            (event.type === 'mouse' && event.kind === 'click'))
+        ) {
+          return;
+        }
         const hover = model.hover;
         const scroll = model.scroll;
         model.handle(event);
