@@ -88,8 +88,39 @@ test('SERVE_SCRIPT serves the exported mirror correctly', async (t) => {
     const res = await fetch(`${BASE}/missing.png`);
     assert.equal(res.status, 404);
   });
+  await t.test('in-bundle relative asset traversals are safely resolved', async () => {
+    const res = await rawRequest('/../../styles/main.css');
+    assert.equal(res.status, 200);
+    assert.match(res.body, /body\{margin:0\}/);
+  });
+  await t.test('media files support byte-range streaming with 206 Partial Content', async () => {
+    await fs.mkdir(path.join(outDir, 'assets', 'misc'), { recursive: true });
+    await fs.writeFile(path.join(outDir, 'assets', 'misc', 'test.mp4'), Buffer.alloc(1000, 0x42));
+    const res = await fetch(`${BASE}/assets/misc/test.mp4`, {
+      headers: { Range: 'bytes=0-99' },
+    });
+    assert.equal(res.status, 206);
+    assert.equal(res.headers.get('content-range'), 'bytes 0-99/1000');
+    assert.equal(res.headers.get('accept-ranges'), 'bytes');
+    assert.equal(res.headers.get('content-length'), '100');
+    assert.equal(res.headers.get('content-type'), 'video/mp4');
+  });
   await t.test('path traversal outside the export root is blocked', async () => {
     const res = await rawRequest('/../package.json');
     assert.equal(res.status, 403);
+  });
+  await t.test('HTML file requested at root falls back to subpages if not in root', async () => {
+    const res = await fetch(`${BASE}/about.html`);
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /ABOUT_SUBPAGE/);
+  });
+  await t.test('sniffs magic bytes to serve AVIF even when extension is .png or .jpg', async () => {
+    await fs.mkdir(path.join(outDir, 'assets', 'images'), { recursive: true });
+    // Write AVIF header (00 00 00 1c 66 74 79 70 61 76 69 66)
+    const avifBuffer = Buffer.from('0000001c667479706176696600000000', 'hex');
+    await fs.writeFile(path.join(outDir, 'assets', 'images', 'fake.png'), avifBuffer);
+    const res = await fetch(`${BASE}/assets/images/fake.png`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'image/avif');
   });
 });

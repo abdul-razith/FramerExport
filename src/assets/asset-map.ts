@@ -71,7 +71,20 @@ export class AssetMap {
     const previousType = this.contentTypes.get(urlStr);
     if (contentType) this.contentTypes.set(urlStr, contentType);
     const previous = this.entries.get(urlStr);
-    if (previous && (!contentType || previousType || !extFromContentType(contentType)))
+    const contentTypeExt = contentType ? extFromContentType(contentType) : '';
+    const needsImageFormatUpdate =
+      previous &&
+      Boolean(
+        contentTypeExt &&
+          ['.avif', '.webp'].includes(contentTypeExt) &&
+          !previous.localPath.toLowerCase().endsWith(contentTypeExt)
+      );
+
+    if (
+      previous &&
+      !needsImageFormatUpdate &&
+      (!contentType || previousType || !contentTypeExt)
+    )
       return previous.localPath;
     if (previous) {
       this.pathOwners.delete(previous.localPath.toLowerCase());
@@ -80,33 +93,40 @@ export class AssetMap {
     const host: string = parsed.hostname;
     const pathname: string = parsed.pathname;
     let ext: string = path.extname(pathname.split('?')[0]).toLowerCase();
+    const isTranscodedImage = Boolean(
+      contentTypeExt &&
+        ['.avif', '.webp'].includes(contentTypeExt) &&
+        ['.png', '.jpg', '.jpeg', ''].includes(ext)
+    );
+
     if (
-      contentType &&
-      ![
-        '.css',
-        '.js',
-        '.mjs',
-        '.json',
-        '.svg',
-        '.png',
-        '.jpg',
-        '.jpeg',
-        '.gif',
-        '.webp',
-        '.avif',
-        '.ico',
-        '.woff2',
-        '.woff',
-        '.ttf',
-        '.otf',
-        '.mp4',
-        '.webm',
-        '.html',
-        '.xml',
-        '.framercms',
-      ].includes(ext)
+      isTranscodedImage ||
+      (contentType &&
+        ![
+          '.css',
+          '.js',
+          '.mjs',
+          '.json',
+          '.svg',
+          '.png',
+          '.jpg',
+          '.jpeg',
+          '.gif',
+          '.webp',
+          '.avif',
+          '.ico',
+          '.woff2',
+          '.woff',
+          '.ttf',
+          '.otf',
+          '.mp4',
+          '.webm',
+          '.html',
+          '.xml',
+          '.framercms',
+        ].includes(ext))
     ) {
-      ext = extFromContentType(contentType) || ext;
+      ext = contentTypeExt || ext;
     }
     let dir: string | null = null;
     if (platform) {
@@ -121,7 +141,14 @@ export class AssetMap {
     if (baseName && baseName.length > 1 && baseName !== '/') {
       const clean: string = baseName.replace(/[^a-zA-Z0-9._-]/g, '_');
       filename = clean.includes('.') ? clean : `${clean}-${hash}${ext || ''}`;
-      if (ext && path.extname(filename).toLowerCase() !== ext) filename += ext;
+      if (ext && path.extname(filename).toLowerCase() !== ext) {
+        if (isTranscodedImage) {
+          const oldExt = path.extname(filename);
+          filename = filename.slice(0, filename.length - oldExt.length) + ext;
+        } else {
+          filename += ext;
+        }
+      }
     } else {
       filename = `asset-${hash}${ext || ''}`;
     }

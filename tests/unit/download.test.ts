@@ -114,3 +114,21 @@ test('reports failed assets and leaves no nonexistent local mapping', async (t) 
   assert.equal(assets.entries.has(url), false);
   assert.equal(assets.failures.get(url), 'HTTP 404');
 });
+
+test('rejects truncated streams where Content-Length exceeds received bytes', async (t) => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': '100',
+    });
+    res.write(Buffer.alloc(50, 0x01));
+    res.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const url = 'http://127.0.0.1:' + (server.address() as { port: number }).port + '/truncated.bin';
+  await assert.rejects(dlResource(url, 1), /(?:Stream truncated|Asset response aborted)/);
+});

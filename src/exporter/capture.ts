@@ -232,7 +232,8 @@ export async function launchAndCapture(exporter: ExporterContext): Promise<void>
   exporter.page.on('response', (res) => {
     const url: string = res.url();
     if (url.startsWith('data:') || url.startsWith('blob:')) return;
-    if (res.request().method() !== 'GET' || res.status() < 200 || res.status() >= 300) return;
+    // Strict check: Only cache full 200 OK responses; ignore 206 Range chunks and redirects
+    if (res.request().method() !== 'GET' || res.status() !== 200) return;
     try {
       const host: string = new URL(url).hostname;
       const stripDomains = [...CFG.sharedStripDomains, ...exporter.platform.stripDomains];

@@ -253,7 +253,15 @@ async function buildSubpages(
 ): Promise<void> {
   if (exporter.subpages.size === 0) return;
   let built = 0;
+
+  const uniqueSubpageFiles = new Map<string, { pageUrl: string; filename: string }>();
   for (const [pageUrl, filename] of exporter.subpages) {
+    if (!uniqueSubpageFiles.has(filename)) {
+      uniqueSubpageFiles.set(filename, { pageUrl, filename });
+    }
+  }
+
+  for (const { pageUrl, filename } of uniqueSubpageFiles.values()) {
     const filePath: string = path.join(exporter.outDir, 'subpages', filename);
     try {
       let html: string = await fs.readFile(filePath, 'utf-8');
@@ -264,7 +272,7 @@ async function buildSubpages(
       warn('Sub-page post-processing skipped: ' + filename + ' - ' + (e as Error).message);
     }
   }
-  success('Sub-pages linked to local assets: ' + built + '/' + exporter.subpages.size);
+  success('Sub-pages linked to local assets: ' + built + '/' + uniqueSubpageFiles.size);
 }
 export async function buildOutput(exporter: ExporterContext): Promise<void> {
   exporter.cooking?.update('Stripping platform badges...');

@@ -47,11 +47,24 @@ async function requestResource(
           return;
         }
         const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        let receivedBytes = 0;
+        const expectedBytes = res.headers['content-length']
+          ? parseInt(res.headers['content-length'], 10)
+          : null;
+
+        res.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+          receivedBytes += chunk.length;
+        });
         res.on('error', reject);
         res.on('aborted', () => reject(new Error('Asset response aborted')));
         res.on('end', async () => {
           try {
+            if (expectedBytes !== null && !isNaN(expectedBytes) && receivedBytes !== expectedBytes) {
+              throw new Error(
+                `Stream truncated: received ${receivedBytes} of ${expectedBytes} bytes`
+              );
+            }
             let buffer = Buffer.concat(chunks);
             for (const encoding of (res.headers['content-encoding'] ?? '').split(',').reverse()) {
               if (encoding.trim() === 'gzip') buffer = await promisify(gunzip)(buffer);

@@ -282,3 +282,24 @@ test('reserved Windows device filenames are made writable', () => {
     /^scripts\/vendor\/[a-f0-9]{6}-aux\.js$/
   );
 });
+
+test('CDN-transcoded images update extension from contentType (.jpg/.png -> .avif/.webp)', () => {
+  const map = new AssetMap();
+  assert.equal(
+    map.localPathFor('https://framerusercontent.com/images/hero.jpg', undefined, 'image/avif'),
+    'assets/images/hero.avif'
+  );
+  assert.equal(
+    map.localPathFor('https://framerusercontent.com/images/banner.png', undefined, 'image/webp'),
+    'assets/images/banner.webp'
+  );
+  const map2 = new AssetMap();
+  assert.equal(
+    map2.localPathFor('https://framerusercontent.com/images/photo.jpg'),
+    'assets/images/photo.jpg'
+  );
+  assert.equal(
+    map2.localPathFor('https://framerusercontent.com/images/photo.jpg', undefined, 'image/avif'),
+    'assets/images/photo.avif'
+  );
+});

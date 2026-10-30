@@ -28,14 +28,35 @@ const MIME = {
   '.mp4':       'video/mp4',
   '.webm':      'video/webm',
   '.ogg':       'video/ogg',
+  '.mp3':       'audio/mpeg',
   '.framercms': 'application/octet-stream',
 };
+
+function sniffImageMime(pathToFile, fallbackMime) {
+  try {
+    const fd = fs.openSync(pathToFile, 'r');
+    const buf = Buffer.alloc(16);
+    fs.readSync(fd, buf, 0, 16, 0);
+    fs.closeSync(fd);
+    if (buf.length >= 12) {
+      const box = buf.toString('latin1', 4, 12);
+      if (box === 'ftypavif' || box === 'ftypavis') return 'image/avif';
+      if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+      if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+      if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+      if (buf.toString('ascii', 0, 4) === 'GIF8') return 'image/gif';
+    }
+  } catch {}
+  return fallbackMime;
+}
+
 
 const server = http.createServer((req, res) => {
   let url = decodeURIComponent(req.url.split('?')[0]);
   if (url === '/') url = '/index.html';
 
-  let filePath = path.join(ROOT, url);
+  const cleanUrl = url.replace(/^(?:\\/?\\.\\.)+(?=\\/(?:assets|styles|scripts|data|subpages)\\/)/, '');
+  let filePath = path.join(ROOT, cleanUrl);
   if (!filePath.startsWith(ROOT)) {
     res.writeHead(403);
     res.end('Forbidden');
@@ -43,26 +64,53 @@ const server = http.createServer((req, res) => {
   }
 
   const serveFile = (pathToFile, onMissing) => {
-    fs.readFile(pathToFile, (err, data) => {
-      if (err) {
+    fs.stat(pathToFile, (err, stats) => {
+      if (err || !stats.isFile()) {
         if (onMissing) return onMissing();
         res.writeHead(404);
         res.end('Not found');
         return;
       }
       const ext  = path.extname(pathToFile).toLowerCase();
-      const mime = MIME[ext] || 'application/octet-stream';
-      res.writeHead(200, {
-        'Content-Type': mime,
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=3600',
-      });
-      res.end(data);
+      let mime = MIME[ext] || 'application/octet-stream';
+      if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.webp' || ext === '.avif') {
+        mime = sniffImageMime(pathToFile, mime);
+      }
+      const range = req.headers.range;
+
+      if (range && (ext === '.mp4' || ext === '.webm' || ext === '.ogg' || ext === '.mp3')) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+
+        if (start >= stats.size || end >= stats.size || start > end) {
+          res.writeHead(416, { 'Content-Range': 'bytes */' + stats.size });
+          return res.end();
+        }
+
+        res.writeHead(206, {
+          'Content-Range': 'bytes ' + start + '-' + end + '/' + stats.size,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': end - start + 1,
+          'Content-Type': mime,
+          'Access-Control-Allow-Origin': '*',
+        });
+        fs.createReadStream(pathToFile, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': stats.size,
+          'Content-Type': mime,
+          'Access-Control-Allow-Origin': '*',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        fs.createReadStream(pathToFile).pipe(res);
+      }
     });
   };
 
-  if (url !== '/index.html' && !path.extname(url)) {
-    const slug = url.replace(/^\\/+|\\/+$/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_');
+  if (cleanUrl !== '/index.html' && !path.extname(cleanUrl)) {
+    const slug = cleanUrl.replace(/^\\/+|\\/+$/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_');
     const serveIndex = () => serveFile(path.join(ROOT, 'index.html'));
     if (slug) {
       return serveFile(path.join(ROOT, 'subpages', slug + '.html'), serveIndex);
@@ -70,7 +118,14 @@ const server = http.createServer((req, res) => {
     return serveIndex();
   }
 
-  serveFile(filePath);
+  serveFile(filePath, () => {
+    if (path.extname(filePath).toLowerCase() === '.html') {
+      const subpagePath = path.join(ROOT, 'subpages', path.basename(filePath));
+      return serveFile(subpagePath);
+    }
+    res.writeHead(404);
+    res.end('Not found');
+  });
 });
 
 const ANSI = {
