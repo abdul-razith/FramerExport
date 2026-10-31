@@ -4,7 +4,7 @@ import { detectPlatform } from '../../platforms/index.js';
 import type { PlatformType } from '../../platforms/types.js';
 import { uiText, formatShortcutHint } from '../ui/prompts.js';
 
-export function validateUrlInput(input: string): string | undefined {
+export function validateUrlInput(input?: string): string | undefined {
   if (!input || !input.trim()) {
     return 'URL cannot be empty.';
   }
@@ -50,7 +50,7 @@ export async function runScreenDetails(
     {
       defaultValue: defaultDir,
       placeholder: defaultDir,
-      validate: (val) => (!val.trim() ? 'Output directory cannot be empty.' : undefined),
+      validate: (val) => (!val || !val.trim() ? 'Output directory cannot be empty.' : undefined),
     }
   );
 

@@ -30,14 +30,14 @@ export function uiCancelAndExit(message: string = 'Operation cancelled.'): never
   process.exit(0);
 }
 
-export async function uiSelect<T>(
+export async function uiSelect<T extends string | number | boolean>(
   message: string,
   options: { label: string; value: T; hint?: string }[],
   initialValue?: T
 ): Promise<T> {
   const result = await clack.select({
     message,
-    options,
+    options: options as any,
     initialValue,
   });
 
@@ -53,14 +53,14 @@ export async function uiText(
   options?: {
     placeholder?: string;
     defaultValue?: string;
-    validate?: (val: string) => string | void;
+    validate?: (val: string | undefined) => string | void;
   }
 ): Promise<string> {
   const result = await clack.text({
     message,
     placeholder: options?.placeholder,
     initialValue: options?.defaultValue,
-    validate: options?.validate,
+    validate: options?.validate as any,
   });
 
   if (isCancelOperation(result)) {

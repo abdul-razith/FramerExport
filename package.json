@@ -7,7 +7,8 @@
   "bin": {
     "framer-export": "bin/framer-export.js",
     "fexport": "bin/fexport.js",
-    "framerexport": "bin/framerexport.js"
+    "framerexport": "bin/framerexport.js",
+    "fexport-v2": "bin/fexport-v2.js"
   },
   "files": [
     "dist/",
@@ -29,7 +30,8 @@
     "release": "node scripts/release.mjs",
     "format": "prettier --write \"src/**/*.ts\"",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "npm run check",
+    "cli:v2": "tsx src/cli-v2/index.ts"
   },
   "keywords": [
     "framer",
