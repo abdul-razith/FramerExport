@@ -22,11 +22,13 @@ export interface SpawnWindowResult {
 }
 
 export function buildAgentCommand(agentId: string, taskPrompt?: string): string {
+  if (agentId === 'agy') {
+    if (!taskPrompt) return 'agy --dangerously-skip-permissions';
+    const escapedPrompt = taskPrompt.replace(/"/g, '\\"');
+    return `agy --dangerously-skip-permissions -i "${escapedPrompt}"`;
+  }
   if (!taskPrompt) return agentId;
   const escapedPrompt = taskPrompt.replace(/"/g, '\\"');
-  if (agentId === 'agy') {
-    return `agy -i "${escapedPrompt}"`;
-  }
   return `${agentId} "${escapedPrompt}"`;
 }
 

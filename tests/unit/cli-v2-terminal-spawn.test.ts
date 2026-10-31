@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildAgentCommand, buildSpawnCommand, spawnAgentWindow } from '../../src/cli-v2/utils/terminal-spawn.js';
 
-test('buildAgentCommand formats agy with -i interactive flag and quotes prompt', () => {
-  assert.equal(buildAgentCommand('agy', 'Read CONVERSION_SPEC.md'), 'agy -i "Read CONVERSION_SPEC.md"');
-  assert.equal(buildAgentCommand('agy'), 'agy');
+test('buildAgentCommand formats agy with --dangerously-skip-permissions and -i interactive flag', () => {
+  assert.equal(
+    buildAgentCommand('agy', 'Read CONVERSION_SPEC.md'),
+    'agy --dangerously-skip-permissions -i "Read CONVERSION_SPEC.md"'
+  );
+  assert.equal(buildAgentCommand('agy'), 'agy --dangerously-skip-permissions');
 });
 
 test('buildAgentCommand formats claude and codex with prompt', () => {
