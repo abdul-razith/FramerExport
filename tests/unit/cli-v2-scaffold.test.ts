@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { scaffoldFrameworkStarter } from '../../src/cli-v2/utils/scaffold.js';
 
-test('scaffoldFrameworkStarter creates package.json, public directory, framer-motion dependency and copies assets', async () => {
+test('scaffoldFrameworkStarter creates package.json with modern React 19, Vite 6 and framer-motion', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-test-'));
   try {
     const assetsDir = path.join(tmpDir, 'assets', 'images');
@@ -17,11 +17,12 @@ test('scaffoldFrameworkStarter creates package.json, public directory, framer-mo
     assert.equal(result.projectDirName, 'converted-react-vite');
     assert.ok(result.projectPath.includes('converted-react-vite'));
 
-    // Check package.json exists and includes framer-motion
+    // Check package.json exists and includes React 19, Vite 6, and framer-motion
     const pkgPath = path.join(result.projectPath, 'package.json');
     const pkgContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
-    assert.ok(pkgContent.dependencies?.react);
+    assert.ok(pkgContent.dependencies?.react?.startsWith('^19'), 'React should be version 19');
     assert.ok(pkgContent.dependencies?.['framer-motion']);
+    assert.ok(pkgContent.devDependencies?.vite?.startsWith('^6'), 'Vite should be version 6');
 
     // Check assets were copied into public/assets
     const copiedAsset = path.join(result.projectPath, 'public', 'assets', 'images', 'logo.png');
@@ -32,13 +33,14 @@ test('scaffoldFrameworkStarter creates package.json, public directory, framer-mo
   }
 });
 
-test('scaffoldFrameworkStarter creates Next.js starter with framer-motion', async () => {
+test('scaffoldFrameworkStarter creates Next.js 15 starter with React 19 and framer-motion', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-next-'));
   try {
     const result = await scaffoldFrameworkStarter(tmpDir, 'nextjs');
     const pkgPath = path.join(result.projectPath, 'package.json');
     const pkgContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
-    assert.ok(pkgContent.dependencies?.next);
+    assert.ok(pkgContent.dependencies?.next?.startsWith('^15'), 'Next.js should be version 15');
+    assert.ok(pkgContent.dependencies?.react?.startsWith('^19'), 'React should be version 19');
     assert.ok(pkgContent.dependencies?.['framer-motion']);
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true });

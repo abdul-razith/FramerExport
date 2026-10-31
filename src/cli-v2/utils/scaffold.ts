@@ -51,7 +51,7 @@ export async function scaffoldFrameworkStarter(
   const targetAssets = path.join(staticPath, 'assets');
   await copyDirRecursive(sourceAssets, targetAssets);
 
-  // 2. Write minimal framework starter package.json if it doesn't already exist
+  // 2. Write modern framework starter package.json if it doesn't already exist
   const pkgPath = path.join(projectPath, 'package.json');
   try {
     await fs.access(pkgPath);
@@ -110,17 +110,17 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           preview: 'vite preview',
         },
         dependencies: {
-          react: '^18.3.1',
-          'react-dom': '^18.3.1',
-          'framer-motion': '^11.3.0',
+          react: '^19.0.0',
+          'react-dom': '^19.0.0',
+          'framer-motion': '^11.11.17',
           clsx: '^2.1.1',
         },
         devDependencies: {
-          '@types/react': '^18.3.1',
-          '@types/react-dom': '^18.3.1',
-          '@vitejs/plugin-react': '^4.3.1',
-          typescript: '^5.5.3',
-          vite: '^5.4.1',
+          '@types/react': '^19.0.0',
+          '@types/react-dom': '^19.0.0',
+          '@vitejs/plugin-react': '^4.3.4',
+          typescript: '^5.7.2',
+          vite: '^6.0.1',
         },
       };
 
@@ -135,16 +135,16 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           start: 'next start',
         },
         dependencies: {
-          next: '^14.2.5',
-          react: '^18.3.1',
-          'react-dom': '^18.3.1',
-          'framer-motion': '^11.3.0',
+          next: '^15.0.3',
+          react: '^19.0.0',
+          'react-dom': '^19.0.0',
+          'framer-motion': '^11.11.17',
           clsx: '^2.1.1',
         },
         devDependencies: {
           '@types/node': '^20',
-          '@types/react': '^18',
-          '@types/react-dom': '^18',
+          '@types/react': '^19.0.0',
+          '@types/react-dom': '^19.0.0',
           typescript: '^5',
         },
       };
@@ -161,13 +161,13 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           preview: 'vite preview',
         },
         dependencies: {
-          vue: '^3.4.31',
+          vue: '^3.5.13',
         },
         devDependencies: {
-          '@vitejs/plugin-vue': '^5.0.5',
-          typescript: '^5.5.3',
-          vite: '^5.4.1',
-          'vue-tsc': '^2.0.24',
+          '@vitejs/plugin-vue': '^5.2.1',
+          typescript: '^5.7.2',
+          vite: '^6.0.1',
+          'vue-tsc': '^2.1.10',
         },
       };
 
@@ -183,12 +183,12 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           preview: 'vite preview',
         },
         devDependencies: {
-          '@sveltejs/adapter-auto': '^3.2.2',
-          '@sveltejs/kit': '^2.5.18',
-          '@sveltejs/vite-plugin-svelte': '^3.1.1',
-          svelte: '^4.2.18',
-          typescript: '^5.5.3',
-          vite: '^5.4.1',
+          '@sveltejs/adapter-auto': '^3.3.1',
+          '@sveltejs/kit': '^2.9.0',
+          '@sveltejs/vite-plugin-svelte': '^4.0.1',
+          svelte: '^5.2.7',
+          typescript: '^5.7.2',
+          vite: '^6.0.1',
         },
       };
 
@@ -205,10 +205,10 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           preview: 'astro preview',
         },
         dependencies: {
-          astro: '^4.12.0',
+          astro: '^5.0.0',
         },
         devDependencies: {
-          typescript: '^5.5.3',
+          typescript: '^5.7.2',
         },
       };
   }
