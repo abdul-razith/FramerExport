@@ -109,7 +109,14 @@ Your human partner has explicitly given the following standing instructions, whi
    - Transfer all CSS rules from the exported markup into the project stylesheet (e.g. \`globals.css\`).
    - Preserve the exact HTML elements and class names in JSX (\`className="framer-..."\`) so that the CSS rules bind directly to the elements.
 
-2. **CRITICAL: Resolving Framer SSR Zero-Opacity & Animation Initial States**:
+2. **CRITICAL: Preserving Root Container Class Hierarchy (CSS Descendant Scoping)**:
+   - In no-code platforms (especially Framer), almost all layout, flexbox, dimension, and section positioning rules in the CSS are **descendant selectors** scoped under the root page component classes (e.g. \`.framer-2yJbE .framer-15n2sit\`, \`.framer-Ub91r ...\`).
+   - In \`index.html\`, inside \`<div id="main">\`, observe the exact outer wrapper divs enclosing the sections (e.g. \`<div className="framer-Ub91r ...">\` and \`<div data-framer-root="" className="framer-2yJbE ...">\`).
+   - **WARNING**: NEVER strip or omit these root container divs when building \`app/page.tsx\` or \`App.tsx\`!
+   - If you omit the root container class (e.g. \`.framer-2yJbE\`), hundreds of CSS rules will fail to match. Consequently, sections will collapse from \`display: flex; height: 100vh\` to \`display: block; position: static\`, causing lower sections and banners to float up and overlap the hero section, creating overlapping ribbons and jumbled text.
+   - **REQUIRED ACTION**: Wrap the page sections in the exact root container div hierarchy found in \`index.html\`.
+
+3. **CRITICAL: Resolving Framer SSR Zero-Opacity & Animation Initial States**:
    - In Framer's exported SSR HTML, elements designed for entrance animations (such as the Hero title letters, avatar speech bubbles, availability badges, and section headers) have inline \`style\` attributes set to their initial animation keyframes:
      * \`opacity: 0.001; transform: translateX(40px) scale(0.9)...\`
      * \`opacity: 0; transform: translate(-50%, -50%)...\`
@@ -119,20 +126,20 @@ Your human partner has explicitly given the following standing instructions, whi
      * Either wrap them with \`framer-motion\` (\`<motion.span initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }}>\`) so they animate into view.
      * OR reset the inline style to visible (\`opacity: 1\`, natural transform) so all typography (like the Hero name 'BENJAMIN', bio text, and avatars) renders visibly and beautifully!
 
-3. **CRITICAL: SVG Template Definitions (\`<div id="svg-templates">\`)**:
+4. **CRITICAL: SVG Template Definitions (\`<div id="svg-templates">\`)**:
    - Framer sites place shared SVG icons, cursor pointers, and badge arrows inside \`<div id="svg-templates" ...><svg id="svg1378496346_348">...</svg></div>\` at the end of \`index.html\`.
    - Elements throughout the page reference these via \`<use href="#svg1378496346_348"></use>\`.
    - You MUST include the \`<div id="svg-templates">...</div>\` block in the root layout shell (\`app/layout.tsx\` or \`src/App.tsx\`), or use the pre-scaffolded \`SvgTemplates\` component, so that all pointer arrows, cursors, and icons render properly.
 
-4. **Dynamic CMS & Handover Content Extraction**:
+5. **Dynamic CMS & Handover Content Extraction**:
    - Inspect \`__framer__handoverData\` or \`./data/\` JSON files to extract any dynamic content strings (such as "Available for thoughtful projects", case study details, or blog posts) so no text slots are left blank.
 
-5. **Animation & Interactivity Fidelity**:
+6. **Animation & Interactivity Fidelity**:
    - Use \`framer-motion\` (\`motion.div\`, \`AnimatePresence\`, spring physics) for hover states, card lifting, and page transitions.
    - Wire up smooth scrolling with \`lenis\` if detected in \`scripts/vendor/\`.
    - Preserve CSS keyframe animations, transforms, and hover transitions defined in the exported stylesheet.
 
-6. **100% Page & Subpage Coverage**:
+7. **100% Page & Subpage Coverage**:
    - Convert every single section present in the exported markup (Hero, Features, Testimonials, FAQ, Timeline, Portfolio, Footer, etc.). Do not stop after just 2 or 3 sections.
    - Ensure all subpages in \`./subpages/\` are properly mapped to framework routes.
 
