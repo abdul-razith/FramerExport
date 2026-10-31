@@ -134,3 +134,48 @@ The framework starter is initialized in \`./${ctx.projectDirName}\`:
 4. **Interactivity**: Identify client-side interactive elements (accordions, sliders, navigation menus) and implement appropriate reactive state.
 `;
 }
+
+export function buildLauncherScripts(
+  agentCommand: string,
+  agentId: string,
+  frameworkName: string
+): { cmdScript: string; shScript: string } {
+  const cmdScript = `@echo off
+title NoCodeXport AI Conversion
+cd /d "%~dp0"
+echo ========================================================
+echo   NoCodeXport AI Tech Stack Conversion
+echo   Agent:            ${agentId}
+echo   Target Framework: ${frameworkName}
+echo   Working Dir:      %CD%
+echo ========================================================
+echo.
+echo Launching conversion agent...
+echo ${agentCommand}
+echo.
+${agentCommand}
+echo.
+echo Agent process ended.
+cmd.exe /k
+`;
+
+  const shScript = `#!/usr/bin/env bash
+cd "$(dirname "$0")"
+echo "========================================================"
+echo "  NoCodeXport AI Tech Stack Conversion"
+echo "  Agent:            ${agentId}"
+echo "  Target Framework: ${frameworkName}"
+echo "  Working Dir:      $(pwd)"
+echo "========================================================"
+echo ""
+echo "Launching conversion agent..."
+echo "${agentCommand}"
+echo ""
+${agentCommand}
+echo ""
+echo "Agent process ended. Press Enter to exit."
+read -r
+`;
+
+  return { cmdScript, shScript };
+}

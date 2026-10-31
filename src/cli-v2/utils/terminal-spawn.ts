@@ -5,6 +5,7 @@ export interface SpawnWindowOptions {
   workingDir: string;
   agentId: AgentToolId | string;
   taskPrompt?: string;
+  scriptPath?: string;
   platform?: NodeJS.Platform;
 }
 
@@ -20,24 +21,34 @@ export interface SpawnWindowResult {
   pid?: number;
 }
 
+export function buildAgentCommand(agentId: string, taskPrompt?: string): string {
+  if (!taskPrompt) return agentId;
+  const escapedPrompt = taskPrompt.replace(/"/g, '\\"');
+  if (agentId === 'agy') {
+    return `agy -i "${escapedPrompt}"`;
+  }
+  return `${agentId} "${escapedPrompt}"`;
+}
+
 export function buildSpawnCommand(
   platform: NodeJS.Platform,
   workingDir: string,
   agentId: string,
-  taskPrompt?: string
+  taskPrompt?: string,
+  scriptPath?: string
 ): SpawnCommandDescriptor {
-  const taskArg = taskPrompt ? ` "${taskPrompt.replace(/"/g, '\\"')}"` : '';
-  const agentCommand = `${agentId}${taskArg}`;
+  const agentCommand = buildAgentCommand(agentId, taskPrompt);
 
   if (platform === 'win32') {
+    const target = scriptPath || agentCommand;
     return {
       file: 'cmd.exe',
-      args: ['/c', 'start', '""', 'cmd.exe', '/k', `cd /d "${workingDir}" && ${agentCommand}`],
+      args: ['/c', 'start', '""', 'cmd.exe', '/k', target],
     };
   }
 
   if (platform === 'darwin') {
-    const rawInner = `cd "${workingDir}" && ${agentCommand}`;
+    const rawInner = scriptPath ? `cd "${workingDir}" && ./${scriptPath}` : `cd "${workingDir}" && ${agentCommand}`;
     const escapedInner = rawInner.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return {
       file: 'osascript',
@@ -51,9 +62,10 @@ export function buildSpawnCommand(
   }
 
   // Linux / BSD - default to x-terminal-emulator
+  const innerCommand = scriptPath ? `cd "${workingDir}" && ./${scriptPath}` : `cd "${workingDir}" && ${agentCommand}`;
   return {
     file: 'x-terminal-emulator',
-    args: ['-e', `bash -c 'cd "${workingDir}" && ${agentCommand}; exec bash'`],
+    args: ['-e', `bash -c '${innerCommand}; exec bash'`],
   };
 }
 
@@ -63,20 +75,21 @@ export function spawnAgentWindow(options: SpawnWindowOptions): SpawnWindowResult
     platform,
     options.workingDir,
     options.agentId,
-    options.taskPrompt
+    options.taskPrompt,
+    options.scriptPath
   );
   const commandString = `${descriptor.file} ${descriptor.args.join(' ')}`;
 
   try {
     const child: ChildProcess = spawn(descriptor.file, descriptor.args, {
+      cwd: options.workingDir,
       detached: true,
       stdio: 'ignore',
       shell: false,
       windowsHide: false,
     });
 
-    // Guard against unhandled 'error' event crash when executable does not exist
-    child.on('error', (err) => {
+    child.on('error', (_err) => {
       // Handled to prevent process crash
     });
 

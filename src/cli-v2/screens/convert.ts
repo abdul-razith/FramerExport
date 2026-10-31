@@ -7,11 +7,12 @@ import {
   type AgentToolId,
   type AgentToolStatus,
 } from '../utils/tool-check.js';
-import { spawnAgentWindow } from '../utils/terminal-spawn.js';
+import { buildAgentCommand, spawnAgentWindow } from '../utils/terminal-spawn.js';
 import { scaffoldFrameworkStarter } from '../utils/scaffold.js';
 import {
   buildSuperpowersInstructions,
   buildConversionSpec,
+  buildLauncherScripts,
   FRAMEWORK_CONFIGS,
   type FrameworkTarget,
 } from '../utils/superpowers-template.js';
@@ -78,6 +79,19 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export async function runScreenConvert(summary: ExportSummary): Promise<void> {
+  // 0. Confirm whether to proceed with tech stack conversion
+  const wantsConversion = await uiConfirm(
+    'Step 5/5: Would you like to convert this export into a modern web framework (React, Next.js, etc.)?'
+  );
+
+  if (!wantsConversion) {
+    uiNote(
+      `Export completed successfully in ${chalk.underline(summary.outDir)}.\nAll static markup, styles, scripts, and assets are preserved.\n\nYou can run tech stack conversion at any time with:\n  npm run cli:v2`,
+      'Export Complete'
+    );
+    return;
+  }
+
   // 1. Choose Target Tech Stack
   const frameworkChoices = (Object.keys(FRAMEWORK_CONFIGS) as FrameworkTarget[]).map((key) => ({
     label: FRAMEWORK_CONFIGS[key].name,
@@ -86,7 +100,7 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
   }));
 
   const selectedFramework = await uiSelect<FrameworkTarget>(
-    `Step 5/5: Select Target Tech Stack ${formatShortcutHint('Enter', 'select')}`,
+    `Select Target Tech Stack ${formatShortcutHint('Enter', 'select')}`,
     frameworkChoices,
     'nextjs'
   );
@@ -160,6 +174,25 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
   await fs.writeFile(claudeMdPath, claudeMd, 'utf-8');
   await fs.writeFile(agentsMdPath, agentsMd, 'utf-8');
 
+  // Generate runnable launcher scripts (.cmd for Windows, .sh for Unix)
+  const kickoffTask = `Read CONVERSION_SPEC.md and follow ${
+    selectedAgent === 'claude' ? 'CLAUDE.md' : 'AGENTS.md'
+  } using Superpowers to rebuild this site into ${scaffoldResult.projectDirName}`;
+
+  const agentCommand = buildAgentCommand(selectedAgent, kickoffTask);
+  const { cmdScript, shScript } = buildLauncherScripts(agentCommand, selectedAgent, cfg.name);
+
+  const cmdScriptPath = path.join(summary.outDir, 'start-conversion.cmd');
+  const shScriptPath = path.join(summary.outDir, 'start-conversion.sh');
+
+  await fs.writeFile(cmdScriptPath, cmdScript, 'utf-8');
+  await fs.writeFile(shScriptPath, shScript, 'utf-8');
+  try {
+    await fs.chmod(shScriptPath, 0o755);
+  } catch {}
+
+  const activeScript = process.platform === 'win32' ? 'start-conversion.cmd' : 'start-conversion.sh';
+
   // Copy prompt brief to clipboard
   const copied = await copyToClipboard(specContent);
 
@@ -174,6 +207,7 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
       chalk.green('✓ Framework starter initialized: ') + scaffoldResult.projectDirName,
       chalk.green('✓ Static assets transferred to: ') + `${scaffoldResult.projectDirName}/${cfg.staticDir}/assets`,
       chalk.green('✓ Superpowers specifications created: ') + 'CONVERSION_SPEC.md, CLAUDE.md, AGENTS.md',
+      chalk.green('✓ Standalone launcher script created: ') + activeScript,
       copied ? chalk.cyan('✓ Conversion brief copied to your clipboard!') : '',
       '',
       chalk.bold('Next Steps for Manual Conversion:'),
@@ -182,6 +216,7 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
       copied
         ? `3. Paste the conversion brief from your clipboard to begin the verified rebuild.`
         : `3. Copy the instructions from ${chalk.underline('CONVERSION_SPEC.md')} into your AI assistant.`,
+      `4. Or run the launcher script anytime: ${chalk.cyan(activeScript)}`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -197,31 +232,28 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
 
   if (!confirmed) {
     uiNote(
-      `Files are ready in ${summary.outDir}.\nConversion brief copied to clipboard. You can launch '${selectedAgent}' manually whenever you are ready.`,
+      `Files are ready in ${summary.outDir}.\nConversion brief copied to clipboard.\nLauncher script saved: ${activeScript}\nYou can launch '${selectedAgent}' manually whenever you are ready:\n  cd "${summary.outDir}" && ./${activeScript}`,
       'Manual Conversion Ready'
     );
     return;
   }
 
-  // 7. Execute spawn in separate window
-  const kickoffTask = `Read CONVERSION_SPEC.md and follow ${
-    selectedAgent === 'claude' ? 'CLAUDE.md' : 'AGENTS.md'
-  } using Superpowers to rebuild this site into ${scaffoldResult.projectDirName}`;
-
+  // 7. Execute spawn in separate window using launcher script and cwd
   const spawnResult = spawnAgentWindow({
     workingDir: summary.outDir,
     agentId: selectedAgent,
     taskPrompt: kickoffTask,
+    scriptPath: activeScript,
   });
 
   if (spawnResult.success) {
     uiNote(
-      `Launched ${selectedAgent} in a new window!\nWorking Directory: ${summary.outDir}\nTarget Directory:  ${scaffoldResult.projectDirName}`,
+      `Launched ${selectedAgent} in a new window!\nWorking Directory: ${summary.outDir}\nTarget Directory:  ${scaffoldResult.projectDirName}\nLauncher Script:   ${activeScript}`,
       'Conversion Agent Started'
     );
   } else {
     uiNote(
-      `Could not spawn terminal window: ${spawnResult.error || 'Unknown error'}\nRun command manually:\n  cd "${summary.outDir}" && ${selectedAgent} "${kickoffTask}"`,
+      `Could not spawn terminal window: ${spawnResult.error || 'Unknown error'}\nRun command manually:\n  cd "${summary.outDir}" && ./${activeScript}`,
       'Spawn Notice'
     );
   }

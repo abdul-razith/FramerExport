@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildConversionSpec, buildSuperpowersInstructions } from '../../src/cli-v2/utils/superpowers-template.js';
+import { buildConversionSpec, buildSuperpowersInstructions, buildLauncherScripts } from '../../src/cli-v2/utils/superpowers-template.js';
+
+test('buildLauncherScripts generates .cmd and .sh with agent commands and directory resolution', () => {
+  const { cmdScript, shScript } = buildLauncherScripts('agy -i "Read CONVERSION_SPEC.md"', 'agy', 'Next.js App Router');
+  assert.ok(cmdScript.includes('@echo off'));
+  assert.ok(cmdScript.includes('%~dp0'));
+  assert.ok(cmdScript.includes('agy -i "Read CONVERSION_SPEC.md"'));
+  assert.ok(cmdScript.includes('cmd.exe /k'));
+
+  assert.ok(shScript.includes('#!/usr/bin/env bash'));
+  assert.ok(shScript.includes('dirname "$0"'));
+  assert.ok(shScript.includes('agy -i "Read CONVERSION_SPEC.md"'));
+});
 
 test('buildSuperpowersInstructions generates CLAUDE.md and AGENTS.md with Superpowers rules', () => {
   const { claudeMd, agentsMd } = buildSuperpowersInstructions({
