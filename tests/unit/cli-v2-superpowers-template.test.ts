@@ -14,7 +14,7 @@ test('buildLauncherScripts generates .cmd and .sh with agent commands and direct
   assert.ok(shScript.includes('agy -i "Read CONVERSION_SPEC.md"'));
 });
 
-test('buildSuperpowersInstructions generates CLAUDE.md and AGENTS.md with Superpowers rules', () => {
+test('buildSuperpowersInstructions generates CLAUDE.md and AGENTS.md with Superpowers rules and autonomous directives', () => {
   const { claudeMd, agentsMd } = buildSuperpowersInstructions({
     framework: 'nextjs',
     projectDirName: 'converted-nextjs',
@@ -27,11 +27,16 @@ test('buildSuperpowersInstructions generates CLAUDE.md and AGENTS.md with Superp
   assert.ok(claudeMd.includes('superpowers:writing-plans'));
   assert.ok(claudeMd.includes('superpowers:verification-before-completion'));
   assert.ok(claudeMd.includes('converted-nextjs'));
+  assert.ok(claudeMd.includes('unattended') || claudeMd.includes('autonomous'));
+  assert.ok(claudeMd.includes('Native') || claudeMd.includes('native'));
+  assert.ok(claudeMd.includes('DOM') || claudeMd.includes('framer-motion'));
+
   assert.ok(agentsMd.includes('CONVERSION_SPEC.md'));
   assert.ok(agentsMd.includes('npm run build'));
+  assert.ok(agentsMd.includes('unattended') || agentsMd.includes('autonomous'));
 });
 
-test('buildConversionSpec details directory structure and files to convert', () => {
+test('buildConversionSpec details directory structure, DOM preservation and files to convert', () => {
   const spec = buildConversionSpec({
     framework: 'react-vite',
     projectDirName: 'converted-react-vite',
@@ -45,4 +50,5 @@ test('buildConversionSpec details directory structure and files to convert', () 
   assert.ok(spec.includes('React 18/19, TypeScript, Vite'));
   assert.ok(spec.includes('index.html'));
   assert.ok(spec.includes('public/assets'));
+  assert.ok(spec.includes('DOM') || spec.includes('framer-motion'));
 });

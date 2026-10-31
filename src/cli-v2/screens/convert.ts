@@ -175,9 +175,9 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
   await fs.writeFile(agentsMdPath, agentsMd, 'utf-8');
 
   // Generate runnable launcher scripts (.cmd for Windows, .sh for Unix)
-  const kickoffTask = `Read CONVERSION_SPEC.md and follow ${
+  const kickoffTask = `Execute fully unattended in autonomous native mode: Read CONVERSION_SPEC.md and follow ${
     selectedAgent === 'claude' ? 'CLAUDE.md' : 'AGENTS.md'
-  } using Superpowers to rebuild this site into ${scaffoldResult.projectDirName}`;
+  } using Superpowers to rebuild this site into ${scaffoldResult.projectDirName}. Do not ask interactive questions or pause for confirmation. Implement all tasks directly, verify with npm run build, and exit when complete.`;
 
   const agentCommand = buildAgentCommand(selectedAgent, kickoffTask);
   const { cmdScript, shScript } = buildLauncherScripts(agentCommand, selectedAgent, cfg.name);

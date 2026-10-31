@@ -1,32 +1,35 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FRAMEWORK_CONFIGS, type FrameworkTarget } from './superpowers-template.js';
+import {
+  FRAMEWORK_CONFIGS,
+  type FrameworkTarget,
+} from './superpowers-template.js';
 
 export interface ScaffoldResult {
   projectDirName: string;
   projectPath: string;
   staticPath: string;
+  entryFiles: string;
 }
 
 export async function copyDirRecursive(src: string, dest: string): Promise<void> {
   try {
-    await fs.mkdir(dest, { recursive: true });
-    const entries = await fs.readdir(src, { withFileTypes: true });
+    await fs.access(src);
+  } catch {
+    return;
+  }
 
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
 
-      if (entry.isDirectory()) {
-        await copyDirRecursive(srcPath, destPath);
-      } else {
-        await fs.copyFile(srcPath, destPath);
-      }
-    }
-  } catch (err) {
-    // If source doesn't exist, ignore
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw err;
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirRecursive(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
     }
   }
 }
@@ -73,9 +76,11 @@ export async function scaffoldFrameworkStarter(
             jsx: framework.includes('react') || framework === 'nextjs' ? 'react-jsx' : 'preserve',
             strict: true,
             skipLibCheck: true,
-            esModuleInterop: true,
+            paths: {
+              '@/*': ['./*'],
+            },
           },
-          include: ['src/**/*', 'app/**/*'],
+          include: ['**/*.ts', '**/*.tsx', '**/*.vue', '**/*.svelte', '**/*.astro'],
         },
         null,
         2
@@ -83,23 +88,15 @@ export async function scaffoldFrameworkStarter(
     );
   }
 
-  // 4. Create base directories
-  if (framework === 'nextjs') {
-    await fs.mkdir(path.join(projectPath, 'app'), { recursive: true });
-    await fs.mkdir(path.join(projectPath, 'components'), { recursive: true });
-  } else {
-    await fs.mkdir(path.join(projectPath, 'src'), { recursive: true });
-    await fs.mkdir(path.join(projectPath, 'src', 'components'), { recursive: true });
-  }
-
   return {
     projectDirName,
     projectPath,
     staticPath,
+    entryFiles: cfg.entryFiles,
   };
 }
 
-function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Record<string, unknown> {
+function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Record<string, any> {
   switch (framework) {
     case 'react-vite':
       return {
@@ -115,6 +112,8 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
         dependencies: {
           react: '^18.3.1',
           'react-dom': '^18.3.1',
+          'framer-motion': '^11.3.0',
+          clsx: '^2.1.1',
         },
         devDependencies: {
           '@types/react': '^18.3.1',
@@ -139,6 +138,8 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           next: '^14.2.5',
           react: '^18.3.1',
           'react-dom': '^18.3.1',
+          'framer-motion': '^11.3.0',
+          clsx: '^2.1.1',
         },
         devDependencies: {
           '@types/node': '^20',
@@ -182,9 +183,11 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           preview: 'vite preview',
         },
         devDependencies: {
+          '@sveltejs/adapter-auto': '^3.2.2',
           '@sveltejs/kit': '^2.5.18',
           '@sveltejs/vite-plugin-svelte': '^3.1.1',
           svelte: '^4.2.18',
+          typescript: '^5.5.3',
           vite: '^5.4.1',
         },
       };
@@ -202,7 +205,10 @@ function getFrameworkPackageJson(framework: FrameworkTarget, name: string): Reco
           preview: 'astro preview',
         },
         dependencies: {
-          astro: '^4.12.2',
+          astro: '^4.12.0',
+        },
+        devDependencies: {
+          typescript: '^5.5.3',
         },
       };
   }

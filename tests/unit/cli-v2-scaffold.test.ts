@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { scaffoldFrameworkStarter } from '../../src/cli-v2/utils/scaffold.js';
 
-test('scaffoldFrameworkStarter creates package.json, public directory and copies assets', async () => {
+test('scaffoldFrameworkStarter creates package.json, public directory, framer-motion dependency and copies assets', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-test-'));
   try {
     const assetsDir = path.join(tmpDir, 'assets', 'images');
@@ -17,15 +17,29 @@ test('scaffoldFrameworkStarter creates package.json, public directory and copies
     assert.equal(result.projectDirName, 'converted-react-vite');
     assert.ok(result.projectPath.includes('converted-react-vite'));
 
-    // Check package.json exists
+    // Check package.json exists and includes framer-motion
     const pkgPath = path.join(result.projectPath, 'package.json');
     const pkgContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
-    assert.ok(pkgContent.dependencies?.react || pkgContent.devDependencies?.vite);
+    assert.ok(pkgContent.dependencies?.react);
+    assert.ok(pkgContent.dependencies?.['framer-motion']);
 
     // Check assets were copied into public/assets
     const copiedAsset = path.join(result.projectPath, 'public', 'assets', 'images', 'logo.png');
     const stat = await fs.stat(copiedAsset);
     assert.ok(stat.isFile());
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('scaffoldFrameworkStarter creates Next.js starter with framer-motion', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-next-'));
+  try {
+    const result = await scaffoldFrameworkStarter(tmpDir, 'nextjs');
+    const pkgPath = path.join(result.projectPath, 'package.json');
+    const pkgContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
+    assert.ok(pkgContent.dependencies?.next);
+    assert.ok(pkgContent.dependencies?.['framer-motion']);
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
