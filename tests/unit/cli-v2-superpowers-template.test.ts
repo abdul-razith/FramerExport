@@ -14,7 +14,7 @@ test('buildLauncherScripts generates .cmd and .sh with agent commands and direct
   assert.ok(shScript.includes('agy -i "Read CONVERSION_SPEC.md"'));
 });
 
-test('buildSuperpowersInstructions generates CLAUDE.md and AGENTS.md with Superpowers rules and autonomous directives', () => {
+test('buildSuperpowersInstructions mandates Task 1 Analysis and autonomous directives', () => {
   const { claudeMd, agentsMd } = buildSuperpowersInstructions({
     framework: 'nextjs',
     projectDirName: 'converted-nextjs',
@@ -31,12 +31,17 @@ test('buildSuperpowersInstructions generates CLAUDE.md and AGENTS.md with Superp
   assert.ok(claudeMd.includes('Native') || claudeMd.includes('native'));
   assert.ok(claudeMd.includes('DOM') || claudeMd.includes('framer-motion'));
 
+  // Must mandate Task 1 as Pre-Conversion Source & Dependency Analysis
+  assert.ok(claudeMd.includes('Task 1: Pre-Conversion Source & Dependency Analysis'));
+  assert.ok(claudeMd.includes('scripts/vendor'));
+  assert.ok(claudeMd.includes('npm install'));
+
   assert.ok(agentsMd.includes('CONVERSION_SPEC.md'));
   assert.ok(agentsMd.includes('npm run build'));
-  assert.ok(agentsMd.includes('unattended') || agentsMd.includes('autonomous'));
+  assert.ok(agentsMd.includes('Task 1: Pre-Conversion Source & Dependency Analysis'));
 });
 
-test('buildConversionSpec details directory structure, DOM preservation and files to convert', () => {
+test('buildConversionSpec details directory structure, scripts/vendor analysis, and DOM preservation', () => {
   const spec = buildConversionSpec({
     framework: 'react-vite',
     projectDirName: 'converted-react-vite',
@@ -47,8 +52,9 @@ test('buildConversionSpec details directory structure, DOM preservation and file
   });
 
   assert.ok(spec.includes('converted-react-vite'));
-  assert.ok(spec.includes('React 18/19, TypeScript, Vite'));
   assert.ok(spec.includes('index.html'));
   assert.ok(spec.includes('public/assets'));
   assert.ok(spec.includes('DOM') || spec.includes('framer-motion'));
+  assert.ok(spec.includes('scripts/vendor'));
+  assert.ok(spec.includes('Dependency Analysis'));
 });

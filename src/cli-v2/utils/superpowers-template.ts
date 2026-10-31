@@ -20,36 +20,36 @@ export const FRAMEWORK_CONFIGS: Record<
   }
 > = {
   'react-vite': {
-    name: 'React + Vite + TypeScript',
-    stack: 'React 18/19, TypeScript, Vite, framer-motion, CSS modules or stylesheet',
+    name: 'React 19 + Vite 6 (TypeScript)',
+    stack: 'React 19, TypeScript, Vite 6, framer-motion, CSS modules or stylesheet',
     defaultDir: 'converted-react-vite',
     staticDir: 'public',
     entryFiles: 'src/main.tsx, src/App.tsx, src/components/*',
   },
   nextjs: {
-    name: 'Next.js App Router (TypeScript)',
-    stack: 'Next.js App Router, TypeScript, framer-motion, React Server & Client Components',
+    name: 'Next.js 15 App Router (React 19, TypeScript)',
+    stack: 'Next.js 15, React 19, TypeScript, framer-motion, React Server & Client Components',
     defaultDir: 'converted-nextjs',
     staticDir: 'public',
     entryFiles: 'app/layout.tsx, app/page.tsx, components/*',
   },
   'vue-vite': {
-    name: 'Vue 3 + Vite + TypeScript',
-    stack: 'Vue 3, TypeScript, Vite, Single-File Components',
+    name: 'Vue 3.5 + Vite 6 (TypeScript)',
+    stack: 'Vue 3.5, TypeScript, Vite 6, Single-File Components',
     defaultDir: 'converted-vue-vite',
     staticDir: 'public',
     entryFiles: 'src/main.ts, src/App.vue, src/components/*',
   },
   sveltekit: {
-    name: 'SvelteKit (TypeScript)',
-    stack: 'SvelteKit, TypeScript, Svelte components',
+    name: 'SvelteKit (Svelte 5, TypeScript)',
+    stack: 'SvelteKit, Svelte 5, TypeScript, Vite 6',
     defaultDir: 'converted-sveltekit',
     staticDir: 'static',
     entryFiles: 'src/routes/+layout.svelte, src/routes/+page.svelte',
   },
   astro: {
-    name: 'Astro (TypeScript)',
-    stack: 'Astro, TypeScript, component islands',
+    name: 'Astro 5 (TypeScript)',
+    stack: 'Astro 5, TypeScript, component islands',
     defaultDir: 'converted-astro',
     staticDir: 'public',
     entryFiles: 'src/pages/index.astro, src/components/*',
@@ -88,14 +88,25 @@ You are performing a verified, production-grade website conversion from the expo
    - Ensure all subpages in \`./subpages/\` are properly mapped to framework routes.
 
 ## MANDATORY SUPERPOWERS WORKFLOW
-1. **Plan First**: You MUST invoke \`superpowers:writing-plans\` before writing product code. Read \`./CONVERSION_SPEC.md\` and inspect the source files (\`./index.html\`, \`./styles/\`, \`./subpages/\`).
+1. **Plan First**: You MUST invoke \`superpowers:writing-plans\` before writing product code. Read \`./CONVERSION_SPEC.md\` and inspect the source files (\`./index.html\`, \`./scripts/vendor/\`, \`./styles/\`, \`./subpages/\`).
 2. **Decompose into Modular Tasks**:
-   - Task 1: Scaffolding validation & dependency installation (\`npm install\` inside \`./${ctx.projectDirName}\`).
-   - Task 2: Design tokens, global CSS, and font imports.
-   - Task 3: Layout primitives (Navbar, Footer, base shell).
-   - Task 4: Main page sections (Convert all sections directly from \`./index.html\` DOM).
-   - Task 5: Interactive components (framer-motion animations, mobile drawers, modals, filter tabs).
-   - Task 6: Subpages & routing (map all subpages in \`./subpages/\` to framework routes).
+   - Task 1: Pre-Conversion Source & Dependency Analysis:
+     * Inspect \`./scripts/vendor/\` and \`<script>\`/\`<style>\` tags in \`./index.html\`.
+     * Identify third-party libraries and runtime features (e.g. \`lenis\` smooth scrolling, \`gsap\` ScrollTrigger, \`framer-motion\`, \`lucide-react\`, \`canvas-confetti\`, etc.).
+     * Dynamically install the detected packages via \`npm install <packages>\` inside \`./${ctx.projectDirName}\`.
+     * Audit and map the full DOM hierarchy of \`<div id="main">\` in \`./index.html\`.
+   - Task 2: Design Tokens, Global CSS & Font Imports:
+     * Transfer all CSS rules, \`--token-*\` custom properties, and \`@font-face\` definitions into the global stylesheet.
+   - Task 3: Layout Primitives (Navbar, Footer, Base Shell):
+     * Construct responsive navigation, footer CTA, and background grid shells.
+   - Task 4: Main Page Sections (DOM Preservation):
+     * Convert 100% of the sections from \`./index.html\` into clean JSX components, preserving the original \`className="framer-..."\` attributes.
+   - Task 5: Animation & Interactivity Restoration:
+     * Wire up dynamic interaction using the installed libraries (Framer Motion, Lenis smooth scroll, GSAP ScrollTrigger, modals, filter tabs).
+   - Task 6: Subpages & Routing:
+     * Map all subpages in \`./subpages/\` to framework routes.
+   - Task 7: Verification Gate:
+     * Execute \`superpowers:verification-before-completion\`. Run \`npm run build\` inside \`./${ctx.projectDirName}\` and ensure 0 TypeScript and 0 packaging errors.
 3. **Execute Task-by-Task in Native Mode**: Execute each task directly and verify progress.
 4. **Verification Gate**: You MUST invoke \`superpowers:verification-before-completion\`. The conversion is NOT complete until \`npm run build\` passes with zero TypeScript or packaging errors inside \`./${ctx.projectDirName}\`.
 `;
@@ -135,6 +146,7 @@ export function buildConversionSpec(ctx: ConversionContext): string {
 ## 1. Inventory of Exported Source Files
 - **Markup:** \`./index.html\` (${counts['index.html'] || 1} file)
 - **Styles:** \`./styles/\` (${counts['styles'] || 0} CSS files)
+- **Vendor Scripts:** \`./scripts/vendor/\`
 - **Images & Media:** \`./assets/\` (${counts['assets/images'] || 0} images/videos/fonts)
 - **Dynamic Data/CMS:** \`./data/\` (${counts['data'] || 0} JSON files)
 - **Subpages:** \`./subpages/\` (${counts['subpages'] || 0} HTML subpages)
@@ -149,18 +161,20 @@ The framework starter is initialized in \`./${ctx.projectDirName}\`:
 
 ---
 
-## 3. Component Extraction & DOM Preservation Guidelines
-1. **DOM Structure & CSS Classes**:
+## 3. Pre-Conversion Source & Dependency Analysis Guidelines
+1. **Vendor Script & Dependency Analysis (Task 1)**:
+   - Examine \`./scripts/vendor/\` to identify the runtime libraries used by the site (e.g. \`Lenis.*.mjs\` -> \`lenis\`, \`ScrollTrigger.*.mjs\` -> \`gsap\`, \`motion.*.mjs\` -> \`framer-motion\`, etc.).
+   - Dynamically install all detected libraries into \`./${ctx.projectDirName}\` via \`npm install <packages>\`.
+2. **DOM Structure & CSS Classes**:
    - Inspect the real DOM inside \`<div id="main">\` in \`./index.html\`.
    - Do NOT rewrite or approximate layouts with hand-written inline styles (\`style={{ ... }}\`).
    - Extract the real DOM elements, convert them to clean JSX components, and retain their exact CSS classes (\`className="framer-..."\`).
-2. **Typography & Styling**:
+3. **Typography & Styling**:
    - Transfer all \`<style>\` tag rules and CSS variables (\`--token-...\`) from \`./index.html\` into the global stylesheet.
    - Retain font definitions from \`./assets/fonts/\` and responsive media query breakpoint classes.
-3. **Animations & Interactivity with framer-motion**:
-   - Use \`framer-motion\` (\`motion.div\`, \`motion.button\`, hover variants) to reproduce spring physics, smooth reveals, and hover states.
-   - Replicate client-side interactive elements (accordions, sliders, navigation menus, filter tabs) with React state and Framer Motion.
-4. **Complete Coverage**:
+4. **Animations & Interactivity with framer-motion & lenis**:
+   - Use \`framer-motion\` and detected animation libraries to reproduce spring physics, smooth reveals, and hover states.
+5. **Complete Coverage**:
    - Replicate 100% of the sections in \`./index.html\`. Do not stop after just 2 or 3 sections.
    - For all subpages in \`./subpages/\`, create matching routes in \`./${ctx.projectDirName}\`.
 `;
