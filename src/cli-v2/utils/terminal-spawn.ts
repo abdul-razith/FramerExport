@@ -32,23 +32,25 @@ export function buildSpawnCommand(
   if (platform === 'win32') {
     return {
       file: 'cmd.exe',
-      args: ['/c', 'start', 'cmd.exe', '/k', `cd /d "${workingDir}" && ${agentCommand}`],
+      args: ['/c', 'start', '""', 'cmd.exe', '/k', `cd /d "${workingDir}" && ${agentCommand}`],
     };
   }
 
   if (platform === 'darwin') {
+    const rawInner = `cd "${workingDir}" && ${agentCommand}`;
+    const escapedInner = rawInner.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return {
       file: 'osascript',
       args: [
         '-e',
-        `tell application "Terminal" to activate`,
+        'tell application "Terminal" to activate',
         '-e',
-        `tell application "Terminal" to do script "cd \\"${workingDir}\\" && ${agentCommand}"`,
+        `tell application "Terminal" to do script "${escapedInner}"`,
       ],
     };
   }
 
-  // Linux / BSD
+  // Linux / BSD - default to x-terminal-emulator
   return {
     file: 'x-terminal-emulator',
     args: ['-e', `bash -c 'cd "${workingDir}" && ${agentCommand}; exec bash'`],
@@ -69,8 +71,13 @@ export function spawnAgentWindow(options: SpawnWindowOptions): SpawnWindowResult
     const child: ChildProcess = spawn(descriptor.file, descriptor.args, {
       detached: true,
       stdio: 'ignore',
-      shell: platform === 'win32',
+      shell: false,
       windowsHide: false,
+    });
+
+    // Guard against unhandled 'error' event crash when executable does not exist
+    child.on('error', (err) => {
+      // Handled to prevent process crash
     });
 
     child.unref();

@@ -165,6 +165,11 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
 
   // 6. Branch: Manual Mode vs Automated Spawn Mode
   if (resolution.status === 'none-available') {
+    uiNote(
+      `No supported automated coding agents (claude, codex, agy) were detected on your system PATH.`,
+      'Manual Mode'
+    );
+
     const manualCard = [
       chalk.green('✓ Framework starter initialized: ') + scaffoldResult.projectDirName,
       chalk.green('✓ Static assets transferred to: ') + `${scaffoldResult.projectDirName}/${cfg.staticDir}/assets`,
@@ -174,7 +179,9 @@ export async function runScreenConvert(summary: ExportSummary): Promise<void> {
       chalk.bold('Next Steps for Manual Conversion:'),
       `1. Open your project folder in your IDE: ${chalk.underline(summary.outDir)}`,
       `2. Open your AI Assistant (Cursor, VS Code Copilot, Antigravity, or Web LLM).`,
-      `3. Paste the conversion brief from your clipboard to begin the verified rebuild.`,
+      copied
+        ? `3. Paste the conversion brief from your clipboard to begin the verified rebuild.`
+        : `3. Copy the instructions from ${chalk.underline('CONVERSION_SPEC.md')} into your AI assistant.`,
     ]
       .filter(Boolean)
       .join('\n');

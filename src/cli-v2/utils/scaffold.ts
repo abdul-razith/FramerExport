@@ -48,30 +48,40 @@ export async function scaffoldFrameworkStarter(
   const targetAssets = path.join(staticPath, 'assets');
   await copyDirRecursive(sourceAssets, targetAssets);
 
-  // 2. Write minimal framework starter package.json
-  const pkgContent = getFrameworkPackageJson(framework, projectDirName);
-  await fs.writeFile(path.join(projectPath, 'package.json'), JSON.stringify(pkgContent, null, 2) + '\n');
+  // 2. Write minimal framework starter package.json if it doesn't already exist
+  const pkgPath = path.join(projectPath, 'package.json');
+  try {
+    await fs.access(pkgPath);
+  } catch {
+    const pkgContent = getFrameworkPackageJson(framework, projectDirName);
+    await fs.writeFile(pkgPath, JSON.stringify(pkgContent, null, 2) + '\n');
+  }
 
-  // 3. Write minimal tsconfig.json
-  await fs.writeFile(
-    path.join(projectPath, 'tsconfig.json'),
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: 'ES2022',
-          module: 'ESNext',
-          moduleResolution: 'bundler',
-          jsx: framework.includes('react') || framework === 'nextjs' ? 'react-jsx' : 'preserve',
-          strict: true,
-          skipLibCheck: true,
-          esModuleInterop: true,
+  // 3. Write minimal tsconfig.json if it doesn't already exist
+  const tsconfigPath = path.join(projectPath, 'tsconfig.json');
+  try {
+    await fs.access(tsconfigPath);
+  } catch {
+    await fs.writeFile(
+      tsconfigPath,
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: 'ES2022',
+            module: 'ESNext',
+            moduleResolution: 'bundler',
+            jsx: framework.includes('react') || framework === 'nextjs' ? 'react-jsx' : 'preserve',
+            strict: true,
+            skipLibCheck: true,
+            esModuleInterop: true,
+          },
+          include: ['src/**/*', 'app/**/*'],
         },
-        include: ['src/**/*', 'app/**/*'],
-      },
-      null,
-      2
-    ) + '\n'
-  );
+        null,
+        2
+      ) + '\n'
+    );
+  }
 
   // 4. Create base directories
   if (framework === 'nextjs') {

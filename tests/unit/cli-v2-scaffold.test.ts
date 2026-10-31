@@ -30,3 +30,21 @@ test('scaffoldFrameworkStarter creates package.json, public directory and copies
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('scaffoldFrameworkStarter does not overwrite existing package.json on re-run', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-rerun-'));
+  try {
+    const projectPath = path.join(tmpDir, 'converted-nextjs');
+    await fs.mkdir(projectPath, { recursive: true });
+    const customPkg = { name: 'my-custom-modified-project', version: '1.2.3' };
+    await fs.writeFile(path.join(projectPath, 'package.json'), JSON.stringify(customPkg));
+
+    await scaffoldFrameworkStarter(tmpDir, 'nextjs');
+
+    const readBack = JSON.parse(await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8'));
+    assert.equal(readBack.name, 'my-custom-modified-project');
+    assert.equal(readBack.version, '1.2.3');
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
