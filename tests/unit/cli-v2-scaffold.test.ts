@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { scaffoldFrameworkStarter } from '../../src/cli-v2/utils/scaffold.js';
 
-test('scaffoldFrameworkStarter creates package.json with modern React 19, Vite 6 and framer-motion', async () => {
+test('scaffoldFrameworkStarter creates package.json with modern React 19, Vite 8 and framer-motion', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-test-'));
   try {
     const assetsDir = path.join(tmpDir, 'assets', 'images');
@@ -17,12 +17,12 @@ test('scaffoldFrameworkStarter creates package.json with modern React 19, Vite 6
     assert.equal(result.projectDirName, 'converted-react-vite');
     assert.ok(result.projectPath.includes('converted-react-vite'));
 
-    // Check package.json exists and includes React 19, Vite 6, and framer-motion
+    // Check package.json exists and includes React 19, Vite 8, and framer-motion
     const pkgPath = path.join(result.projectPath, 'package.json');
     const pkgContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
     assert.ok(pkgContent.dependencies?.react?.startsWith('^19'), 'React should be version 19');
     assert.ok(pkgContent.dependencies?.['framer-motion']);
-    assert.ok(pkgContent.devDependencies?.vite?.startsWith('^6'), 'Vite should be version 6');
+    assert.ok(pkgContent.devDependencies?.vite?.startsWith('^8'), 'Vite should be version 8');
 
     // Check assets were copied into public/assets
     const copiedAsset = path.join(result.projectPath, 'public', 'assets', 'images', 'logo.png');
@@ -33,15 +33,39 @@ test('scaffoldFrameworkStarter creates package.json with modern React 19, Vite 6
   }
 });
 
-test('scaffoldFrameworkStarter creates Next.js 15 starter with React 19 and framer-motion', async () => {
+test('scaffoldFrameworkStarter creates Next.js 16 starter with React 19 and framer-motion', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-next-'));
   try {
     const result = await scaffoldFrameworkStarter(tmpDir, 'nextjs');
     const pkgPath = path.join(result.projectPath, 'package.json');
     const pkgContent = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
-    assert.ok(pkgContent.dependencies?.next?.startsWith('^15'), 'Next.js should be version 15');
+    assert.ok(pkgContent.dependencies?.next?.startsWith('^16'), 'Next.js should be version 16');
     assert.ok(pkgContent.dependencies?.react?.startsWith('^19'), 'React should be version 19');
     assert.ok(pkgContent.dependencies?.['framer-motion']);
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('scaffoldFrameworkStarter pre-extracts SvgTemplates and globals.css when index.html contains them', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-scaffold-extract-'));
+  try {
+    const fakeHtml = `<!doctype html><html><head><style>.framer-test { color: red; } @font-face { font-family: Test; src: url("assets/fonts/test.woff2"); }</style></head><body><div id="main"><h1>Hello</h1></div><div id="svg-templates"><svg id="test-svg"><path d="M0 0"/></svg></div></body></html>`;
+    await fs.writeFile(path.join(tmpDir, 'index.html'), fakeHtml, 'utf-8');
+
+    const result = await scaffoldFrameworkStarter(tmpDir, 'nextjs');
+
+    // SvgTemplates component created
+    const svgComp = path.join(result.projectPath, 'components', 'SvgTemplates.tsx');
+    const svgContent = await fs.readFile(svgComp, 'utf-8');
+    assert.ok(svgContent.includes('test-svg'));
+    assert.ok(svgContent.includes('id="svg-templates"'));
+
+    // globals.css created and asset urls rewritten
+    const cssPath = path.join(result.projectPath, 'app', 'globals.css');
+    const cssContent = await fs.readFile(cssPath, 'utf-8');
+    assert.ok(cssContent.includes('.framer-test'));
+    assert.ok(cssContent.includes('url("/assets/fonts/test.woff2")'));
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
