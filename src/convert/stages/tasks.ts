@@ -59,16 +59,29 @@ function orderComponents(components: ComponentInfo[], slices: Map<string, string
   return [...components].sort((a, b) => weight.get(a.name)! - weight.get(b.name)! || byString(a.name, b.name));
 }
 
+/** Read a text file; ENOENT is logged and recorded as a `tasks:` warning, other errors propagate. */
+async function readOrWarn(ctx: StageContext, file: string, label: string): Promise<string | undefined> {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const msg = `tasks: missing ${label}`;
+    ctx.log(msg);
+    if (!ctx.state.warnings.includes(msg)) ctx.state.warnings.push(msg);
+    return undefined;
+  }
+}
+
+const toPosix = (p: string): string => p.split(path.sep).join('/');
+
 /** Ordered section names of a page (see pageSections). */
 async function sectionsFor(ctx: StageContext, page: PageInfo): Promise<string[]> {
-  let html = '';
-  try {
-    html = await readFile(path.join(ctx.exportDir, page.sourceFile), 'utf8');
-  } catch {}
+  const html = (await readOrWarn(ctx, path.join(ctx.exportDir, page.sourceFile), page.sourceFile)) ?? '';
   return pageSections(html).map((s) => s.name);
 }
 
 export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
+  ctx.state.warnings = ctx.state.warnings.filter((w) => !w.startsWith('tasks:'));
   const analysis = path.join(ctx.nextDir, '.convert', 'analysis');
   const pages = await readJson<PageInfo[]>(path.join(analysis, 'pages.json'), []);
   const components = await readJson<ComponentInfo[]>(path.join(analysis, 'components.json'), []);
@@ -76,9 +89,8 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
 
   const slices = new Map<string, string>();
   for (const c of components) {
-    try {
-      slices.set(c.name, await readFile(path.join(ctx.nextDir, c.slice), 'utf8'));
-    } catch {}
+    const html = await readOrWarn(ctx, path.join(ctx.nextDir, c.slice), c.slice);
+    if (html !== undefined) slices.set(c.name, html);
   }
 
   await mkdir(path.join(ctx.nextDir, '.convert', 'tasks'), { recursive: true });
@@ -134,7 +146,7 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
         route: p.route,
         targets: bullets([code(target)]),
         inputs: bullets([
-          `Original page HTML (read-only reference): ${code(path.join(ctx.exportDir, p.sourceFile))}`,
+          `Original page HTML (read-only reference): ${code(toPosix(path.relative(ctx.nextDir, path.join(ctx.exportDir, p.sourceFile))))}`,
           `Shared Framer base styles stripped from slices: ${code(BASE_CSS)}`,
           ...(contentFile ? [`CMS content: ${code(contentFile)}`] : []),
           ...WIDTHS.map((w) => `Reference screenshot at ${w}px: ${code(`.convert/reference/${slug}/${w}.png`)}`),
@@ -186,7 +198,10 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
     );
   }
 
-  const guide = renderTemplate('agents', { rules: SHARED_RULES });
+  const guide = renderTemplate('agents', {
+    rules: SHARED_RULES,
+    exportDir: toPosix(path.relative(ctx.nextDir, ctx.exportDir)) || '.',
+  });
   await writeFile(path.join(ctx.nextDir, 'AGENTS.md'), guide, 'utf8');
   await writeFile(path.join(ctx.nextDir, 'CLAUDE.md'), guide, 'utf8');
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile, mkdir, access } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
@@ -18,8 +18,8 @@ after(async () => {
   for (const d of tmps) await rm(d, { recursive: true, force: true });
 });
 
-async function prepare() {
-  const nextDir = await mkdtemp(path.join(os.tmpdir(), 'fexport tasks '));
+async function prepare(base = os.tmpdir()) {
+  const nextDir = await mkdtemp(path.join(base, 'fexport tasks '));
   tmps.push(nextDir);
   const ctx = { state: initState(fixture, nextDir), exportDir: fixture, nextDir, log: () => {} };
   await runAnalyze(ctx, framerAdapter, { animations: false });
@@ -156,4 +156,35 @@ test('re-run keeps status/attempts and fix files', async () => {
   assert.equal(ctx.state.tasks['101-page-home']!.attempts, 2);
   assert.equal(await read(ctx, '.convert/tasks/fix-001.md'), 'keep me');
   assert.ok((await readdir(path.join(ctx.nextDir, '.convert/tasks'))).includes('fix-001.md'));
+});
+
+// Same drive as the fixture (os.tmpdir() may be on another Windows drive, where no relative path exists).
+test('task files are portable: no absolute export path, relative source resolves', async () => {
+  const ctx = await prepare(path.resolve('tests'));
+  await runTasks(ctx);
+  const abs = ctx.exportDir;
+  for (const f of [...(await readdir(path.join(ctx.nextDir, '.convert/tasks'))).map((n) => '.convert/tasks/' + n), 'AGENTS.md']) {
+    const text = await read(ctx, f);
+    assert.ok(!text.includes(abs) && !text.includes(abs.split(path.sep).join('/')), f);
+  }
+  const text = await read(ctx, '.convert/tasks/101-page-home.md');
+  const rel = /Original page HTML \(read-only reference\): `([^`]+)`/.exec(text)![1]!;
+  await access(path.resolve(ctx.nextDir, rel));
+  assert.match(await read(ctx, 'AGENTS.md'), /Original export: `[^`]+`/);
+});
+
+test('missing slice and source are reported as warnings, not swallowed', async () => {
+  const ctx = await prepare();
+  await rm(path.join(ctx.nextDir, '.convert/analysis/slices/Arrow.html'));
+  const pages = JSON.parse(await read(ctx, '.convert/analysis/pages.json')) as Array<{ sourceFile: string }>;
+  pages[1]!.sourceFile = 'subpages/gone.html';
+  await writeFile(path.join(ctx.nextDir, '.convert/analysis/pages.json'), JSON.stringify(pages));
+  const logs: string[] = [];
+  ctx.log = (m: string) => logs.push(m);
+  await runTasks(ctx);
+  assert.ok(ctx.state.warnings.includes('tasks: missing .convert/analysis/slices/Arrow.html'));
+  assert.ok(ctx.state.warnings.includes('tasks: missing subpages/gone.html'));
+  assert.equal(logs.length, 2);
+  await runTasks(ctx);
+  assert.equal(ctx.state.warnings.filter((w) => w.startsWith('tasks:')).length, 2);
 });
