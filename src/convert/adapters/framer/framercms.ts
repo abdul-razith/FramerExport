@@ -11,13 +11,32 @@ export interface CmsItem {
   fields: Record<string, CmsValue>;
 }
 
-export class UnknownCmsTagError extends Error {
+
+export class CmsDecodeError extends Error {
+  constructor(
+    public reason: 'unknown-tag' | 'truncated' | 'invalid-json',
+    public offset: number,
+    public key?: string,
+    message?: string,
+  ) {
+    super(message ?? `CMS decode error (${reason}) at offset ${offset}${key ? ` for field "${key}"` : ''}`);
+    this.name = 'CmsDecodeError';
+  }
+}
+
+export class UnknownCmsTagError extends CmsDecodeError {
+  declare key: string;
   constructor(
     public tag: number,
-    public offset: number,
-    public key: string,
+    offset: number,
+    key: string,
   ) {
-    super(`Unknown CMS tag 0x${tag.toString(16)} for field "${key}" at offset ${offset}`);
+    super(
+      'unknown-tag',
+      offset,
+      key,
+      `Unknown CMS tag 0x${tag.toString(16)} for field "${key}" at offset ${offset}`,
+    );
     this.name = 'UnknownCmsTagError';
   }
 }
@@ -29,70 +48,81 @@ const TAG_RICHTEXT = 0x0b;
 const TAG_STRING = 0x0c;
 
 export function collectionIdFromFile(fileName: string): string {
-  const base = fileName.split(/[\\/]/).pop() ?? fileName;
+  const base = fileName.split(/[\/]/).pop() ?? fileName;
   return base.split('-')[0] ?? base;
 }
 
-export function decodeChunk(buf: Buffer): { items: CmsItem[]; errors: UnknownCmsTagError[] } {
+export function decodeChunk(buf: Buffer): { items: CmsItem[]; errors: CmsDecodeError[] } {
   const items: CmsItem[] = [];
-  const errors: UnknownCmsTagError[] = [];
+  const errors: CmsDecodeError[] = [];
   let pos = 0;
+  let itemStart = 0;
 
+  const need = (n: number): void => {
+    if (n < 0 || pos + n > buf.length) throw new CmsDecodeError('truncated', itemStart);
+  };
+  const u32 = (): number => {
+    need(4);
+    const v = buf.readUInt32BE(pos);
+    pos += 4;
+    return v;
+  };
   const text = (len: number): string => {
-    if (pos + len > buf.length) throw new RangeError('CMS chunk truncated');
+    need(len);
     const s = buf.toString('utf8', pos, pos + len);
     pos += len;
     return s;
   };
+  const json = (len: number, key: string, offset: number): unknown => {
+    const raw = text(len);
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new CmsDecodeError('invalid-json', offset, key);
+    }
+  };
 
   try {
-    while (pos + 2 <= buf.length) {
+    while (pos < buf.length) {
+      itemStart = pos;
+      need(2);
       const count = buf.readUInt16BE(pos);
       pos += 2;
       const fields: Record<string, CmsValue> = {};
       for (let i = 0; i < count; i++) {
-        const keyLen = buf.readUInt32BE(pos);
-        pos += 4;
-        const key = text(keyLen);
-        const tag = buf.readUInt8(pos);
+        const key = text(u32());
+        need(1);
         const tagOffset = pos;
+        const tag = buf.readUInt8(pos);
         pos += 1;
         switch (tag) {
           case TAG_ENUM:
-          case TAG_STRING: {
-            const len = buf.readUInt32BE(pos);
-            pos += 4;
-            fields[key] = { type: 'string', value: text(len) };
+          case TAG_STRING:
+            fields[key] = { type: 'string', value: text(u32()) };
             break;
-          }
-          case TAG_DATE: {
+          case TAG_DATE:
+            need(8);
             fields[key] = { type: 'date', value: Number(buf.readBigUInt64BE(pos)) };
             pos += 8;
             break;
-          }
-          case TAG_JSON: {
-            const len = buf.readUInt32BE(pos);
-            pos += 4;
-            fields[key] = { type: 'json', value: JSON.parse(text(len)) };
+          case TAG_JSON:
+            fields[key] = { type: 'json', value: json(u32(), key, tagOffset) };
             break;
-          }
-          case TAG_RICHTEXT: {
+          case TAG_RICHTEXT:
+            need(1);
             pos += 1; // flag byte
-            const len = buf.readUInt32BE(pos);
-            pos += 4;
-            fields[key] = { type: 'richtext', value: JSON.parse(text(len)) };
+            fields[key] = { type: 'richtext', value: json(u32(), key, tagOffset) };
             break;
-          }
           default:
-            errors.push(new UnknownCmsTagError(tag, tagOffset, key));
-            return { items, errors };
+            throw new UnknownCmsTagError(tag, tagOffset, key);
         }
       }
       const id = fields.id;
       items.push({ id: id?.type === 'string' ? id.value : '', fields });
     }
   } catch (err) {
-    if (!(err instanceof RangeError)) throw err;
+    if (err instanceof CmsDecodeError) errors.push(err);
+    else throw err;
   }
   return { items, errors };
 }

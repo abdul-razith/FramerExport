@@ -61,6 +61,8 @@ test('unknown tag yields UnknownCmsTagError with key and tag', () => {
   assert.ok(errors[0] instanceof UnknownCmsTagError);
   assert.equal(errors[0]!.tag, 0x7f);
   assert.equal(errors[0]!.key, 'abc');
+  assert.equal(errors[0]!.reason, 'unknown-tag');
+  assert.equal(errors[0]!.offset, 2 + 4 + 3);
 });
 
 test('collectionIdFromFile', () => {
@@ -91,4 +93,42 @@ test('real enum field decodes from the D8jD2HbSE chunk', () => {
   const { items, errors } = decodeChunk(chunk('D8jD2HbSE-chunk-default-0.framercms'));
   assert.equal(errors.length, 0);
   assert.deepEqual(items[0]!.fields.s01z5wmCs, { type: 'string', value: 'isOn3ABPV' });
+});
+
+test('half-length chunk reports truncated and keeps earlier items', () => {
+  const full = chunk('hu3yniggG-chunk-default-0.framercms');
+  const fullCount = decodeChunk(full).items.length;
+  const { items, errors } = decodeChunk(full.subarray(0, Math.floor(full.length / 2)));
+  assert.equal(errors[0]?.reason, 'truncated');
+  assert.ok(items.length >= 1);
+  assert.ok(items.length < fullCount);
+});
+
+test('trailing byte after a full chunk reports truncated but keeps all items', () => {
+  const full = chunk('hu3yniggG-chunk-default-0.framercms');
+  const fullCount = decodeChunk(full).items.length;
+  const { items, errors } = decodeChunk(Buffer.concat([full, Buffer.from([0x00])]));
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.reason, 'truncated');
+  assert.equal(errors[0]!.offset, full.length);
+  assert.equal(items.length, fullCount);
+});
+
+test('malformed JSON in a json field reports invalid-json with key', () => {
+  const key = Buffer.from('jf');
+  const payload = Buffer.from('{bad');
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(payload.length);
+  const buf = Buffer.concat([
+    Buffer.from([0x00, 0x01, 0, 0, 0, key.length]),
+    key,
+    Buffer.from([0x0a]),
+    len,
+    payload,
+  ]);
+  const { items, errors } = decodeChunk(buf);
+  assert.equal(items.length, 0);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.reason, 'invalid-json');
+  assert.equal(errors[0]!.key, 'jf');
 });
