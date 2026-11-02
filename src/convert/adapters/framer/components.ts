@@ -323,7 +323,7 @@ function splitCss(css: string): CssRule[] {
 }
 
 // Framer's shared typography/image resets apply to every page; they are not part of a component's own CSS.
-const GLOBAL_CLASS = /^framer-(?:text|image|link-text|lib-.*)$/;
+export const GLOBAL_CLASS = /^framer-(?:text|image|link-text|lib-.*)$/;
 
 function ruleMatches(prelude: string, classes: Set<string>): boolean {
   return prelude.split(',').some((sel) => {
