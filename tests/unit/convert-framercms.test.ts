@@ -132,3 +132,8 @@ test('malformed JSON in a json field reports invalid-json with key', () => {
   assert.equal(errors[0]!.reason, 'invalid-json');
   assert.equal(errors[0]!.key, 'jf');
 });
+
+test('collectionIdFromFile handles Windows backslash paths', () => {
+  assert.equal(collectionIdFromFile('C:\\x\\data\\hu3yniggG-chunk-default-0.framercms'), 'hu3yniggG');
+  assert.equal(collectionIdFromFile('/x/data/D8jD2HbSE-chunk-default-0.framercms'), 'D8jD2HbSE');
+});

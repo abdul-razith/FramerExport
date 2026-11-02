@@ -48,7 +48,7 @@ const TAG_RICHTEXT = 0x0b;
 const TAG_STRING = 0x0c;
 
 export function collectionIdFromFile(fileName: string): string {
-  const base = fileName.split(/[\/]/).pop() ?? fileName;
+  const base = fileName.split(/[\\/]/).pop() ?? fileName;
   return base.split('-')[0] ?? base;
 }
 
