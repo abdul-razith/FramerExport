@@ -80,21 +80,26 @@ export async function runScaffold(
   opts: { confirmOverwrite?: (file: string) => Promise<boolean> } = {},
 ): Promise<{ written: string[]; skipped: string[] }> {
   const dir = path.join(ctx.nextDir, '.convert', 'analysis');
-  const analysis: Analysis = {
-    pages: await readJson<PageInfo[]>(path.join(dir, 'pages.json'), []),
-    tokens: await readJson<Tokens>(path.join(dir, 'tokens.json'), {
-      colors: {},
-      tokenMap: {},
-      fonts: [],
-      typeScale: [],
-      breakpoints: { md: 810, lg: 1200 },
-    }),
-    components: await readJson<ComponentInfo[]>(path.join(dir, 'components.json'), []),
-    animations: [],
+  const required = async <T>(name: string): Promise<T> => {
+    const value = await readJson<T | null>(path.join(dir, name), null);
+    if (value === null) throw new Error(`scaffold requires analysis: missing ${name}; run analyze first`);
+    return value;
   };
+  const pages = await required<PageInfo[]>('pages.json');
+  const tokens = await required<Tokens>('tokens.json');
+  ctx.state.warnings = ctx.state.warnings.filter((w) => !w.startsWith('scaffold:'));
+  const components = await readJson<ComponentInfo[] | null>(path.join(dir, 'components.json'), null);
+  if (components === null) ctx.state.warnings.push('scaffold: components.json missing; treated as empty');
+  const analysis: Analysis = { pages, tokens, components: components ?? [], animations: [] };
+
+  const report = await readJson<{ source?: unknown }>(path.join(ctx.exportDir, 'export-report.json'), {});
+  let siteOrigin: string | undefined;
+  try {
+    if (typeof report.source === 'string') siteOrigin = new URL(report.source).origin;
+  } catch {}
 
   const imageManifest = await collectImages(ctx);
-  const files = generateFiles(analysis, imageManifest);
+  const files = generateFiles(analysis, imageManifest, siteOrigin);
 
   const written: string[] = [];
   const skipped: string[] = [];
@@ -107,6 +112,7 @@ export async function runScaffold(
       const untouched = stored !== undefined ? sha256(onDisk) === stored : onDisk === content;
       if (!untouched && onDisk !== content && !(await opts.confirmOverwrite?.(rel))) {
         skipped.push(rel);
+        ctx.state.warnings.push(`scaffold: kept edited file ${rel}`);
         continue;
       }
     }

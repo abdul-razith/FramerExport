@@ -59,9 +59,16 @@ export function fontsCss(tokens: Tokens): string {
   return blocks.join('\n\n') + '\n';
 }
 
-function metadataBlock(page: PageInfo | undefined, imageManifest: Record<string, string>, withOg: boolean): string {
+function metadataBlock(
+  page: PageInfo | undefined,
+  imageManifest: Record<string, string>,
+  withOg: boolean,
+  origin?: string,
+): string {
   const m = page?.meta ?? {};
-  const fields: string[] = [`  title: ${q(page?.title ?? 'Site')},`];
+  const fields: string[] = [];
+  if (origin) fields.push(`  metadataBase: new URL(${q(origin)}),`);
+  fields.push(`  title: ${q(page?.title ?? 'Site')},`);
   const description = m.description ?? m['og:description'];
   if (description) fields.push(`  description: ${q(description)},`);
   if (withOg) {
@@ -75,14 +82,14 @@ function metadataBlock(page: PageInfo | undefined, imageManifest: Record<string,
   return `export const metadata: Metadata = {\n${fields.join('\n')}\n};`;
 }
 
-function layoutTsx(home: PageInfo | undefined, imageManifest: Record<string, string>): string {
+function layoutTsx(home: PageInfo | undefined, imageManifest: Record<string, string>, origin?: string): string {
   return `import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './fonts.css';
 import './globals.css';
 import { LenisProvider } from '@/components/providers/LenisProvider';
 
-${metadataBlock(home, imageManifest, true)}
+${metadataBlock(home, imageManifest, true, origin)}
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
@@ -193,6 +200,7 @@ const TSCONFIG = `${JSON.stringify(
 const LENIS = `'use client';
 
 import Lenis from 'lenis';
+import 'lenis/dist/lenis.css';
 import { useEffect, type ReactNode } from 'react';
 
 export function LenisProvider({ children }: { children: ReactNode }) {
@@ -249,7 +257,11 @@ const RICHTEXT = `export function RichText({ html, className }: { html: string; 
 }
 `;
 
-export function generateFiles(analysis: Analysis, imageManifest: Record<string, string>): Map<string, string> {
+export function generateFiles(
+  analysis: Analysis,
+  imageManifest: Record<string, string>,
+  siteOrigin?: string,
+): Map<string, string> {
   const files = new Map<string, string>();
   files.set('package.json', PACKAGE_JSON());
   files.set('tsconfig.json', TSCONFIG);
@@ -266,7 +278,7 @@ export function generateFiles(analysis: Analysis, imageManifest: Record<string, 
   files.set('src/app/globals.css', globalsCss(analysis.tokens));
   files.set('src/app/fonts.css', fontsCss(analysis.tokens));
   const home = analysis.pages.find((p) => p.route === '/');
-  files.set('src/app/layout.tsx', layoutTsx(home, imageManifest));
+  files.set('src/app/layout.tsx', layoutTsx(home, imageManifest, siteOrigin));
   files.set('src/components/providers/LenisProvider.tsx', LENIS);
   files.set('src/lib/motion.ts', MOTION);
   files.set('src/lib/gsap.ts', GSAP);

@@ -117,14 +117,34 @@ test('fixture: images copied, manifest written, no vendor/CDN references', async
   assert.equal(ctx.state.fileHashes['public/fonts'], undefined);
 });
 
+test('layout sets metadataBase and LenisProvider imports lenis css', async () => {
+  const ctx = await ran();
+  assert.match(await read(ctx, 'src/app/layout.tsx'), /metadataBase: new URL\("https:\/\/nudge-folio\.framer\.website"\)/);
+  assert.match(await read(ctx, 'src/components/providers/LenisProvider.tsx'), /import 'lenis\/dist\/lenis\.css'/);
+});
+
+test('scaffold without analysis rejects and does not mark done', async () => {
+  const nextDir = await mkdtemp(path.join(os.tmpdir(), 'fexport scaffold '));
+  tmps.push(nextDir);
+  const ctx = { state: initState(fixture, nextDir), exportDir: fixture, nextDir, log: () => {} };
+  await assert.rejects(runScaffold(ctx), /run analyze first/);
+  assert.notEqual(ctx.state.stages.scaffold, 'done');
+});
+
 test('edited files are skipped unless confirmOverwrite approves', async () => {
   const ctx = await prepare();
   await runScaffold(ctx);
   const layout = path.join(ctx.nextDir, 'src', 'app', 'layout.tsx');
   await writeFile(layout, '// edited by AI\n', 'utf8');
+  const hashBefore = ctx.state.fileHashes['src/app/layout.tsx'];
   const r1 = await runScaffold(ctx);
   assert.equal(await readFile(layout, 'utf8'), '// edited by AI\n');
   assert.ok(r1.skipped.includes('src/app/layout.tsx'));
+  const kept = 'scaffold: kept edited file src/app/layout.tsx';
+  assert.equal(ctx.state.fileHashes['src/app/layout.tsx'], hashBefore);
+  assert.equal(ctx.state.warnings.filter((w) => w === kept).length, 1);
+  await runScaffold(ctx);
+  assert.equal(ctx.state.warnings.filter((w) => w === kept).length, 1);
   const r2 = await runScaffold(ctx, { confirmOverwrite: async () => true });
   assert.ok(r2.written.includes('src/app/layout.tsx'));
   assert.match(await readFile(layout, 'utf8'), /LenisProvider/);
