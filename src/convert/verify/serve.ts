@@ -36,7 +36,14 @@ function statusOf(url: string, timeoutMs: number): Promise<number | null> {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Poll `url` until `ready(status)`; stops the process and rejects on timeout or early exit. */
+/** Record a spawn 'error' (e.g. ENOENT) so readiness polling can fail fast with its message. */
+function trackSpawnError(proc: ManagedProcess): () => Error | null {
+  let error: Error | null = null;
+  proc.child.once('error', (err) => (error = err));
+  return () => error;
+}
+
+/** Poll `url` until `ready(status)`; stops the process and rejects on timeout, spawn error or early exit. */
 async function waitForHttp(
   url: string,
   proc: ManagedProcess,
@@ -45,9 +52,12 @@ async function waitForHttp(
   output: () => string,
   what: string
 ): Promise<void> {
+  const spawnError = trackSpawnError(proc);
   const deadline = Date.now() + timeoutMs;
   let last: number | null = null;
   while (Date.now() < deadline) {
+    const err = spawnError();
+    if (err) throw new Error(`${what} failed to start: ${err.message}`);
     if (proc.child.exitCode !== null || proc.child.signalCode !== null) {
       throw new Error(`${what} exited before becoming ready (code ${proc.child.exitCode}).\n${output().slice(-4000)}`);
     }
@@ -79,25 +89,40 @@ export async function startExportServer(exportDir: string): Promise<{ url: strin
   return { url, stop: () => proc.stop() };
 }
 
-/** `npm run build` then `npm run start -- -p <port>`; resolves when `GET /` answers below 500. */
+/**
+ * `npm run build` then `npm run start -- -p <port>`; resolves when `GET /` answers below 500.
+ * The build is stopped after `buildTimeoutMs` (default 10 min); the server after `readyTimeoutMs` (default 60 s).
+ */
 export async function startNextServer(
-  nextDir: string
+  nextDir: string,
+  opts: { readyTimeoutMs?: number; buildTimeoutMs?: number } = {}
 ): Promise<{ url: string; stop(): Promise<void>; buildLog: string }> {
+  const readyTimeoutMs = opts.readyTimeoutMs ?? 60_000;
+  const buildTimeoutMs = opts.buildTimeoutMs ?? 10 * 60_000;
   const build = spawnManaged(npmCommand, ['run', 'build'], { cwd: nextDir });
   const buildOutput = collectOutput(build.child);
-  const code = await new Promise<number | null>((resolve) => {
-    build.child.once('error', () => resolve(-1));
-    build.child.once('close', (c) => resolve(c));
-  });
-  const buildLog = buildOutput();
-  if (code !== 0) throw new BuildFailedError(buildLog);
+  let timer: NodeJS.Timeout | undefined;
+  const outcome = await Promise.race([
+    new Promise<{ code: number | null; error?: Error }>((resolve) => {
+      build.child.once('error', (error) => resolve({ code: -1, error }));
+      build.child.once('close', (code) => resolve({ code }));
+    }),
+    new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), buildTimeoutMs)))
+  ]);
+  clearTimeout(timer);
+  if (outcome === 'timeout') {
+    await build.stop();
+    throw new Error(`next build did not finish within ${buildTimeoutMs / 1000}s.\n${buildOutput().slice(-4000)}`);
+  }
+  const buildLog = buildOutput() + (outcome.error ? `\n${outcome.error.message}` : '');
+  if (outcome.code !== 0) throw new BuildFailedError(buildLog);
 
   const port = await freePort();
   const proc = spawnManaged(npmCommand, ['run', 'start', '--', '-p', String(port)], { cwd: nextDir });
   const output = collectOutput(proc.child);
   const url = `http://127.0.0.1:${port}`;
   try {
-    await waitForHttp(url + '/', proc, (s) => s < 500, 60_000, output, 'next server');
+    await waitForHttp(url + '/', proc, (s) => s < 500, readyTimeoutMs, output, 'next server');
   } catch (err) {
     await proc.stop();
     throw err;

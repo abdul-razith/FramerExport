@@ -50,17 +50,28 @@ export async function stopAllManaged(): Promise<void> {
   await Promise.all([...managed.values()].map((stop) => stop()));
 }
 
+/**
+ * Synchronously kill every managed child's process tree. Registered as the `process.on('exit')` handler,
+ * where only synchronous work runs. (On Windows libuv's job object also kills direct children on exit;
+ * this handler additionally covers detached POSIX process groups and grandchildren.)
+ */
+export function killAllManagedSync(): void {
+  for (const child of managed.keys()) killTreeSync(child);
+}
+
 function installHandlers(): void {
   if (handlersInstalled) return;
   handlersInstalled = true;
+  let shuttingDown = false;
+  // `on`, not `once`: a second Ctrl-C during cleanup must not fall back to Node's default and skip it.
   const onSignal = (code: number) => () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     void stopAllManaged().finally(() => process.exit(code));
   };
-  process.once('SIGINT', onSignal(130));
-  process.once('SIGTERM', onSignal(143));
-  process.on('exit', () => {
-    for (const child of managed.keys()) killTreeSync(child);
-  });
+  process.on('SIGINT', onSignal(130));
+  process.on('SIGTERM', onSignal(143));
+  process.on('exit', killAllManagedSync);
 }
 
 function quoteIfSpaced(arg: string): string {
