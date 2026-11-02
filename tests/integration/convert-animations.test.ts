@@ -64,3 +64,16 @@ test('observeAnimations records appear, scroll, hover and loop animations', asyn
 
   assert.equal(by('loop')[0].selector, '[data-framer-name="Spinner"]');
 });
+
+test('hover candidates keep their slots past the 2000-element tracking cap', async () => {
+  const filler = Array.from({ length: 2100 }, (_, i) => `<div data-framer-name="Filler${i}" style="height:1px"></div>`).join('');
+  await page.setContent(`<!doctype html><html><head><style>
+body { margin: 0; }
+button { display: block; width: 100px; height: 40px; transition: transform 200ms linear; }
+button:hover { transform: scale(1.2); }
+</style></head><body>${filler}<button data-framer-name="Late Button">Go</button></body></html>`);
+  const entries = await observeAnimations(page, '/many');
+  const hover = entries.filter((e) => e.trigger === 'hover');
+  assert.equal(hover.length, 1, JSON.stringify(entries));
+  assert.equal(hover[0].selector, '[data-framer-name="Late Button"]');
+});

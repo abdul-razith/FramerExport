@@ -1,5 +1,6 @@
 import type { Page } from 'puppeteer';
 import type { AnimationEntry } from '../../types.js';
+import { warn } from '../../../logger/index.js';
 
 type Snap = string[]; // per element: opacity, transform, filter, clip-path joined by SEP
 interface Sample {
@@ -20,14 +21,18 @@ const SETUP = String.raw`(() => {
   const els = [];
   const seen = new Set();
   const add = (el) => { if (!seen.has(el) && els.length < ${MAX_ELEMENTS}) { seen.add(el); els.push(el); } };
-  for (const el of document.querySelectorAll('*')) {
-    if (el.hasAttribute('data-framer-name') || re.test(el.getAttribute('class') || '')) add(el);
-  }
   const hover = [];
   for (const el of document.querySelectorAll('a, button, [data-framer-name*="Button"]')) {
     if (hover.length >= ${MAX_HOVER}) break;
     add(el);
     hover.push(els.indexOf(el));
+  }
+  let skipped = 0;
+  for (const el of document.querySelectorAll('*')) {
+    if (seen.has(el)) continue;
+    if (el.hasAttribute('data-framer-name') || re.test(el.getAttribute('class') || '')) {
+      if (els.length < ${MAX_ELEMENTS}) add(el); else skipped++;
+    }
   }
   const esc = (v) => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const attrSel = (el) => {
@@ -77,7 +82,7 @@ const SETUP = String.raw`(() => {
     meta: (idx) => idx.map((i) => ({ selector: selector(els[i]), name: els[i].getAttribute('data-framer-name') })),
     maxScroll: () => Math.max(0, document.documentElement.scrollHeight - innerHeight),
   };
-  return els.length;
+  return { count: els.length, skipped };
 })()`;
 
 interface Change {
@@ -125,10 +130,14 @@ function analyse(series: Array<{ t: number; v: string }>, startT: number, endT: 
 
 export async function observeAnimations(page: Page, route: string): Promise<AnimationEntry[]> {
   await sleep(300);
-  const count = (await page.evaluate(SETUP)) as number;
-  if (!count) return [];
   const entries: AnimationEntry[] = [];
   try {
+    const setup = (await page.evaluate(SETUP)) as { count: number; skipped: number };
+    const count = setup.count;
+    if (setup.skipped > 0) {
+      warn(`animations: ${route}: tracked ${count} elements, skipped ${setup.skipped} beyond the ${MAX_ELEMENTS} cap`);
+    }
+    if (!count) return [];
     const takeSnap = async (): Promise<Sample> => {
       const snap = (await page.evaluate('window.__fx.snap()')) as Snap;
       return { t: performance.now(), snap };
@@ -223,8 +232,10 @@ export async function observeAnimations(page: Page, route: string): Promise<Anim
         await handle.dispose();
         const c = analyse(series, series[0].t, Infinity);
         if (c) found.push({ i, trigger: 'hover', c });
-      } catch {
-        // element not hoverable (hidden, detached); skip
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/not visible|not clickable|not an HTMLElement|detached|Node is detached|Execution context was destroyed/i.test(msg)) throw err;
+        // expected per-element failure (hidden, detached); skip
       }
     }
     await page.mouse.move(0, 0);
