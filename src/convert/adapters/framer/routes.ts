@@ -25,16 +25,11 @@ function decode(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
-/** Hash of the tag / data-framer-name skeleton of #main (text and other attributes ignored). */
-export function structureSignature(html: string): string {
-  let start = -1;
-  rewriteHtmlTags(html, (tag) => {
-    if (start < 0 && /\sid\s*=\s*["']?main["'\s>]/i.test(tag)) start = html.indexOf(tag);
-    return tag;
-  });
+/** Hash of the tag / data-framer-name skeleton of a whole fragment (text and other attributes ignored). */
+export function skeletonSignature(fragmentHtml: string): string {
   const skeleton: string[] = [];
   rewriteHtmlTags(
-    start < 0 ? html : html.slice(start),
+    fragmentHtml,
     (tag, name) => {
       if (name === 'script' || name === 'style' || name === 'noscript') return tag;
       const fn = attr(tag, 'data-framer-name');
@@ -44,6 +39,16 @@ export function structureSignature(html: string): string {
     (body) => body
   );
   return createHash('sha1').update(skeleton.join('|')).digest('hex');
+}
+
+/** Hash of the tag / data-framer-name skeleton of #main. */
+export function structureSignature(html: string): string {
+  let start = -1;
+  rewriteHtmlTags(html, (tag) => {
+    if (start < 0 && /\sid\s*=\s*["']?main["'\s>]/i.test(tag)) start = html.indexOf(tag);
+    return tag;
+  });
+  return skeletonSignature(start < 0 ? html : html.slice(start));
 }
 
 interface Parsed extends PageInfo {
