@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import { framerAdapter } from '../../src/convert/adapters/framer/index.js';
 import { extractBaseCss } from '../../src/convert/adapters/framer/base-css.js';
+import { pageSections } from '../../src/convert/adapters/framer/sections.js';
 import { initState, loadState } from '../../src/convert/state.js';
 import { runAnalyze } from '../../src/convert/stages/analyze.js';
 
@@ -45,11 +47,31 @@ test('runAnalyze writes analysis files, slices, base css, and marks stage done',
   await stat(path.join(nextDir, '.convert', 'state.json'));
 });
 
-test('animations must be explicitly false for now', async () => {
-  const nextDir = await tmp();
-  const ctx = { state: initState(fixture, nextDir), exportDir: fixture, nextDir, log: () => {} };
-  await assert.rejects(() => runAnalyze(ctx, framerAdapter), /Task 11/);
-  await assert.rejects(() => runAnalyze(ctx, framerAdapter, { animations: true }), /Task 11/);
+test('animations: false and FEXPORT_CONVERT_NO_ANIMATIONS=1 skip runtime observation', async () => {
+  const read = async (nextDir: string) =>
+    JSON.parse(await readFile(path.join(nextDir, '.convert', 'analysis', 'animations.json'), 'utf8'));
+  const a = await tmp();
+  await runAnalyze({ state: initState(fixture, a), exportDir: fixture, nextDir: a, log: () => {} }, framerAdapter, {
+    animations: false
+  });
+  assert.deepEqual(await read(a), []);
+
+  const b = await tmp();
+  const prev = process.env.FEXPORT_CONVERT_NO_ANIMATIONS;
+  process.env.FEXPORT_CONVERT_NO_ANIMATIONS = '1';
+  try {
+    // Default (animations omitted) would launch a browser; the env flag must short-circuit it.
+    await runAnalyze({ state: initState(fixture, b), exportDir: fixture, nextDir: b, log: () => {} }, framerAdapter);
+  } finally {
+    if (prev === undefined) delete process.env.FEXPORT_CONVERT_NO_ANIMATIONS;
+    else process.env.FEXPORT_CONVERT_NO_ANIMATIONS = prev;
+  }
+  assert.deepEqual(await read(b), []);
+});
+
+test('framerAdapter.sections is the page section definition', () => {
+  const html = readFileSync(path.join(fixture, 'index.html'), 'utf8');
+  assert.deepEqual(framerAdapter.sections(html), pageSections(html));
 });
 
 test('extractBaseCss keeps only global-class rules, preserving @media', () => {
