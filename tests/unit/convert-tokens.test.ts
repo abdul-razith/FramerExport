@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { extractTokens, nameColor } from '../../src/convert/adapters/framer/tokens.js';
@@ -21,7 +22,7 @@ test('extractTokens keeps only used fonts whose files exist', () => {
   assert.ok(t.fonts.length > 0 && t.fonts.length < 93);
   for (const f of t.fonts) {
     assert.ok(f.files.length > 0);
-    for (const file of f.files) assert.ok(existsSync(path.join(dir, file)), file);
+    for (const file of f.files) assert.ok(existsSync(path.join(dir, file.path)), file.path);
   }
 });
 
@@ -40,4 +41,32 @@ test('nameColor picks the base name by dominant usage', () => {
 
 test('extractTokens throws when breakpoint media are missing', () => {
   assert.throws(() => extractTokens('<style>a{color:red}</style>', dir), /breakpoint/);
+});
+
+test('fixture font groups keep distinct unicode-range per file', () => {
+  const t = extractTokens(html, dir);
+  const multi = t.fonts.filter((f) => f.files.length >= 2);
+  assert.ok(multi.length > 0);
+  for (const f of multi) {
+    const ranges = f.files.map((x) => x.unicodeRange);
+    for (const r of ranges) assert.ok(r && r.length > 0);
+    assert.equal(new Set(ranges).size, ranges.length);
+  }
+});
+
+test('same family/weight/style faces with different unicode-range stay separate files', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'tok-'));
+  mkdirSync(path.join(tmp, 'assets/fonts'), { recursive: true });
+  writeFileSync(path.join(tmp, 'assets/fonts/a.woff2'), 'x');
+  writeFileSync(path.join(tmp, 'assets/fonts/b.woff2'), 'x');
+  const synthetic =
+    '<style>@font-face { font-family: "Foo"; font-style: normal; font-weight: 400; src: url("assets/fonts/a.woff2") format("woff2"); unicode-range: U+0-FF; }' +
+    '@font-face { font-family: "Foo"; font-style: normal; font-weight: 400; src: url("assets/fonts/b.woff2") format("woff2"); unicode-range: U+100-2BA, U+2BD; }' +
+    'body{font-family:"Foo", sans-serif}@media (min-width: 1200px){a{color:red}}@media (max-width: 809.98px){a{color:red}}</style>';
+  const t = extractTokens(synthetic, tmp);
+  assert.equal(t.fonts.length, 1);
+  assert.deepEqual(t.fonts[0].files, [
+    { path: 'assets/fonts/a.woff2', unicodeRange: 'U+0-FF' },
+    { path: 'assets/fonts/b.woff2', unicodeRange: 'U+100-2BA, U+2BD' },
+  ]);
 });

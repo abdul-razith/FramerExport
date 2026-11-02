@@ -34,8 +34,8 @@ function stripFontFaces(html: string): string {
   return html.replace(/@font-face\s*\{[^}]*\}/g, '');
 }
 
-function extractFontFaces(html: string): Array<{ family: string; weight: string; style: string; file: string }> {
-  const out: Array<{ family: string; weight: string; style: string; file: string }> = [];
+function extractFontFaces(html: string): Array<{ family: string; weight: string; style: string; file: string; unicodeRange?: string }> {
+  const out: Array<{ family: string; weight: string; style: string; file: string; unicodeRange?: string }> = [];
   for (const m of html.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
     const body = m[1];
     const family = /font-family:\s*["']?([^;"']+)["']?\s*;/.exec(body)?.[1]?.trim();
@@ -43,7 +43,8 @@ function extractFontFaces(html: string): Array<{ family: string; weight: string;
     if (!family || !src) continue;
     const weight = /font-weight:\s*([^;]+);/.exec(body)?.[1]?.trim() ?? '400';
     const style = /font-style:\s*([^;]+);/.exec(body)?.[1]?.trim() ?? 'normal';
-    out.push({ family, weight, style, file: src.replace(/^\.?\//, '').split('\\').join('/') });
+    const unicodeRange = /unicode-range:\s*([^;]+);/.exec(body)?.[1]?.trim();
+    out.push({ family, weight, style, file: src.replace(/^\.?\//, '').split('\\').join('/'), ...(unicodeRange ? { unicodeRange } : {}) });
   }
   return out;
 }
@@ -73,7 +74,9 @@ function extractFonts(html: string, exportDir: string): Tokens['fonts'] {
       g = { family: f.family, files: [], weight: f.weight, style: f.style };
       groups.set(key, g);
     }
-    if (!g.files.includes(f.file)) g.files.push(f.file);
+    if (!g.files.some((x) => x.path === f.file && x.unicodeRange === f.unicodeRange)) {
+      g.files.push({ path: f.file, ...(f.unicodeRange ? { unicodeRange: f.unicodeRange } : {}) });
+    }
   }
   return [...groups.values()];
 }

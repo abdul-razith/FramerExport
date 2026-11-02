@@ -33,7 +33,12 @@ export interface PageInfo {
 export interface Tokens {
   colors: Record<string, string>;
   tokenMap: Record<string, string>;
-  fonts: Array<{ family: string; files: string[]; weight: string; style: string }>;
+  fonts: Array<{
+    family: string;
+    weight: string;
+    style: string;
+    files: Array<{ path: string; unicodeRange?: string }>;
+  }>;
   typeScale: Array<{ name: string; size: string; lineHeight: string; letterSpacing: string }>;
   breakpoints: { md: 810; lg: 1200 };
 }
