@@ -48,7 +48,7 @@ export function pairByName(
   return out;
 }
 
-function crop(src: PNG, box: { x: number; y: number; width: number; height: number }): PNG {
+export function crop(src: PNG, box: { x: number; y: number; width: number; height: number }): PNG {
   const x0 = Math.min(Math.max(0, Math.round(box.x)), src.width - 1);
   const y0 = Math.min(Math.max(0, Math.round(box.y)), src.height - 1);
   const w = Math.max(1, Math.min(Math.round(box.width), src.width - x0));
