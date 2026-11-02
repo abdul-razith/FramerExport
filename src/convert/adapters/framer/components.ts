@@ -11,6 +11,8 @@ interface Node {
   attrs: Record<string, string>;
   parent?: Node;
   size: number; // element count in subtree, including self
+  index: number; // 1-based position among sibling elements
+  kids: number;
 }
 
 const VOID = new Set(
@@ -20,6 +22,7 @@ const RAW = new Set(['script', 'style', 'textarea', 'title']);
 const TAG_RE = /<!--[\s\S]*?(?:-->|$)|<(\/?)([a-z][\w:-]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/gi;
 const ATTR_RE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 const COMPONENT_CLASS = /^framer-[A-Za-z0-9]{5}$/;
+const MAX_SLICE = 30 * 1024; // larger first instances are page sections, not components
 const VARIANT_RE = /^(?:Desktop|Tablet|Mobile|Variant \d+)$/;
 
 function decode(s: string): string {
@@ -35,6 +38,7 @@ function decode(s: string): string {
 function parseNodes(html: string): Node[] {
   const nodes: Node[] = [];
   const stack: Node[] = [];
+  let topLevel = 0;
   const close = (n: Node, end: number) => {
     n.end = end;
     if (n.parent) n.parent.size += n.size;
@@ -64,8 +68,11 @@ function parseNodes(html: string): Node[] {
       id: attrs.id,
       attrs,
       parent: stack[stack.length - 1],
-      size: 1
+      size: 1,
+      index: 0,
+      kids: 0
     };
+    node.index = node.parent ? ++node.parent.kids : ++topLevel;
     nodes.push(node);
     if (RAW.has(tag)) {
       const closing = new RegExp(`</${tag}\\s*>`, 'gi');
@@ -109,6 +116,41 @@ function selectorFor(n: Node): string {
   const cls = n.classes.filter((c) => /^framer-/.test(c)).map((c) => '.' + c);
   const name = n.name !== undefined ? `[data-framer-name="${cssAttr(n.name)}"]` : '';
   return (cls.length || name ? '' : n.tag) + cls.join('') + name;
+}
+
+const VARIANT_WORDS = new Set('desktop tablet mobile variant default active inactive current hover pressed'.split(' '));
+const GENERIC_WORDS = new Set([
+  ...VARIANT_WORDS,
+  ...'name number component frame content text image container wrapper stack'.split(' ')
+]);
+
+const wordsOf = (name: string) => name.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+
+/** PascalCase of a data-framer-name unless it is only a variant/state/generic label. */
+function meaningfulName(n?: Node): string {
+  if (n?.name === undefined) return '';
+  const w = wordsOf(n.name);
+  return w.length && !w.every((x) => GENERIC_WORDS.has(x)) ? pascal(n.name) : '';
+}
+
+function nameFor(root: Node, nodes: Node[]): string {
+  for (let a: Node | undefined = root; a && a.id !== 'main'; a = a.parent) {
+    const m = meaningfulName(a);
+    if (m) return m;
+  }
+  for (const d of nodes) if (d.start > root.start && d.start < root.end && meaningfulName(d)) return meaningfulName(d);
+  return '';
+}
+
+/** Selector for `n` that matches exactly one element of `nodes`: a compound, else an anchored child path. */
+function uniqueSelector(n: Node, nodes: Node[]): string {
+  const compound = selectorFor(n);
+  if (nodes.filter((x) => matchesSelector(x, compound)).length === 1) return compound;
+  const path: string[] = [];
+  for (let a: Node | undefined = n; a; a = a.parent) {
+    path.unshift((a === n ? compound : a.tag) + `:nth-child(${a.index})`);
+  }
+  return path.join(' > ');
 }
 
 interface Group {
@@ -171,8 +213,12 @@ export function findComponents(pages: Array<{ route: string; html: string }>): C
   let counter = 0;
   for (const g of groups) {
     const first = g.instances[0]!.node;
+    if (first.end - first.start > MAX_SLICE) continue;
+    const firstPage = parsed[g.instances[0]!.page]!;
+    const selector = uniqueSelector(first, firstPage.nodes);
+    if (buildSlice(firstPage.html, selector).length > MAX_SLICE) continue;
     counter++;
-    const base = (first.name !== undefined ? pascal(first.name) : '') || `Component${counter}`;
+    const base = nameFor(first, firstPage.nodes) || `Component${counter}`;
     let name = base;
     for (let i = 2; used.has(name); i++) name = `${base}${i}`;
     used.add(name);
@@ -182,13 +228,14 @@ export function findComponents(pages: Array<{ route: string; html: string }>): C
       if (n?.name !== undefined && VARIANT_RE.test(n.name)) variants.add(n.name);
     };
     for (const { page, node } of g.instances) {
+      if (node.name !== undefined && wordsOf(node.name).every((w) => VARIANT_WORDS.has(w))) variants.add(node.name);
       for (let a: Node | undefined = node; a; a = a.parent) note(a);
       for (const d of parsed[page]!.nodes) if (d.start > node.start && d.start < node.end) note(d);
     }
 
     out.push({
       name,
-      selector: selectorFor(first),
+      selector,
       pages: [...new Set(g.instances.map((i) => pages[i.page]!.route))],
       variants: [...variants],
       slice: `.convert/analysis/slices/${name}.html`
@@ -218,6 +265,20 @@ function matchesCompound(n: Node, sel: string): boolean {
     }
   }
   return pos === sel.length && sel.length > 0;
+}
+
+/** Compound selectors, optionally `:nth-child(k)`, joined by ` > `; a multi-segment path is anchored at the top level. */
+function matchesSelector(n: Node, selector: string): boolean {
+  const segs = selector.trim().split(/\s>\s(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+  let cur: Node | undefined = n;
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (!cur) return false;
+    const m = /^(.*?)(?::nth-child\((\d+)\))?$/.exec(segs[i]!)!;
+    if (m[2] !== undefined && cur.index !== Number(m[2])) return false;
+    if (m[1] !== '' && !matchesCompound(cur, m[1]!)) return false;
+    cur = cur.parent;
+  }
+  return segs.length === 1 || cur === undefined;
 }
 
 interface CssRule {
@@ -261,10 +322,13 @@ function splitCss(css: string): CssRule[] {
   return rules;
 }
 
+// Framer's shared typography/image resets apply to every page; they are not part of a component's own CSS.
+const GLOBAL_CLASS = /^framer-(?:text|image|link-text|lib-.*)$/;
+
 function ruleMatches(prelude: string, classes: Set<string>): boolean {
   return prelude.split(',').some((sel) => {
     const used = [...sel.matchAll(/\.((?:\\.|[\w-])+)/g)].map((m) => m[1]!.replace(/\\(.)/g, '$1'));
-    return used.length > 0 && used.every((c) => classes.has(c));
+    return used.some((c) => !GLOBAL_CLASS.test(c)) && used.every((c) => classes.has(c));
   });
 }
 
@@ -287,7 +351,7 @@ function filterCss(css: string, classes: Set<string>): string {
 export function buildSlice(html: string, selector: string): string {
   const nodes = parseNodes(html);
   const sel = selector.trim();
-  const target = nodes.find((n) => matchesCompound(n, sel));
+  const target = nodes.find((n) => matchesSelector(n, sel));
   if (!target) return '';
   const fragment = html.slice(target.start, target.end);
   const classes = new Set<string>();
@@ -300,4 +364,9 @@ export function buildSlice(html: string, selector: string): string {
     if (kept) css.push(kept);
   }
   return `${fragment}\n<style>\n${css.join('\n')}\n</style>\n`;
+}
+
+/** Number of elements in `html` matched by `selector` (same selector dialect as buildSlice). */
+export function countMatches(html: string, selector: string): number {
+  return parseNodes(html).filter((n) => matchesSelector(n, selector.trim())).length;
 }
