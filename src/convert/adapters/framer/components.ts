@@ -370,3 +370,11 @@ export function buildSlice(html: string, selector: string): string {
 export function countMatches(html: string, selector: string): number {
   return parseNodes(html).filter((n) => matchesSelector(n, selector.trim())).length;
 }
+
+/** Direct element children of `#main` in document order: tag and `data-framer-name` of each. */
+export function mainChildren(html: string): Array<{ tag: string; name?: string }> {
+  const nodes = parseNodes(html);
+  const main = nodes.find((n) => n.id === 'main');
+  if (!main) return [];
+  return nodes.filter((n) => n.parent === main).map((n) => ({ tag: n.tag, name: n.name }));
+}
