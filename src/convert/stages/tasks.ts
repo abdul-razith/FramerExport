@@ -1,14 +1,14 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { StageContext } from '../adapters/types.js';
-import { countMatches, mainChildren } from '../adapters/framer/components.js';
+import { countMatches } from '../adapters/framer/components.js';
+import { pageSections } from '../adapters/framer/sections.js';
 import { saveState } from '../state.js';
 import type { AnimationEntry, ComponentInfo, PageInfo, TaskRecord } from '../types.js';
 import { SHARED_RULES, TEMPLATES, type TemplateName } from '../tasks/templates/index.js';
 
 const WIDTHS = [1440, 1000, 390];
 const BASE_CSS = '.convert/analysis/slices/_base.css';
-const NON_VISUAL = new Set(['style', 'script', 'link', 'meta', 'template', 'noscript']);
 
 export function renderTemplate(name: TemplateName, vars: Record<string, string>): string {
   const missing = new Set<string>();
@@ -59,15 +59,13 @@ function orderComponents(components: ComponentInfo[], slices: Map<string, string
   return [...components].sort((a, b) => weight.get(a.name)! - weight.get(b.name)! || byString(a.name, b.name));
 }
 
-/** Names of the rendered `#main > *` children: data-framer-name, else section-<1-based index>. */
+/** Ordered section names of a page (see pageSections). */
 async function sectionsFor(ctx: StageContext, page: PageInfo): Promise<string[]> {
   let html = '';
   try {
     html = await readFile(path.join(ctx.exportDir, page.sourceFile), 'utf8');
   } catch {}
-  return mainChildren(html)
-    .filter((k) => !NON_VISUAL.has(k.tag))
-    .map((k, i) => k.name?.trim() || `section-${i + 1}`);
+  return pageSections(html).map((s) => s.name);
 }
 
 export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {

@@ -121,7 +121,7 @@ test('component and page task content', async () => {
   for (const w of [1440, 1000, 390]) assert.match(dark, new RegExp(`\.convert/reference/components/DarkButton/${w}\.png`));
   assert.match(dark, /Tablet/);
   const home = await read(ctx, '.convert/tasks/101-page-home.md');
-  assert.match(home, /data-section="section-1"/);
+  assert.ok(home.includes('`Hero + About`: `data-section="Hero + About"`'));
   assert.match(home, /\.convert\/reference\/home\/1440\.png/);
   const blog = ctx.records.find((r) => r.route === '/blog/[slug]' && r.kind === 'page')!;
   const blogText = await read(ctx, blog.file);

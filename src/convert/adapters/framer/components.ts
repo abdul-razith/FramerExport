@@ -1,7 +1,7 @@
 import type { ComponentInfo } from '../../types.js';
 import { skeletonSignature } from './routes.js';
 
-interface Node {
+export interface Node {
   tag: string;
   start: number; // offset of '<'
   end: number; // offset after closing tag (or after open tag for void/unclosed)
@@ -35,7 +35,7 @@ function decode(s: string): string {
 }
 
 /** Tolerant tag-soup tree builder: enough structure for subtree ranges and selector matching. */
-function parseNodes(html: string): Node[] {
+export function parseNodes(html: string): Node[] {
   const nodes: Node[] = [];
   const stack: Node[] = [];
   let topLevel = 0;
@@ -369,12 +369,4 @@ export function buildSlice(html: string, selector: string): string {
 /** Number of elements in `html` matched by `selector` (same selector dialect as buildSlice). */
 export function countMatches(html: string, selector: string): number {
   return parseNodes(html).filter((n) => matchesSelector(n, selector.trim())).length;
-}
-
-/** Direct element children of `#main` in document order: tag and `data-framer-name` of each. */
-export function mainChildren(html: string): Array<{ tag: string; name?: string }> {
-  const nodes = parseNodes(html);
-  const main = nodes.find((n) => n.id === 'main');
-  if (!main) return [];
-  return nodes.filter((n) => n.parent === main).map((n) => ({ tag: n.tag, name: n.name }));
 }
