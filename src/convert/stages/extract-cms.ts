@@ -391,6 +391,10 @@ function emitValue(v: unknown, indent: string): string {
 
 export async function runExtractCms(ctx: StageContext): Promise<void> {
   const warnings = ctx.state.warnings;
+  for (let i = warnings.length - 1; i >= 0; i--) {
+    if (warnings[i]!.startsWith('extract-cms:')) warnings.splice(i, 1);
+  }
+  const claimed = new Set<PageInfo>();
   const pagesFile = path.join(ctx.nextDir, '.convert', 'analysis', 'pages.json');
   let pages: PageInfo[] = [];
   try {
@@ -424,15 +428,24 @@ export async function runExtractCms(ctx: StageContext): Promise<void> {
   const collections = await loadCollections(ctx);
   for (const col of collections) {
     if (!col.items.length) continue;
+    for (const item of col.items) {
+      for (const [k, v] of Object.entries(item.fields)) {
+        if (v.type === 'date' && Number.isNaN(new Date(v.value).getTime())) {
+          delete item.fields[k];
+          warnings.push(`extract-cms: invalid date in field ${k} of item ${item.id}; omitted`);
+        }
+      }
+    }
 
     // link to a dynamic route
     let page: PageInfo | undefined;
     let slugField: string | null = null;
     for (const p of pages) {
-      if (!p.dynamic || p.dynamic.collection) continue;
+      if (!p.dynamic || claimed.has(p)) continue;
       const f = findSlugField(col.items, p.dynamic.slugs);
       if (f) {
         page = p;
+        claimed.add(p);
         slugField = f;
         break;
       }

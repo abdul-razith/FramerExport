@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, truncate } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
@@ -107,4 +107,47 @@ test('truncated chunks warn but never throw', async () => {
   const src = await readFile(path.join(ctx.nextDir, 'src', 'content', 'caseStudy.ts'), 'utf8');
   assert.match(src, /slug: "meridian-health"/);
   assert.equal(ctx.state.stages['extract-cms'], 'done');
+});
+
+test('re-running extract-cms is idempotent', async () => {
+  const ctx = await prepare();
+  await runExtractCms(ctx);
+  const dir = path.join(ctx.nextDir, 'src', 'content');
+  const snap = async () =>
+    Object.fromEntries(await Promise.all((await readdir(dir)).sort().map(async (f) => [f, await readFile(path.join(dir, f), 'utf8')])));
+  const first = await snap();
+  const warnCount = ctx.state.warnings.length;
+  await runExtractCms(ctx);
+  assert.deepEqual(await snap(), first);
+  assert.deepEqual(Object.keys(first), ['blog.ts', 'caseStudy.ts']);
+  assert.equal(ctx.state.warnings.length, warnCount);
+});
+
+test('invalid date values are omitted with a warning, not thrown', async () => {
+  const exportDir = await mkdtemp(path.join(os.tmpdir(), 'fexport cms bad date '));
+  tmps.push(exportDir);
+  await mkdir(path.join(exportDir, 'data'), { recursive: true });
+  const str = (s: string) => {
+    const b = Buffer.from(s);
+    const l = Buffer.alloc(4);
+    l.writeUInt32BE(b.length);
+    return Buffer.concat([l, b]);
+  };
+  const date = Buffer.alloc(8);
+  date.writeBigUInt64BE(BigInt(8.64e15) + 1n);
+  const buf = Buffer.concat([
+    Buffer.from([0, 3]),
+    str('id'), Buffer.from([0x0c]), str('a1'),
+    str('name'), Buffer.from([0x0c]), str('Hello'),
+    str('when'), Buffer.from([0x04]), date,
+  ]);
+  await writeFile(path.join(exportDir, 'data', 'zzCol-chunk-default-0.framercms'), buf);
+  const nextDir = await mkdtemp(path.join(os.tmpdir(), 'fexport cms '));
+  tmps.push(nextDir);
+  const ctx = { state: initState(exportDir, nextDir), exportDir, nextDir, log: () => {} };
+  await runExtractCms(ctx);
+  const src = await readFile(path.join(nextDir, 'src', 'content', 'zzCol.ts'), 'utf8');
+  assert.match(src, /name: "Hello"/);
+  assert.doesNotMatch(src, /when/);
+  assert.ok(ctx.state.warnings.some((w) => /invalid date/.test(w)));
 });
