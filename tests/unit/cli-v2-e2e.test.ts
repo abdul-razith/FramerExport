@@ -16,9 +16,10 @@ test('parseCliV2Args recognizes flags like --subpages, --provider, -h, --help', 
   assert.equal(parsed.url, 'https://test.com');
 });
 
-test('showCliV2Help returns comprehensive usage text', () => {
+test('showCliV2Help returns comprehensive usage text with AI conversion option', () => {
   const help = showCliV2Help();
   assert.ok(help.includes('fexport-v2'));
   assert.ok(help.includes('USAGE'));
   assert.ok(help.includes('OPTIONS'));
+  assert.ok(help.includes('AI Conversion Prompt'));
 });

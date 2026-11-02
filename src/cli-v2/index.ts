@@ -4,7 +4,7 @@ import { runScreenProvider } from './screens/provider.js';
 import { runScreenDetails, deriveInitialOutDir } from './screens/details.js';
 import { runScreenOptions } from './screens/options.js';
 import { runScreenExport } from './screens/export.js';
-import { runScreenConvert } from './screens/convert.js';
+import { runAiPromptAssistant } from '../ai/prompt-assistant.js';
 import { uiIntro, uiOutro, uiCancelAndExit } from './ui/prompts.js';
 
 export interface CliV2ParsedArgs {
@@ -50,7 +50,7 @@ export function parseCliV2Args(args: string[]): CliV2ParsedArgs {
 
 export function showCliV2Help(): string {
   return `
-  fexport-v2 - Modern Interactive Website Exporter & Tech-Stack Rebuilder
+  fexport-v2 - Modern Interactive Website Exporter
 
   USAGE
     $ fexport-v2 [url] [output-dir] [options]
@@ -61,10 +61,7 @@ export function showCliV2Help(): string {
     2. Enter Website URL & Destination Directory
     3. Choose Options (JS formatting, sub-pages crawl, concurrency)
     4. Review & Live Export (Asset download with real-time spinner)
-    5. Tech Stack & Superpowers Conversion (React, Next.js, Vue, SvelteKit, Astro)
-       + Tool PATH detection (Claude Code, Codex, AGY)
-       + Automated scaffolding & prompt generation
-       + Spawns agent in a separate terminal window
+    5. Optional AI Conversion Prompt (Generate prompt brief for React, Next.js, Vue, SvelteKit, Astro)
 
   OPTIONS
     --subpages             Crawl and export internal sub-pages
@@ -119,10 +116,10 @@ export async function runCliV2Workflow(argv: string[] = process.argv.slice(2)): 
       options,
     });
 
-    // Step 5: Tech Stack & Superpowers Conversion
-    await runScreenConvert(exportSummary);
+    // Step 5: Optional AI conversion prompt assistant (same as direct CLI export command)
+    await runAiPromptAssistant(exportSummary.exporter);
 
-    uiOutro('All operations completed successfully! Enjoy your new project.');
+    uiOutro(`Export completed successfully in ${exportSummary.outDir}!`);
   } catch (err) {
     if ((err as Error).name === 'ExitPromptError' || (err as Error).message?.includes('cancelled')) {
       uiCancelAndExit();

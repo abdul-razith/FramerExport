@@ -20,6 +20,7 @@ export interface ExportSummary {
   assetCount: number;
   subpageCount: number;
   counts: Record<string, number>;
+  exporter: FramerExporter;
 }
 
 export async function countDirItems(dirPath: string): Promise<number> {
@@ -95,5 +96,6 @@ export async function runScreenExport(config: ExportRunConfig): Promise<ExportSu
     assetCount: exporter.assets.entries.size,
     subpageCount: exporter.subpages.size,
     counts,
+    exporter,
   };
 }
