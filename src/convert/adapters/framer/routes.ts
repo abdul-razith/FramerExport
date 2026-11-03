@@ -41,18 +41,64 @@ export function skeletonSignature(fragmentHtml: string): string {
   return createHash('sha1').update(skeleton.join('|')).digest('hex');
 }
 
-/** Hash of the tag / data-framer-name skeleton of #main. */
-export function structureSignature(html: string): string {
+/** Fragment of `html` starting at the #main element (the whole document when there is none). */
+function mainFragment(html: string): string {
   let start = -1;
   rewriteHtmlTags(html, (tag) => {
     if (start < 0 && /\sid\s*=\s*["']?main["'\s>]/i.test(tag)) start = html.indexOf(tag);
     return tag;
   });
-  return skeletonSignature(start < 0 ? html : html.slice(start));
+  return start < 0 ? html : html.slice(start);
 }
 
+/** Hash of the tag / data-framer-name skeleton of #main. */
+export function structureSignature(html: string): string {
+  return skeletonSignature(mainFragment(html));
+}
+
+/**
+ * The named Framer layers (`tag[data-framer-name]`) of #main. Names of component variant roots
+ * (`framer-v-*`) are left out: CMS fields pick the variant, so detail pages of one collection differ there.
+ */
+export function namedLayers(html: string): string[] {
+  const layers: string[] = [];
+  rewriteHtmlTags(
+    mainFragment(html),
+    (tag, name) => {
+      const fn = attr(tag, 'data-framer-name');
+      if (fn !== undefined && !/(^|\s)framer-v-/.test(attr(tag, 'class') ?? '')) layers.push(`${name}[${fn}]`);
+      return tag;
+    },
+    (body) => body
+  );
+  return layers;
+}
+
+/** Dice similarity of two layer multisets: 1 = same layers, 0 = nothing shared. */
+export function templateSimilarity(a: string[], b: string[]): number {
+  if (!a.length && !b.length) return 1;
+  const counts = new Map<string, number>();
+  for (const x of a) counts.set(x, (counts.get(x) ?? 0) + 1);
+  let shared = 0;
+  for (const x of b) {
+    const n = counts.get(x) ?? 0;
+    if (n > 0) {
+      shared++;
+      counts.set(x, n - 1);
+    }
+  }
+  return (2 * shared) / (a.length + b.length);
+}
+
+/**
+ * Sibling pages at or above this similarity share a template. CMS detail pages differ in rich text,
+ * variants and conditional sections (nudge's last case study lacks "Next Case Study" and scores 0.87
+ * against the others), while different templates score lower (nudge's blog listing vs a post: 0.82).
+ */
+const SAME_TEMPLATE = 0.85;
+
 interface Parsed extends PageInfo {
-  signature: string;
+  layers: string[];
 }
 
 function parsePage(html: string, route: string, sourceFile: string): Parsed {
@@ -73,7 +119,7 @@ function parsePage(html: string, route: string, sourceFile: string): Parsed {
       return body;
     }
   );
-  return { route, sourceFile, title, meta, signature: structureSignature(html) };
+  return { route, sourceFile, title, meta, layers: namedLayers(html) };
 }
 
 export async function derivePages(exportDir: string): Promise<PageInfo[]> {
@@ -90,19 +136,25 @@ export async function derivePages(exportDir: string): Promise<PageInfo[]> {
   }
 
   const routes = new Set(parsed.map((p) => p.route));
-  const groups = new Map<string, Parsed[]>();
+  // Cluster sibling pages (same parent route) by template similarity to each cluster's first member.
+  const groups: Array<{ parent: string; members: Parsed[] }> = [];
   for (const p of parsed) {
     const segs = p.route.split('/').filter(Boolean);
     if (segs.length < 2) continue;
-    const key = `${segs.slice(0, -1).join('/')}\u0000${p.signature}`;
-    (groups.get(key) ?? groups.set(key, []).get(key)!).push(p);
+    const parent = segs.slice(0, -1).join('/');
+    const g = groups.find(
+      (c) => c.parent === parent && templateSimilarity(c.members[0]!.layers, p.layers) >= SAME_TEMPLATE
+    );
+    if (g) g.members.push(p);
+    else groups.push({ parent, members: [p] });
   }
+  // The largest cluster under a parent claims `/<parent>/[slug]`; the stable sort keeps file order on ties.
+  groups.sort((x, y) => y.members.length - x.members.length);
 
   const grouped = new Set<Parsed>();
   const dynamic = new Map<Parsed, PageInfo>();
   const usedDynamicRoutes = new Set<string>();
-  for (const [key, members] of groups) {
-    const parent = key.split('\u0000')[0]!;
+  for (const { parent, members } of groups) {
     if (members.length < 2 && !routes.has('/' + parent)) continue;
     const route = `/${parent}/[slug]`;
     if (usedDynamicRoutes.has(route)) continue;
@@ -127,7 +179,7 @@ export async function derivePages(exportDir: string): Promise<PageInfo[]> {
     const dyn = dynamic.get(p);
     if (dyn) pages.push(dyn);
     else if (!grouped.has(p)) {
-      const { signature: _sig, ...info } = p;
+      const { layers: _layers, ...info } = p;
       pages.push(info);
     }
   }
