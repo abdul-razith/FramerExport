@@ -3,6 +3,7 @@ export type StackPackage =
   | 'react'
   | 'react-dom'
   | 'typescript'
+  | '@typescript/typescript6'
   | 'tailwindcss'
   | '@tailwindcss/postcss'
   | 'framer-motion'
@@ -21,6 +22,8 @@ export const STACK_VERSIONS: Record<StackPackage, string> = {
   react: '19.3.1',
   'react-dom': '19.3.1',
   typescript: '7.0.2',
+  /** Installed under the `typescript` name: typescript-eslint (via eslint-config-next) refuses TS 7. */
+  '@typescript/typescript6': '6.0.2',
   tailwindcss: '4.3.3',
   '@tailwindcss/postcss': '4.3.3',
   'framer-motion': '14.9.0',

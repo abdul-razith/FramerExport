@@ -48,7 +48,7 @@ const read = (ctx: { nextDir: string }, rel: string) => readFile(path.join(ctx.n
 
 test('STACK_VERSIONS are exact semver', () => {
   for (const [k, v] of Object.entries(STACK_VERSIONS)) assert.match(v, /^\d+\.\d+\.\d+$/, k);
-  assert.equal(Object.keys(STACK_VERSIONS).length, 15);
+  assert.equal(Object.keys(STACK_VERSIONS).length, 16);
 });
 
 test('fixture: globals.css, dynamic page, fonts, state', async () => {
@@ -148,4 +148,22 @@ test('edited files are skipped unless confirmOverwrite approves', async () => {
   const r2 = await runScaffold(ctx, { confirmOverwrite: async () => true });
   assert.ok(r2.written.includes('src/app/layout.tsx'));
   assert.match(await readFile(layout, 'utf8'), /LenisProvider/);
+});
+
+test('package.json installs TS 6 under the typescript name for typescript-eslint, TS 7 as @typescript/native', async () => {
+  // typescript-eslint (pulled in by eslint-config-next) throws "does not support TS 7.0" when `typescript` is TS 7.
+  const ctx = await ran();
+  const pkg = JSON.parse(await read(ctx, 'package.json')) as { devDependencies: Record<string, string> };
+  assert.equal(pkg.devDependencies.typescript, `npm:@typescript/typescript6@${STACK_VERSIONS['@typescript/typescript6']}`);
+  assert.equal(pkg.devDependencies['@typescript/native'], `npm:typescript@${STACK_VERSIONS.typescript}`);
+  assert.match(STACK_VERSIONS['@typescript/typescript6'], /^6\./);
+});
+
+test('tsconfig matches what next build would rewrite it to', async () => {
+  // `next build` rewrites jsx to react-jsx and adds .next/dev/types, which would mark the file as user-edited.
+  const ctx = await ran();
+  const ts = JSON.parse(await read(ctx, 'tsconfig.json')) as { compilerOptions: { jsx: string }; include: string[] };
+  assert.equal(ts.compilerOptions.jsx, 'react-jsx');
+  assert.ok(ts.include.includes('.next/types/**/*.ts'));
+  assert.ok(ts.include.includes('.next/dev/types/**/*.ts'));
 });
