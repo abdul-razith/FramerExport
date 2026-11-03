@@ -129,6 +129,12 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args[0] === 'convert') {
+    const { runConvertCommand } = await import('../convert/index.js');
+    process.exitCode = await runConvertCommand(args.slice(1));
+    return;
+  }
+
   if (args.includes('--help') || args.includes('-h')) {
     showHelp();
     process.exit(0);

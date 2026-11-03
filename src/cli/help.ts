@@ -21,6 +21,13 @@ export function showHelp(): void {
     `    ${ui.primary('framer-export')} ${ui.success('ui')}   ${ui.muted('[--port <n>] [--no-open]')}`
   );
 
+  console.log(
+    `    ${ui.primary('fexport')} ${ui.success('convert')} ${ui.warning('<export-dir>')} ${ui.muted('[next-dir] [--yes]')}   ${ui.muted('Framer export to Next.js (beta)')}`
+  );
+  console.log(
+    `    ${ui.primary('fexport')} ${ui.success('convert')} ${ui.muted('status | next | verify [target]')}`
+  );
+
   console.log('');
   console.log(ui.text.bold('  OPTIONS\n'));
 

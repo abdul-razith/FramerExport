@@ -5,7 +5,7 @@ import { runScreenDetails, deriveInitialOutDir } from './screens/details.js';
 import { runScreenOptions } from './screens/options.js';
 import { runScreenExport } from './screens/export.js';
 import { runAiPromptAssistant } from '../ai/prompt-assistant.js';
-import { uiIntro, uiOutro, uiCancelAndExit } from './ui/prompts.js';
+import { uiIntro, uiOutro, uiCancelAndExit, uiConfirm } from './ui/prompts.js';
 
 export interface CliV2ParsedArgs {
   url?: string;
@@ -119,6 +119,13 @@ export async function runCliV2Workflow(argv: string[] = process.argv.slice(2)): 
     // Step 5: Optional AI conversion prompt assistant (same as direct CLI export command)
     await runAiPromptAssistant(exportSummary.exporter);
 
+    // Step 6: Offer Framer -> Next.js conversion (interactive terminals only)
+    try {
+      await offerConversion(exportSummary.outDir);
+    } catch (error) {
+      console.error(`Conversion failed: ${(error as Error).message}`);
+    }
+
     uiOutro(`Export completed successfully in ${exportSummary.outDir}!`);
   } catch (err) {
     if ((err as Error).name === 'ExitPromptError' || (err as Error).message?.includes('cancelled')) {
@@ -132,4 +139,23 @@ export async function runCliV2Workflow(argv: string[] = process.argv.slice(2)): 
 // Auto-run if executed directly
 if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/cli-v2/index.ts')) {
   void runCliV2Workflow();
+}
+
+async function offerConversion(exportDir: string): Promise<void> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  try {
+    const { readFile } = await import('node:fs/promises');
+    const report = JSON.parse(await readFile(path.join(exportDir, 'export-report.json'), 'utf8')) as {
+      platform?: string;
+    };
+    if (report.platform !== 'framer') return;
+  } catch {
+    return;
+  }
+  if (!(await uiConfirm('Convert to a Next.js project now?'))) return;
+  const { runPipeline } = await import('../convert/pipeline.js');
+  await runPipeline(exportDir, exportDir + '-next', {
+    confirm: (msg) => uiConfirm(msg, false),
+    log: (msg) => console.log(msg),
+  });
 }

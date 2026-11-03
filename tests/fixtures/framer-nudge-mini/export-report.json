@@ -1,0 +1,13 @@
+{
+  "source": "https://nudge-folio.framer.website/",
+  "platform": "framer",
+  "captureMode": "html-with-runtime",
+  "generatedAt": "2026-11-02T16:00:10.658Z",
+  "assets": 329,
+  "failedAssets": [],
+  "subpages": 18,
+  "visualValidation": "not-run",
+  "limitations": [
+    "Server-side accounts, payments, search and form processing are not exported."
+  ]
+}

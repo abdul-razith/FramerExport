@@ -190,6 +190,24 @@ The site has to be served over HTTP because module scripts do not load from `fil
 
 Every run writes `export.log` with untruncated messages from its retained log history. The terminal wizard's log viewer and the web interface offer clipboard copying, which is handy when reporting a problem or passing context to another tool.
 
+## Convert to Next.js (beta)
+
+Full step-by-step guide: [CONVERT_GUIDE.md](CONVERT_GUIDE.md).
+
+`fexport convert` turns a Framer export into a Next.js (App Router, Tailwind) project. Code stages analyse the export, extract CMS data, scaffold the project and write one task file per component, page and motion into `.convert/tasks/`. You then hand those tasks to an AI coding agent (Claude Code, Antigravity, ...), and `verify` compares the result with the original and writes fix tasks for anything that differs.
+
+```
+fexport convert <export-dir> [next-dir] [--yes]   run the code stages (next-dir defaults to <export-dir>-next)
+fexport convert status                            stages, task counts, warnings, motion checklist
+fexport convert next                              the next task to give to your agent
+fexport convert verify [target]                   build, diff against the export, write fix tasks
+fexport convert done <taskId>                     mark a motion task done after ticking its checklist
+```
+
+The loop: run `convert`, then `npm install` inside the generated project (the converter never installs packages itself, and `verify` refuses to run until `node_modules` exists), work through `fexport convert next` in your agent, run `fexport convert verify`, repeat with the generated `fix-*` tasks until nothing fails. Generated task files call the CLI as `npx -p framer-export fexport convert ...`, so `npx` always resolves this package. The v2 wizard also offers conversion after a Framer export.
+
+Limitations: Framer exports only; animations are detected and listed but must be checked by hand.
+
 ## The AI conversion assistant
 
 After a direct-command or legacy terminal export you can generate a conversion brief for an AI coding agent. Pick a target stack (React with Vite, Next.js, Vue, SvelteKit or Astro), pick the tool you use (Claude Code, Codex, OpenCode or another agent), pick a goal (clean rebuild, pixel-perfect migration, component system, or performance and SEO), and it writes a detailed prompt file into `ai/` inside the export. The prompt references the real files and counts from your export, so the agent starts from facts instead of guesses. The modern wizard finishes in its log viewer.
