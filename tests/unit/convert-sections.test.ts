@@ -2,17 +2,29 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { parseNodes } from '../../src/convert/adapters/framer/components.js';
+import { STABLE_OF } from '../../src/convert/adapters/framer/selectors.js';
 import { pageSections } from '../../src/convert/adapters/framer/sections.js';
 
 const home = readFileSync('tests/fixtures/framer-nudge-mini/index.html', 'utf8');
 
-/** Resolve a `#main > tag:nth-child(n) > ...` path; returns every matching node (should be one). */
+const NON_VISUAL = ['script', 'style', 'link', 'meta', 'template', 'noscript'];
+
+/**
+ * Resolve a `#main > tag:nth-child(k of :not(script, style, ...)) > ...` path, counting k independently of
+ * the parser's indices; returns every matching node (should be one).
+ */
 function resolve(html: string, selector: string) {
   const nodes = parseNodes(html);
   let level = nodes.filter((n) => n.id === 'main');
   for (const seg of selector.split(' > ').slice(1)) {
-    const m = /^([a-z0-9]+):nth-child\((\d+)\)$/.exec(seg)!;
-    level = nodes.filter((n) => n.parent && level.includes(n.parent) && n.tag === m[1] && n.index === Number(m[2]));
+    const m = /^([a-z0-9]+):nth-child\((\d+) of (.+)\)$/.exec(seg);
+    assert.ok(m, `segment uses the stable of-form: ${seg}`);
+    assert.equal(m[3], STABLE_OF);
+    level = nodes.filter((n) => {
+      if (!n.parent || !level.includes(n.parent) || n.tag !== m[1]) return false;
+      const visual = nodes.filter((s) => s.parent === n.parent && !NON_VISUAL.includes(s.tag));
+      return visual.indexOf(n) + 1 === Number(m[2]);
+    });
   }
   return level;
 }
@@ -37,7 +49,10 @@ test('synthetic: descend, expand, fallback, dedupe', () => {
   </div></div></div></div>`;
   const s = pageSections(html);
   assert.deepEqual(s.map((x) => x.name), ['A', 'A-2', 'section-3', 'Named', 'section-5']);
-  assert.match(s[0]!.selector, /^#main > div:nth-child\(2\) > div:nth-child\(1\) > div:nth-child\(1\) > div:nth-child\(1\) > div:nth-child\(1\)$/);
+  const k = (n: number) => `div:nth-child(${n} of ${STABLE_OF})`;
+  // The leading <style> of #main is not counted: hydration removes it.
+  assert.equal(s[0]!.selector, ['#main', k(1), k(1), k(1), k(1), k(1)].join(' > '));
+  assert.equal(s[3]!.selector, ['#main', k(1), k(1), k(1), k(3)].join(' > '));
   for (const x of s) assert.equal(resolve(html, x.selector).length, 1);
   assert.deepEqual(pageSections('<div></div>'), []);
 });

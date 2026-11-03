@@ -98,6 +98,13 @@ async function exists(file: string): Promise<boolean> {
 }
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+/**
+ * Cache key of `.convert/reference/<slug>/sections.json`: the export page plus every section's name and
+ * selector, so a change in how selectors are built invalidates references captured with the old ones.
+ */
+export function referenceKey(html: string, sections: Array<{ name: string; selector: string }>): string {
+  return sha256(html + '\u0000' + JSON.stringify(sections.map((s) => [s.name, s.selector])));
+}
 const code = (s: string): string => `\`${s}\``;
 const bullets = (items: string[]): string => items.map((i) => `- ${i}`).join('\n');
 const fileSafe = (s: string): string => s.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
@@ -351,7 +358,7 @@ export async function runVerify(
         const pageComponents = components.filter((c) => c.pages.includes(job.route));
         const refRouteDir = path.join(refDir, job.slug);
         const refJsonFile = path.join(refRouteDir, 'sections.json');
-        const refKey = sha256(html + '\u0000' + JSON.stringify(sections.map((s) => s.name)));
+        const refKey = referenceKey(html, sections);
         const cache = await readReference(refJsonFile, refKey, warn);
 
         for (const width of VERIFY_WIDTHS) {

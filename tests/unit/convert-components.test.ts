@@ -102,3 +102,22 @@ test('a root with no meaningful ancestor is named after a descendant', () => {
 test('buildSlice returns empty string when selector matches nothing', () => {
   assert.equal(buildSlice('<div></div>', '.nope'), '');
 });
+
+test('nth-child fallback selectors use the hydration-stable of-form', () => {
+  const OF = ':not(script, style, link, meta, template, noscript)';
+  // Two identical instances: the compound is not unique, so the anchored path fallback is used.
+  const html = synth(
+    '<style></style><section><script></script><div class="framer-AbCd1"><p>Hi</p></div></section>' +
+      '<section><div class="framer-AbCd1"><p>Hi</p></div></section>'
+  );
+  const [c] = findComponents([{ route: '/', html }]);
+  assert.ok(c);
+  assert.ok(!/nth-child\(\d+\)/.test(c.selector), c.selector);
+  assert.ok(c.selector.endsWith(`section:nth-child(1 of ${OF}) > .framer-AbCd1:nth-child(1 of ${OF})`), c.selector);
+  assert.equal(countMatches(html, c.selector), 1);
+  assert.ok(buildSlice(html, c.selector).includes('<p>Hi</p>'));
+  // countMatches understands the of-form and does not count non-visual siblings.
+  assert.equal(countMatches('<div><style></style><p></p></div>', `div > p:nth-child(1 of ${OF})`), 1);
+  assert.equal(countMatches('<div><style></style><p></p></div>', `div > p:nth-child(2 of ${OF})`), 0);
+  assert.equal(countMatches('<div><style></style><p></p></div>', 'div > p:nth-child(2)'), 1);
+});

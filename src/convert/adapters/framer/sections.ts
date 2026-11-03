@@ -1,10 +1,9 @@
 import { parseNodes, type Node } from './components.js';
-
-const NON_VISUAL = new Set(['style', 'script', 'link', 'meta', 'template', 'noscript']);
+import { NON_VISUAL, stablePathFromMain } from './selectors.js';
 
 export interface PageSection {
   name: string;
-  /** Unique `:nth-child()` path from `#main`. */
+  /** Unique hydration-stable `:nth-child(k of :not(script, style, ...))` path from `#main`. */
   selector: string;
 }
 
@@ -34,17 +33,11 @@ export function pageSections(html: string): PageSection[] {
       return !c.name && sub.length >= 2 && sub.some((s) => s.name) ? expand(sub) : [c];
     });
 
-  const selectorOf = (n: Node): string => {
-    const parts: string[] = [];
-    for (let c: Node | undefined = n; c && c !== main; c = c.parent) parts.unshift(`${c.tag}:nth-child(${c.index})`);
-    return ['#main', ...parts].join(' > ');
-  };
-
   const used = new Map<string, number>();
   return expand(children(current)).map((n, i) => {
     const base = n.name?.trim() || `section-${i + 1}`;
     const seen = (used.get(base) ?? 0) + 1;
     used.set(base, seen);
-    return { name: seen === 1 ? base : `${base}-${seen}`, selector: selectorOf(n) };
+    return { name: seen === 1 ? base : `${base}-${seen}`, selector: stablePathFromMain(n, main) };
   });
 }

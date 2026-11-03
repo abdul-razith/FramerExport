@@ -1,5 +1,6 @@
 import type { ComponentInfo } from '../../types.js';
 import { skeletonSignature } from './routes.js';
+import { NON_VISUAL, STABLE_OF, stableNthChild } from './selectors.js';
 
 export interface Node {
   tag: string;
@@ -12,7 +13,9 @@ export interface Node {
   parent?: Node;
   size: number; // element count in subtree, including self
   index: number; // 1-based position among sibling elements
+  visualIndex: number; // 1-based position among non-NON_VISUAL sibling elements (0 for a non-visual node)
   kids: number;
+  visualKids: number;
 }
 
 const VOID = new Set(
@@ -39,6 +42,7 @@ export function parseNodes(html: string): Node[] {
   const nodes: Node[] = [];
   const stack: Node[] = [];
   let topLevel = 0;
+  let topVisual = 0;
   const close = (n: Node, end: number) => {
     n.end = end;
     if (n.parent) n.parent.size += n.size;
@@ -70,9 +74,12 @@ export function parseNodes(html: string): Node[] {
       parent: stack[stack.length - 1],
       size: 1,
       index: 0,
-      kids: 0
+      visualIndex: 0,
+      kids: 0,
+      visualKids: 0
     };
     node.index = node.parent ? ++node.parent.kids : ++topLevel;
+    if (!NON_VISUAL.has(tag)) node.visualIndex = node.parent ? ++node.parent.visualKids : ++topVisual;
     nodes.push(node);
     if (RAW.has(tag)) {
       const closing = new RegExp(`</${tag}\\s*>`, 'gi');
@@ -148,7 +155,7 @@ function uniqueSelector(n: Node, nodes: Node[]): string {
   if (nodes.filter((x) => matchesSelector(x, compound)).length === 1) return compound;
   const path: string[] = [];
   for (let a: Node | undefined = n; a; a = a.parent) {
-    path.unshift((a === n ? compound : a.tag) + `:nth-child(${a.index})`);
+    path.unshift(stableNthChild(a, a === n ? compound : a.tag));
   }
   return path.join(' > ');
 }
@@ -267,14 +274,22 @@ function matchesCompound(n: Node, sel: string): boolean {
   return pos === sel.length && sel.length > 0;
 }
 
-/** Compound selectors, optionally `:nth-child(k)`, joined by ` > `; a multi-segment path is anchored at the top level. */
+const norm = (s: string) => s.replace(/\s+/g, ' ').replace(/\s*([(),])\s*/g, '$1');
+const STABLE_OF_NORM = norm(STABLE_OF);
+
+/**
+ * Compound selectors, optionally `:nth-child(k)` or the stable `:nth-child(k of :not(script, style, ...))`,
+ * joined by ` > `; a multi-segment path is anchored at the top level. Any other `of S` filter never matches.
+ */
 function matchesSelector(n: Node, selector: string): boolean {
   const segs = selector.trim().split(/\s>\s(?=(?:[^"]*"[^"]*")*[^"]*$)/);
   let cur: Node | undefined = n;
   for (let i = segs.length - 1; i >= 0; i--) {
     if (!cur) return false;
-    const m = /^(.*?)(?::nth-child\((\d+)\))?$/.exec(segs[i]!)!;
-    if (m[2] !== undefined && cur.index !== Number(m[2])) return false;
+    const m = /^(.*?)(?::nth-child\(\s*(\d+)(?:\s+of\s+(.+?))?\s*\))?$/.exec(segs[i]!)!;
+    if (m[3] !== undefined) {
+      if (norm(m[3]) !== STABLE_OF_NORM || cur.visualIndex !== Number(m[2])) return false;
+    } else if (m[2] !== undefined && cur.index !== Number(m[2])) return false;
     if (m[1] !== '' && !matchesCompound(cur, m[1]!)) return false;
     cur = cur.parent;
   }
