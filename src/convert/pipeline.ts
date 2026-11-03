@@ -7,6 +7,7 @@ import { runExtractCms } from './stages/extract-cms.js';
 import { runScaffold } from './stages/scaffold/index.js';
 import { runTasks } from './stages/tasks.js';
 import { initState, loadState, nextStage, saveState } from './state.js';
+import { CLI_INVOCATION } from './tasks/templates/index.js';
 import type { AnimationEntry, ConvertState, TaskRecord } from './types.js';
 
 export interface ConvertIo {
@@ -57,7 +58,17 @@ export async function runPipeline(exportDir: string, nextDir: string, io: Conver
     await saveState(state);
   }
   const first = pickNextTask(state);
-  if (first) io.log(`Next task: ${path.join(nextDir, first.file)}`);
+  if (first) {
+    io.log(
+      [
+        '',
+        'Next steps:',
+        `  1. Install dependencies: cd "${nextDir}" && npm install`,
+        `  2. Give your AI coding agent the first task: ${path.join(nextDir, first.file)}`,
+        `  3. Then verify it: ${CLI_INVOCATION} verify ${first.id}`,
+      ].join('\n')
+    );
+  }
   return state;
 }
 

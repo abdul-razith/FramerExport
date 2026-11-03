@@ -201,7 +201,7 @@ fexport convert next                              the next task to give to your 
 fexport convert verify [target]                   build, diff against the export, write fix tasks
 ```
 
-The loop: run `convert`, work through `fexport convert next` in your agent, run `fexport convert verify`, repeat with the generated `fix-*` tasks until nothing fails. The v2 wizard also offers conversion after a Framer export.
+The loop: run `convert`, then `npm install` inside the generated project (the converter never installs packages itself, and `verify` refuses to run until `node_modules` exists), work through `fexport convert next` in your agent, run `fexport convert verify`, repeat with the generated `fix-*` tasks until nothing fails. Generated task files call the CLI as `npx -p framer-export fexport convert ...`, so `npx` always resolves this package. The v2 wizard also offers conversion after a Framer export.
 
 Limitations: Framer exports only; animations are detected and listed but must be checked by hand.
 

@@ -89,6 +89,7 @@ async function writeScripts(build: string, start = 'node start.mjs'): Promise<vo
 
 async function freshState(): Promise<ConvertState> {
   const state = initState(exportDir, nextDir);
+  Object.assign(state.stages, { analyze: 'done', 'extract-cms': 'done', scaffold: 'done', tasks: 'needs-ai' });
   state.tasks[PAGE_TASK] = {
     id: PAGE_TASK,
     kind: 'page',
@@ -124,6 +125,7 @@ before(async () => {
   await writeFile(path.join(nextDir, 'start.mjs'), START);
   await writeFile(path.join(nextDir, 'start-500.mjs'), START_500);
   await writeFile(path.join(nextDir, 'start-hang.mjs'), START_HANG);
+  await mkdir(path.join(nextDir, 'node_modules'), { recursive: true }); // verify requires installed dependencies
   await writeFile(path.join(nextDir, 'build.mjs'), `console.log('stand-in build ok');\n`);
   indexHtml = await readFile(path.join(fixture, 'index.html'), 'utf8');
   sections = framerAdapter.sections(indexHtml);
@@ -141,7 +143,7 @@ test('matching stand-in -> page task done, report lists every width passing', { 
   await writeStandInIndex();
   const state = await freshState();
   const t0 = Date.now();
-  const result = await runVerify(ctxFor(state), '/');
+  const result = await runVerify(ctxFor(state), framerAdapter, '/');
   console.log(`matching run: ${Date.now() - t0} ms`);
   const report = JSON.parse(await readFile(path.join(nextDir, '.convert', 'diffs', 'report.json'), 'utf8'));
   assert.deepEqual(result, { passed: [PAGE_TASK], failed: [] }, failureSummary(report));
@@ -168,7 +170,7 @@ test('corrupt sections.json -> warning, reference recaptured, run still passes',
   await writeStandInIndex();
   await writeFile(refFile('sections.json'), '{');
   const state = await freshState();
-  const result = await runVerify(ctxFor(state), '/');
+  const result = await runVerify(ctxFor(state), framerAdapter, '/');
   assert.deepEqual(result, { passed: [PAGE_TASK], failed: [] });
   assert.ok(state.warnings.some((w) => /^verify: corrupt reference cache/.test(w)), JSON.stringify(state.warnings));
   const cache = JSON.parse(await readFile(refFile('sections.json'), 'utf8'));
@@ -184,14 +186,14 @@ test('export page changed -> stale reference cache is recaptured under a new key
   const exportIndex = path.join(exportDir, 'index.html');
   await writeFile(exportIndex, (await readFile(exportIndex, 'utf8')).replace(/<\/body>/i, '<!-- edited export --></body>'));
   const state = await freshState();
-  const result = await runVerify(ctxFor(state), '/');
+  const result = await runVerify(ctxFor(state), framerAdapter, '/');
   assert.deepEqual(result, { passed: [PAGE_TASK], failed: [] });
   const after = JSON.parse(await readFile(refFile('sections.json'), 'utf8'));
   assert.notEqual(after.key, before.key);
   assert.ok((await stat(refFile('1440.png'))).mtimeMs > pngBefore);
   // An unchanged export reuses the cache: no recapture on the next run.
   const pngAfter = (await stat(refFile('1440.png'))).mtimeMs;
-  await runVerify(ctxFor(await freshState()), '/');
+  await runVerify(ctxFor(await freshState()), framerAdapter, '/');
   assert.equal((await stat(refFile('1440.png'))).mtimeMs, pngAfter);
 });
 
@@ -203,7 +205,7 @@ test('changed text -> fix tasks for attempts 1 and 2, then needs-human with no t
   const fix = (n: number) => path.join(nextDir, '.convert', 'tasks', `fix-${PAGE_TASK}-${n}.md`);
 
   const t0 = Date.now();
-  const first = await runVerify(ctxFor(state), '/');
+  const first = await runVerify(ctxFor(state), framerAdapter, '/');
   console.log(`failing run 1: ${Date.now() - t0} ms`);
   assert.deepEqual(first, { passed: [], failed: [PAGE_TASK] });
   assert.equal(state.tasks[PAGE_TASK]!.status, 'in-progress');
@@ -212,14 +214,15 @@ test('changed text -> fix tasks for attempts 1 and 2, then needs-human with no t
   assert.match(md, new RegExp(`Section \`${target.name.replace(/[+]/g, '\\+')}\``));
   assert.match(md, /text mismatch/);
   assert.match(md, /Verify changed text/);
-  assert.match(md, /npx fexport convert verify 101-page-home/);
+  assert.match(md, /npx -p framer-export fexport convert verify 101-page-home/);
+  assert.doesNotMatch(md, /npx fexport/);
   assert.equal(state.tasks[`fix-${PAGE_TASK}-1`]?.kind, 'fix');
   assert.deepEqual(state.tasks[`fix-${PAGE_TASK}-1`]?.targets, ['src/app/page.tsx']);
 
-  await runVerify(ctxFor(state), '/');
+  await runVerify(ctxFor(state), framerAdapter, '/');
   assert.equal(state.tasks[PAGE_TASK]!.status, 'in-progress');
   assert.ok(await exists(fix(2)));
-  await runVerify(ctxFor(state), PAGE_TASK);
+  await runVerify(ctxFor(state), framerAdapter, PAGE_TASK);
   console.log(`three failing runs: ${Date.now() - t0} ms`);
   assert.equal(state.tasks[PAGE_TASK]!.status, 'needs-human');
   assert.equal(await exists(fix(3)), false);
@@ -237,11 +240,11 @@ test('needs-human task: skipped by an untargeted run, re-verified and passed whe
   try {
     const state = await freshState();
     Object.assign(state.tasks[PAGE_TASK]!, { status: 'needs-human', attempts: 3 });
-    const untargeted = await runVerify(ctxFor(state), undefined);
+    const untargeted = await runVerify(ctxFor(state), framerAdapter, undefined);
     assert.deepEqual(untargeted, { passed: [], failed: [] });
     assert.equal(state.tasks[PAGE_TASK]!.status, 'needs-human');
     assert.equal(state.tasks[PAGE_TASK]!.attempts, 3);
-    const targeted = await runVerify(ctxFor(state), PAGE_TASK);
+    const targeted = await runVerify(ctxFor(state), framerAdapter, PAGE_TASK);
     const report = JSON.parse(await readFile(path.join(nextDir, '.convert', 'diffs', 'report.json'), 'utf8'));
     assert.deepEqual(targeted, { passed: [PAGE_TASK], failed: [] }, failureSummary(report));
     assert.equal(state.tasks[PAGE_TASK]!.status, 'done');
@@ -253,7 +256,7 @@ test('needs-human task: skipped by an untargeted run, re-verified and passed whe
 test('Next answers 500 -> page failure with an HTTP 500 fix task', { timeout: 600_000 }, async () => {
   await writeScripts('node build.mjs', 'node start-500.mjs');
   const state = await freshState();
-  const result = await runVerify(ctxFor(state), '/');
+  const result = await runVerify(ctxFor(state), framerAdapter, '/');
   assert.deepEqual(result, { passed: [], failed: [PAGE_TASK] });
   assert.equal(state.tasks[PAGE_TASK]!.status, 'in-progress');
   const md = await readFile(path.join(nextDir, '.convert', 'tasks', `fix-${PAGE_TASK}-1.md`), 'utf8');
@@ -267,7 +270,7 @@ test('Next page hangs -> navigation timeout is an infrastructure error, no attem
   await writeScripts('node build.mjs', 'node start-hang.mjs');
   await rm(path.join(nextDir, '.convert', 'tasks'), { recursive: true, force: true });
   const state = await freshState();
-  const result = await runVerify(ctxFor(state), '/', { navigationTimeoutMs: 3000 });
+  const result = await runVerify(ctxFor(state), framerAdapter, '/', { navigationTimeoutMs: 3000 });
   assert.deepEqual(result, { passed: [], failed: [] });
   assert.equal(state.tasks[PAGE_TASK]!.status, 'pending');
   assert.equal(state.tasks[PAGE_TASK]!.attempts, 0);
@@ -284,19 +287,22 @@ test('failing build x3 -> fix-build-1 and -2, then no third fix and stage failed
   await writeScripts('node build-fail.mjs');
   const state = await freshState();
   const fixBuild = (n: number) => path.join(nextDir, '.convert', 'tasks', `fix-build-${n}.md`);
-  const result = await runVerify(ctxFor(state), undefined);
+  const result = await runVerify(ctxFor(state), framerAdapter, undefined);
   assert.deepEqual(result, { passed: [], failed: ['build'] });
-  assert.match(await readFile(fixBuild(1), 'utf8'), /E_BOOM/);
+  const buildFix = await readFile(fixBuild(1), 'utf8');
+  assert.match(buildFix, /E_BOOM/);
+  assert.match(buildFix, /npx -p framer-export fexport convert verify/);
+  assert.doesNotMatch(buildFix, /npx fexport/);
   assert.equal(state.tasks['fix-build-1']?.status, 'pending');
   assert.equal(state.tasks[PAGE_TASK]!.attempts, 0);
   assert.equal(state.stages.verify, 'needs-ai');
   const report = JSON.parse(await readFile(path.join(nextDir, '.convert', 'diffs', 'report.json'), 'utf8'));
   assert.deepEqual(report.routes, {});
 
-  await runVerify(ctxFor(state), undefined);
+  await runVerify(ctxFor(state), framerAdapter, undefined);
   assert.ok(await exists(fixBuild(2)));
   assert.equal(state.tasks['fix-build-1']?.status, 'done'); // superseded
-  await runVerify(ctxFor(state), undefined);
+  await runVerify(ctxFor(state), framerAdapter, undefined);
   assert.equal(await exists(fixBuild(3)), false);
   assert.equal(state.tasks['build']?.status, 'needs-human');
   assert.equal(state.stages.verify, 'failed');

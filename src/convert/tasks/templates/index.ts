@@ -1,6 +1,12 @@
 // Templates are embedded as string constants so tsup's TS-only bundle needs no asset copying.
 // `{{var}}` placeholders are filled by renderTemplate (src/convert/stages/tasks.ts).
 
+/**
+ * How generated task files, AGENTS.md and fix files tell the user to run the CLI. `-p framer-export` pins the
+ * package: a bare `npx fexport` could resolve an unrelated registry package named `fexport`.
+ */
+export const CLI_INVOCATION = 'npx -p framer-export fexport convert';
+
 export const SHARED_RULES = [
   '- Edit only the files listed under "Edit only".',
   '- Tailwind classes only; arbitrary values (e.g. `w-[342px]`) are allowed.',
@@ -33,7 +39,7 @@ Rebuild the Framer component \`{{name}}\` as a React component that is visually 
 {{rules}}
 
 ## Done when
-Run \`npx fexport convert verify {{taskId}}\` and confirm it passes.
+Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes.
 `,
 
   page: `# Task {{taskId}}: rebuild page {{route}}
@@ -59,7 +65,7 @@ Rebuild the page for route \`{{route}}\` so it is visually identical to the orig
 {{rules}}
 
 ## Done when
-Run \`npx fexport convert verify {{taskId}}\` and confirm it passes.
+Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes.
 `,
 
   motion: `# Task {{taskId}}: motion for {{route}}
@@ -81,7 +87,7 @@ Implement each animation below (framer-motion is available); entries marked low 
 {{rules}}
 
 ## Done when
-Tick every item in the checklist above, then run \`npx fexport convert verify {{route}}\`.
+Tick every item in the checklist above, then run \`${CLI_INVOCATION} verify {{route}}\`.
 `,
 
   fix: `# Fix {{taskId}} (attempt {{attempt}})
@@ -122,9 +128,11 @@ Original export: \`{{exportDir}}\`
 ## Workflow
 Task files live in \`.convert/tasks/\`. Components come first (001+), then pages (101+), then motion (201+).
 
-- \`npx fexport convert status\` shows every task and its state.
-- \`npx fexport convert next\` prints the next task to do.
-- \`npx fexport convert verify <taskId>\` checks your work against the original; failed attempts produce \`fix-*.md\` task files.
+Install dependencies once before the first verify: \`npm install\`.
+
+- \`${CLI_INVOCATION} status\` shows every task and its state.
+- \`${CLI_INVOCATION} next\` prints the next task to do.
+- \`${CLI_INVOCATION} verify <taskId>\` checks your work against the original; failed attempts produce \`fix-*.md\` task files.
 
 Do one task at a time: open the task file, edit only the files it lists, then run its verify command.
 

@@ -3,11 +3,10 @@ import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import puppeteer, { type Browser, type HTTPResponse, type Page } from 'puppeteer';
 import { PNG } from 'pngjs';
-import { framerAdapter } from '../adapters/framer/index.js';
-import type { StageContext } from '../adapters/types.js';
+import type { PlatformAdapter, StageContext } from '../adapters/types.js';
 import { recordAttempt, saveState, writeFileAtomic } from '../state.js';
 import type { ComponentInfo, PageInfo, TaskRecord } from '../types.js';
-import { SHARED_RULES } from '../tasks/templates/index.js';
+import { CLI_INVOCATION, SHARED_RULES } from '../tasks/templates/index.js';
 import { capturePage, type CaptureResult } from '../verify/capture.js';
 import { compareSections, crop, type SectionResult } from '../verify/diff.js';
 import { compareDom, extractSectionDom, nextSections, type DomMismatch, type SectionDom } from '../verify/dom-check.js';
@@ -201,12 +200,22 @@ async function readReference(file: string, key: string, warn: (msg: string) => v
   return { key, widths: {} };
 }
 
+/** A precondition of verify is unmet; nothing was changed (no attempt used, no state written). */
+export class VerifyRefusedError extends Error {}
+
 export async function runVerify(
   ctx: StageContext,
+  adapter: PlatformAdapter,
   target?: string,
   opts: VerifyOptions = {}
 ): Promise<{ passed: string[]; failed: string[] }> {
   const { state, nextDir, exportDir } = ctx;
+  if (state.stages.scaffold !== 'done' || (state.stages.tasks !== 'needs-ai' && state.stages.tasks !== 'done')) {
+    throw new VerifyRefusedError('Pipeline incomplete: run "fexport convert <exportDir>" first');
+  }
+  if (!(await exists(path.join(nextDir, 'node_modules')))) {
+    throw new VerifyRefusedError(`Dependencies not installed: run "npm install" in ${nextDir}`);
+  }
   const navigationTimeoutMs = opts.navigationTimeoutMs ?? 60_000;
   const convertDir = path.join(nextDir, '.convert');
   const analysisDir = path.join(convertDir, 'analysis');
@@ -354,7 +363,7 @@ export async function runVerify(
         outcomes.set(job.route, perWidth);
         report.routes[job.route] = {};
         const html = await readFile(path.join(exportDir, job.exportFile), 'utf8').catch(() => '');
-        const sections = framerAdapter.sections(html);
+        const sections = adapter.sections(html);
         const pageComponents = components.filter((c) => c.pages.includes(job.route));
         const refRouteDir = path.join(refDir, job.slug);
         const refJsonFile = path.join(refRouteDir, 'sections.json');
@@ -516,7 +525,7 @@ export async function runVerify(
           attempt: String(task.attempts),
           targets: bullets(task.targets.map(code)),
           failures,
-          doneWhen: `Run \`npx fexport convert verify ${task.id}\` and confirm it passes.`,
+          doneWhen: `Run \`${CLI_INVOCATION} verify ${task.id}\` and confirm it passes.`,
           rules: SHARED_RULES
         })
       );
@@ -676,7 +685,7 @@ async function writeBuildFix(ctx: StageContext, log: string, attempt: number): P
       attempt: String(attempt),
       targets: targets.length ? bullets(targets.map(code)) : '- any file under `src/`',
       failures: `\`npm run build\` failed. Last ${BUILD_LOG_LINES} lines of the build output:\n\n${fence}\n${tail}\n${fence}`,
-      doneWhen: 'Run `npx fexport convert verify` and confirm the build succeeds and verification passes.',
+      doneWhen: `Run \`${CLI_INVOCATION} verify\` and confirm the build succeeds and verification passes.`,
       rules: SHARED_RULES
     })
   );

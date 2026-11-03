@@ -40,7 +40,16 @@ test('runPipeline converts the fixture, then is a no-op', async () => {
   const base = await mkdtemp(path.join(os.tmpdir(), 'fexport pipe '));
   tmps.push(base);
   const nextDir = path.join(base, 'out next');
-  const state = await runPipeline(fixture, nextDir, io());
+  const logs: string[] = [];
+  const state = await runPipeline(fixture, nextDir, { confirm: async () => true, log: (m) => logs.push(m) });
+  // Next steps: install (never automatic), the first task file, then its verify command.
+  const text0 = logs.join('\n');
+  const install = text0.indexOf(`cd "${nextDir}" && npm install`);
+  const first = pickNextTask(state)!;
+  const taskAt = text0.indexOf(path.join(nextDir, first.file));
+  const verifyAt = text0.indexOf(`npx -p framer-export fexport convert verify ${first.id}`);
+  assert.ok(install >= 0 && taskAt > install && verifyAt > taskAt, text0);
+  assert.equal(existsSync(path.join(nextDir, 'node_modules')), false);
   assert.equal(state.stages.analyze, 'done');
   assert.equal(state.stages['extract-cms'], 'done');
   assert.equal(state.stages.scaffold, 'done');

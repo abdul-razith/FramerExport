@@ -10,6 +10,7 @@ import { runAnalyze } from '../../src/convert/stages/analyze.js';
 import { runExtractCms } from '../../src/convert/stages/extract-cms.js';
 import { runScaffold } from '../../src/convert/stages/scaffold/index.js';
 import { renderTemplate, runTasks } from '../../src/convert/stages/tasks.js';
+import { TEMPLATES } from '../../src/convert/tasks/templates/index.js';
 import type { AnimationEntry, ComponentInfo } from '../../src/convert/types.js';
 
 const fixture = path.resolve('tests/fixtures/framer-nudge-mini');
@@ -105,9 +106,9 @@ test('every task file has six headings in order and exact Done when', async () =
     assert.doesNotMatch(text, /\{\{/);
     const done = text.slice(text.indexOf('## Done when'));
     if (r.kind === 'motion') {
-      assert.match(done, /Tick every item in the checklist above, then run `npx fexport convert verify \/about`\./);
+      assert.match(done, /Tick every item in the checklist above, then run `npx -p framer-export fexport convert verify \/about`\./);
     } else {
-      assert.match(done, new RegExp(`Run \`npx fexport convert verify ${r.id}\` and confirm it passes\.`));
+      assert.match(done, new RegExp(`Run \`npx -p framer-export fexport convert verify ${r.id}\` and confirm it passes\.`));
       assert.match(text, /\.convert\/analysis\/slices\/_base\.css/);
     }
   }
@@ -143,6 +144,22 @@ test('AGENTS.md equals CLAUDE.md, shares rules, stage needs-ai, state registered
   const state = await loadState(ctx.nextDir);
   assert.equal(state!.stages.tasks, 'needs-ai');
   assert.ok(state!.tasks['101-page-home']);
+});
+
+test('generated text never calls a bare `npx fexport`; AGENTS.md says to npm install', async () => {
+  const ctx = await ran();
+  const files = [
+    ...(await readdir(path.join(ctx.nextDir, '.convert/tasks'))).map((n) => '.convert/tasks/' + n),
+    'AGENTS.md',
+    'CLAUDE.md',
+  ];
+  for (const f of files) {
+    const text = await read(ctx, f);
+    assert.doesNotMatch(text, /npx fexport/, f);
+    if (/convert (verify|status|next)/.test(text)) assert.match(text, /npx -p framer-export fexport convert/, f);
+  }
+  assert.match(await read(ctx, 'AGENTS.md'), /npm install/);
+  for (const t of Object.values(TEMPLATES)) assert.doesNotMatch(t, /npx fexport/);
 });
 
 test('re-run keeps status/attempts and fix files', async () => {

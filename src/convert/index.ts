@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { framerAdapter } from './adapters/framer/index.js';
 import type { StageContext } from './adapters/types.js';
 import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipeline.js';
 import { findProjectRoot, loadState } from './state.js';
@@ -119,7 +120,13 @@ export async function runConvertCommand(
     return 0;
   }
   const ctx: StageContext = { state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) };
-  const result = await runVerify(ctx, args.target);
+  let result: Awaited<ReturnType<typeof runVerify>>;
+  try {
+    result = await runVerify(ctx, framerAdapter, args.target);
+  } catch (error) {
+    console.error((error as Error).message);
+    return 1;
+  }
   console.log(`Passed: ${result.passed.length}`);
   console.log(`Failed: ${result.failed.length}`);
   console.log(`Report: ${path.join(root, '.convert', 'diffs', 'report.json')}`);
