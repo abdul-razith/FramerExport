@@ -7,6 +7,7 @@ import {
   type CmsItem,
   type CmsValue,
 } from '../adapters/framer/framercms.js';
+import { pageInfoFromHtml } from '../adapters/framer/routes.js';
 import type { StageContext } from '../adapters/types.js';
 import { saveState } from '../state.js';
 import type { PageInfo } from '../types.js';
@@ -184,7 +185,12 @@ function isImage(v: CmsValue): v is Extract<CmsValue, { type: 'json' }> {
   );
 }
 
-export function findSlugField(items: CmsItem[], slugs: string[]): string | null {
+/**
+ * The string field whose values are the page slugs. Every slug must match, unless `partial` (the collection
+ * lost items to decode errors): then the best field matching at least one slug wins, and the missing items
+ * are recovered from their rendered pages.
+ */
+export function findSlugField(items: CmsItem[], slugs: string[], partial = false): string | null {
   if (!slugs.length) return null;
   const counts = new Map<string, Set<string>>();
   for (const item of items) {
@@ -204,7 +210,7 @@ export function findSlugField(items: CmsItem[], slugs: string[]): string | null 
       bestN = set.size;
     }
   }
-  return bestN === slugs.length ? best : null;
+  return bestN === slugs.length || (partial && bestN > 0) ? best : null;
 }
 
 // ------------------------------------------------------------------ naming
@@ -212,6 +218,7 @@ export function findSlugField(items: CmsItem[], slugs: string[]): string | null 
 export function nameFields(
   items: CmsItem[],
   renderedBySlug: Map<string, string>,
+  knownSlugField?: string | null,
 ): { names: Record<string, string>; unmatched: string[] } {
   const names: Record<string, string> = {};
   const taken = new Set<string>();
@@ -230,7 +237,7 @@ export function nameFields(
     }
   }
 
-  const slugField = findSlugField(items, [...renderedBySlug.keys()]);
+  const slugField = knownSlugField ?? findSlugField(items, [...renderedBySlug.keys()]);
   if (slugField) assign(slugField, 'slug');
 
   // images do not need a rendered page
@@ -311,6 +318,42 @@ function isAncestor(anc: PageEl, el: PageEl): boolean {
 
 // -------------------------------------------------------------------- stage
 
+/** Member pages of a dynamic route (older pages.json files carry only `slugs`). */
+function membersOf(page: PageInfo): Array<{ slug: string; sourceFile: string }> {
+  const d = page.dynamic!;
+  if (d.members?.length) return d.members;
+  const parent = page.route.replace(/\/\[[^\]]+\]$/, '').replace(/^\//, '');
+  return d.slugs.map((slug) => ({ slug, sourceFile: `subpages/${parent.split('/').join('_')}_${slug}.html` }));
+}
+
+/**
+ * A dynamic route no CMS collection links to cannot be generated (no content module to read slugs from):
+ * expand it back into one static page per member, each with its own source file, title and meta.
+ */
+async function demoteUnlinked(ctx: StageContext, pages: PageInfo[]): Promise<PageInfo[]> {
+  const out: PageInfo[] = [];
+  for (const page of pages) {
+    if (!page.dynamic || page.dynamic.collection) {
+      out.push(page);
+      continue;
+    }
+    const parent = page.route.replace(/\/\[[^\]]+\]$/, '');
+    for (const m of membersOf(page)) {
+      const route = `${parent}/${m.slug}`;
+      const html = await readIfExists(path.join(ctx.exportDir, m.sourceFile));
+      out.push(
+        html === undefined
+          ? { route, sourceFile: m.sourceFile, title: page.title, meta: page.meta }
+          : pageInfoFromHtml(html, route, m.sourceFile),
+      );
+    }
+    ctx.state.warnings.push(
+      `extract-cms: no CMS collection matches ${page.route}; kept its ${membersOf(page).length} pages as static routes`,
+    );
+  }
+  return out;
+}
+
 async function writeAtomic(file: string, content: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
@@ -333,6 +376,8 @@ async function readIfExists(file: string): Promise<string | undefined> {
 interface Collection {
   id: string;
   items: CmsItem[];
+  /** Some chunk of this collection failed to decode fully, so items may be missing. */
+  damaged: boolean;
 }
 
 async function loadCollections(ctx: StageContext): Promise<Collection[]> {
@@ -348,15 +393,17 @@ async function loadCollections(ctx: StageContext): Promise<Collection[]> {
   const byId = new Map<string, Collection>();
   for (const f of files) {
     const id = collectionIdFromFile(f);
-    const col = byId.get(id) ?? { id, items: [] };
+    const col = byId.get(id) ?? { id, items: [], damaged: false };
     byId.set(id, col);
     let decoded;
     try {
       decoded = decodeChunk(await readFile(path.join(dataDir, f)));
     } catch (err) {
       ctx.state.warnings.push(`extract-cms: could not read ${f}: ${(err as Error).message}`);
+      col.damaged = true;
       continue;
     }
+    if (decoded.errors.length) col.damaged = true;
     for (const e of decoded.errors) {
       ctx.state.warnings.push(
         `extract-cms: ${f}: ${e.reason} at offset ${e.offset}${e.key ? ` (field ${e.key})` : ''}`,
@@ -442,7 +489,7 @@ export async function runExtractCms(ctx: StageContext): Promise<void> {
     let slugField: string | null = null;
     for (const p of pages) {
       if (!p.dynamic || claimed.has(p)) continue;
-      const f = findSlugField(col.items, p.dynamic.slugs);
+      const f = findSlugField(col.items, p.dynamic.slugs, col.damaged);
       if (f) {
         page = p;
         claimed.add(p);
@@ -472,7 +519,7 @@ export async function runExtractCms(ctx: StageContext): Promise<void> {
       }
     }
 
-    const { names, unmatched } = nameFields(col.items, rendered);
+    const { names, unmatched } = nameFields(col.items, rendered, slugField);
 
     // items lost to decode errors: recover slug/title from rendered pages
     if (page?.dynamic && slugField) {
@@ -594,6 +641,7 @@ export async function runExtractCms(ctx: StageContext): Promise<void> {
     ctx.log(`extract-cms: ${name}: ${rows.length} items`);
   }
 
+  pages = await demoteUnlinked(ctx, pages);
   await writeAtomic(pagesFile, JSON.stringify(pages, null, 2) + '\n');
   ctx.state.stages['extract-cms'] = 'done';
   await saveState(ctx.state);

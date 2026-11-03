@@ -106,6 +106,9 @@ test('truncated chunks warn but never throw', async () => {
   assert.ok(ctx.state.warnings.some((w) => /truncated/.test(w)));
   const src = await readFile(path.join(ctx.nextDir, 'src', 'content', 'caseStudy.ts'), 'utf8');
   assert.match(src, /slug: "meridian-health"/);
+  // The truncated chunk lost "homestead"; the route still links and the item is scraped from its page.
+  assert.match(src, /slug: "homestead"/);
+  assert.ok(ctx.state.warnings.some((w) => /item "homestead" missing from decoded data/.test(w)));
   assert.equal(ctx.state.stages['extract-cms'], 'done');
 });
 

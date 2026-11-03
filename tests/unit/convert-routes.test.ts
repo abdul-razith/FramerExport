@@ -35,10 +35,18 @@ test('derivePages groups CMS detail pages into dynamic routes', async () => {
   }
   assert.ok(!routes.includes('/blog/the-power-of-focus'));
   const blog = pages.find((p) => p.route === '/blog/[slug]');
-  assert.deepEqual(blog?.dynamic, { param: 'slug', collection: '', slugs: ['the-power-of-focus'] });
-  assert.equal(blog?.sourceFile, 'subpages/blog_the-power-of-focus.html');
+  assert.deepEqual(blog?.dynamic, {
+    param: 'slug',
+    collection: '',
+    slugs: ['a-greener-workspace', 'the-power-of-focus'],
+    members: [
+      { slug: 'a-greener-workspace', sourceFile: 'subpages/blog_a-greener-workspace.html' },
+      { slug: 'the-power-of-focus', sourceFile: 'subpages/blog_the-power-of-focus.html' }
+    ]
+  });
+  assert.equal(blog?.sourceFile, 'subpages/blog_a-greener-workspace.html');
   const cs = pages.find((p) => p.route === '/case-study/[slug]');
-  assert.deepEqual(cs?.dynamic?.slugs, ['meridian-health']);
+  assert.deepEqual(cs?.dynamic?.slugs, ['homestead', 'meridian-health']);
   assert.equal(pages.find((p) => p.route === '/')?.sourceFile, 'index.html');
   for (const p of pages) assert.ok(p.title.length > 0, `empty title for ${p.route}`);
   assert.ok(pages.find((p) => p.route === '/about')?.meta.description);

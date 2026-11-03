@@ -14,7 +14,9 @@ const htmlFiles = [
   'subpages/about.html',
   'subpages/blog.html',
   'subpages/blog_the-power-of-focus.html',
+  'subpages/blog_a-greener-workspace.html',
   'subpages/case-study_meridian-health.html',
+  'subpages/case-study_homestead.html',
   'subpages/case-study.html',
 ];
 const plainFiles = ['export-report.json', 'serve.js', 'package.json'];

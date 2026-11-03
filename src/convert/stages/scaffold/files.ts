@@ -116,6 +116,11 @@ export default function Page() {
 
 function dynamicPage(page: PageInfo): string {
   const c = page.dynamic!.collection;
+  if (!c) {
+    throw new Error(
+      `scaffold: dynamic route ${page.route} has no CMS collection; re-run extract-cms (it turns unlinked routes into static pages)`,
+    );
+  }
   return `import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ${c} } from '@/content/${c}';

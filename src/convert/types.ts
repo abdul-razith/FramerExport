@@ -27,7 +27,13 @@ export interface PageInfo {
   sourceFile: string;
   title: string;
   meta: Record<string, string>;
-  dynamic?: { param: 'slug'; collection: string; slugs: string[] };
+  dynamic?: {
+    param: 'slug';
+    collection: string;
+    slugs: string[];
+    /** One entry per detail page folded into this route (same order as `slugs`). */
+    members: Array<{ slug: string; sourceFile: string }>;
+  };
 }
 
 export interface Tokens {

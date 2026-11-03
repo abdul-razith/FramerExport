@@ -122,6 +122,12 @@ function parsePage(html: string, route: string, sourceFile: string): Parsed {
   return { route, sourceFile, title, meta, layers: namedLayers(html) };
 }
 
+/** Static PageInfo (route, title, meta) of one exported page. */
+export function pageInfoFromHtml(html: string, route: string, sourceFile: string): PageInfo {
+  const { layers: _layers, ...info } = parsePage(html, route, sourceFile);
+  return info;
+}
+
 export async function derivePages(exportDir: string): Promise<PageInfo[]> {
   const files = ['index.html'];
   const subDir = path.join(exportDir, 'subpages');
@@ -135,7 +141,6 @@ export async function derivePages(exportDir: string): Promise<PageInfo[]> {
     parsed.push(parsePage(html, route, file));
   }
 
-  const routes = new Set(parsed.map((p) => p.route));
   // Cluster sibling pages (same parent route) by template similarity to each cluster's first member.
   const groups: Array<{ parent: string; members: Parsed[] }> = [];
   for (const p of parsed) {
@@ -149,13 +154,15 @@ export async function derivePages(exportDir: string): Promise<PageInfo[]> {
     else groups.push({ parent, members: [p] });
   }
   // The largest cluster under a parent claims `/<parent>/[slug]`; the stable sort keeps file order on ties.
+  // A lone page is never dynamic: one page gives no evidence of a template, and without a CMS collection
+  // to link it would scaffold an unbuildable route.
   groups.sort((x, y) => y.members.length - x.members.length);
 
   const grouped = new Set<Parsed>();
   const dynamic = new Map<Parsed, PageInfo>();
   const usedDynamicRoutes = new Set<string>();
   for (const { parent, members } of groups) {
-    if (members.length < 2 && !routes.has('/' + parent)) continue;
+    if (members.length < 2) continue;
     const route = `/${parent}/[slug]`;
     if (usedDynamicRoutes.has(route)) continue;
     usedDynamicRoutes.add(route);
@@ -169,7 +176,8 @@ export async function derivePages(exportDir: string): Promise<PageInfo[]> {
       dynamic: {
         param: 'slug',
         collection: '',
-        slugs: members.map((m) => m.route.split('/').pop()!)
+        slugs: members.map((m) => m.route.split('/').pop()!),
+        members: members.map((m) => ({ slug: m.route.split('/').pop()!, sourceFile: m.sourceFile }))
       }
     });
   }
