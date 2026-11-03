@@ -62,7 +62,10 @@ function normalizeExportLink(url: string, routes: Record<string, string>): strin
   if (isAbsolute(url) && !/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\//i.test(url)) return url;
   const hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
   const rel = exportRelative(url);
-  return rel in routes ? routes[rel] + hash : url;
+  if (rel in routes) return routes[rel] + hash;
+  // After hydration the Framer runtime rewrites page links to extensionless form (`./about`, `./`).
+  const route = rel ? '/' + rel.replace(/\.html$/, '') : '/';
+  return Object.values(routes).includes(route) ? route + hash : url;
 }
 
 function normalizeExportImage(url: string, images: Record<string, string>): string {

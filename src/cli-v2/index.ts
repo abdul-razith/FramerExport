@@ -62,6 +62,7 @@ export function showCliV2Help(): string {
     3. Choose Options (JS formatting, sub-pages crawl, concurrency)
     4. Review & Live Export (Asset download with real-time spinner)
     5. Optional AI Conversion Prompt (Generate prompt brief for React, Next.js, Vue, SvelteKit, Astro)
+    6. Optional Next.js Conversion (Framer only): stages 1-5 with a Conversion Dashboard
 
   OPTIONS
     --subpages             Crawl and export internal sub-pages
@@ -153,9 +154,9 @@ async function offerConversion(exportDir: string): Promise<void> {
     return;
   }
   if (!(await uiConfirm('Convert to a Next.js project now?'))) return;
-  const { runPipeline } = await import('../convert/pipeline.js');
-  await runPipeline(exportDir, exportDir + '-next', {
-    confirm: (msg) => uiConfirm(msg, false),
-    log: (msg) => console.log(msg),
-  });
+  const { runScreenConvertRun } = await import('./screens/convert-run.js');
+  const { runScreenConvertDashboard } = await import('./screens/convert-dashboard.js');
+  const nextDir = await runScreenConvertRun(exportDir, exportDir + '-next', { intro: false });
+  // Stay in this session: install, run an AI agent, verify and sign off motion from the dashboard.
+  await runScreenConvertDashboard(nextDir, { intro: false });
 }
