@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
@@ -85,4 +85,18 @@ test('extractBaseCss keeps only global-class rules, preserving @media', () => {
   assert.ok(css.includes('@media (max-width:800px)'));
   assert.ok(!css.includes('AbC12'));
   assert.ok(!css.includes('font-face'));
+});
+
+test('runAnalyze clears stale slice files before writing new ones', async () => {
+  const nextDir = await tmp();
+  const slices = path.join(nextDir, '.convert', 'analysis', 'slices');
+  await mkdir(slices, { recursive: true });
+  await writeFile(path.join(slices, 'RenamedAway.html'), '<div>stale</div>');
+  await runAnalyze({ state: initState(fixture, nextDir), exportDir: fixture, nextDir, log: () => {} }, framerAdapter, {
+    animations: false
+  });
+  const files = await readdir(slices);
+  assert.ok(!files.includes('RenamedAway.html'), files.join(', '));
+  const comps = JSON.parse(await readFile(path.join(nextDir, '.convert', 'analysis', 'components.json'), 'utf8'));
+  assert.equal(files.length, comps.length + 1); // + _base.css
 });

@@ -128,7 +128,12 @@ function analyse(series: Array<{ t: number; v: string }>, startT: number, endT: 
   };
 }
 
-export async function observeAnimations(page: Page, route: string): Promise<AnimationEntry[]> {
+export interface ObserveOptions {
+  /** Called once ~2.5 s after the observer starts, after the appear/loop sampling and before any scrolling. */
+  onSettled?: () => Promise<void>;
+}
+
+export async function observeAnimations(page: Page, route: string, opts?: ObserveOptions): Promise<AnimationEntry[]> {
   await sleep(300);
   const entries: AnimationEntry[] = [];
   try {
@@ -179,6 +184,8 @@ export async function observeAnimations(page: Page, route: string): Promise<Anim
       const c = analyse(seriesFor(appearSamples, i), baseline.t, Infinity);
       if (c) found.push({ i, trigger: 'appear', c });
     }
+
+    await opts?.onSettled?.();
 
     // Scroll: 250 px steps, 50 ms wait, track elements newly in viewport.
     const maxScroll = (await page.evaluate('window.__fx.maxScroll()')) as number;

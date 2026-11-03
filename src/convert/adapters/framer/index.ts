@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import puppeteer, { type Browser } from 'puppeteer';
+import puppeteer, { type Browser, type Page } from 'puppeteer';
 import type { Analysis, AnimationEntry, PageInfo } from '../../types.js';
 import type { PlatformAdapter, StageContext } from '../types.js';
 import { extractBaseCss } from './base-css.js';
@@ -9,6 +9,7 @@ import { derivePages } from './routes.js';
 import { extractTokens } from './tokens.js';
 import { observeAnimations } from './animations.js';
 import { pageSections } from './sections.js';
+import { readSsrAppear, ssrAppearCandidates, withoutObserved } from './ssr-appear.js';
 import { settleExport } from '../../verify/settle.js';
 import { startExportServer } from '../../verify/serve.js';
 import { warn } from '../../../logger/index.js';
@@ -35,15 +36,34 @@ async function analyze(ctx: StageContext, opts?: { animations?: boolean }): Prom
     await writeFile(path.join(nextDir, c.slice), buildSlice(page.html, c.selector), 'utf8');
   }
   await writeFile(path.join(sliceDir, '_base.css'), extractBaseCss(indexHtml), 'utf8');
-  const animations = opts?.animations === false ? [] : await observeExport(ctx, pages);
+  const animations = opts?.animations === false ? [] : await observeExport(ctx, pages, loaded.map((l) => l.html));
   return { pages, tokens, components, animations };
+}
+
+/**
+ * Observe runtime animations on a loaded page, plus appear effects recovered from the export HTML's SSR
+ * initial styles (read once the page has settled, before scrolling) that the observer did not already record.
+ */
+export async function observePage(page: Page, route: string, html: string): Promise<AnimationEntry[]> {
+  const candidates = ssrAppearCandidates(html);
+  let ssr: AnimationEntry[] = [];
+  const found = await observeAnimations(page, route, {
+    onSettled: async () => {
+      try {
+        ssr = await readSsrAppear(page, route, candidates);
+      } catch (err) {
+        warn(`animations: ${route}: SSR appear check failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  });
+  return [...found, ...(await withoutObserved(page, ssr, found))];
 }
 
 /**
  * Serve the export and record runtime animations on every static route plus the first slug of each
  * dynamic route (a dynamic page's `sourceFile` is its first member). The browser and server are always torn down.
  */
-async function observeExport(ctx: StageContext, pages: PageInfo[]): Promise<AnimationEntry[]> {
+async function observeExport(ctx: StageContext, pages: PageInfo[], htmls: string[]): Promise<AnimationEntry[]> {
   const server = await startExportServer(ctx.exportDir);
   let browser: Browser | undefined;
   const entries: AnimationEntry[] = [];
@@ -51,13 +71,13 @@ async function observeExport(ctx: StageContext, pages: PageInfo[]): Promise<Anim
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
     const page = await browser.newPage();
     await page.setViewport({ width: 1440, height: 900 });
-    for (const p of pages) {
+    for (const [i, p] of pages.entries()) {
       // Entries carry the pages.json route (`/blog/[slug]` for dynamic pages) so they join with pages.json.
       const route = p.route;
       const url = server.url + (p.sourceFile === 'index.html' ? '/' : '/' + p.sourceFile);
       try {
         await page.goto(url, { waitUntil: 'load', timeout: 60_000 });
-        const found = await observeAnimations(page, route);
+        const found = await observePage(page, route, htmls[i] ?? '');
         ctx.log(`animations: ${route}: ${found.length} observed`);
         entries.push(...found);
       } catch (err) {
