@@ -81,6 +81,16 @@ test('compareDom maps links', () => {
   assert.equal(compareDom(sec({ links: ['subpages/about.html'] }), sec({ links: ['/blog'] }), maps)[0].kind, 'link');
 });
 
+test('compareDom maps extensionless links the Framer runtime writes after hydration', () => {
+  const ok = compareDom(
+    sec({ links: ['./about#team', './', 'http://127.0.0.1:5000/about'] }),
+    sec({ links: ['/about#team', '/', '/about'] }),
+    maps
+  );
+  assert.deepEqual(ok, []);
+  assert.equal(compareDom(sec({ links: ['./about'] }), sec({ links: ['/blog'] }), maps)[0].kind, 'link');
+});
+
 test('compareDom maps images', () => {
   assert.deepEqual(
     compareDom(

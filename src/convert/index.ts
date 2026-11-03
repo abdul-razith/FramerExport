@@ -6,13 +6,13 @@ import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipel
 import { findProjectRoot, loadState, saveState } from './state.js';
 import { CLI_INVOCATION } from './tasks/templates/index.js';
 import { runVerify } from './stages/verify.js';
-import type { AnimationEntry } from './types.js';
+import type { AnimationEntry, ConvertState, TaskRecord } from './types.js';
 
 export { formatStatus, runPipeline } from './pipeline.js';
 export type { ConvertIo } from './pipeline.js';
 
 export interface ConvertArgs {
-  command: 'run' | 'status' | 'next' | 'verify' | 'done';
+  command: 'run' | 'status' | 'next' | 'verify' | 'done' | 'ui' | 'generate';
   exportDir?: string;
   nextDir?: string;
   target?: string;
@@ -25,6 +25,8 @@ export const CONVERT_USAGE = `Usage:
   fexport convert next                            show the next task to give to your AI coding agent
   fexport convert verify [target]                 build and compare against the export, write fix tasks
   fexport convert done <taskId>                   mark a motion task done after ticking its checklist
+  fexport convert generate                        build pages and components automatically (no AI), then run verify
+  fexport convert ui                              open the interactive Conversion Dashboard
 
 nextDir defaults to <exportDir>-next. status/next/verify run from inside the converted project.`;
 
@@ -33,7 +35,10 @@ export function parseConvertArgs(argv: string[]): ConvertArgs {
   const rest = argv[0] === 'convert' ? argv.slice(1) : argv;
   const yes = rest.includes('--yes') || rest.includes('-y');
   const [first, second] = rest.filter((a) => a !== '--yes' && a !== '-y');
-  if (first === 'status' || first === 'next') {
+  if (first === 'ui') {
+    return { command: 'ui', exportDir: undefined, nextDir: undefined, target: undefined, yes };
+  }
+  if (first === 'status' || first === 'next' || first === 'generate') {
     return { command: first, exportDir: undefined, nextDir: undefined, target: undefined, yes };
   }
   if (first === 'done') {
@@ -45,7 +50,7 @@ export function parseConvertArgs(argv: string[]): ConvertArgs {
   return { command: 'run', exportDir: first, nextDir: second, target: undefined, yes };
 }
 
-async function readAnimations(root: string): Promise<AnimationEntry[]> {
+export async function readAnimations(root: string): Promise<AnimationEntry[]> {
   try {
     return JSON.parse(
       await readFile(path.join(root, '.convert', 'analysis', 'animations.json'), 'utf8')
@@ -53,6 +58,42 @@ async function readAnimations(root: string): Promise<AnimationEntry[]> {
   } catch {
     return [];
   }
+}
+
+/** Returns the body of the "Goal" section of a task file, or null when unreadable or absent. */
+export async function readTaskGoal(file: string): Promise<string | null> {
+  try {
+    const text = await readFile(file, 'utf8');
+    const m = /^#+[ \t]*Goal[ \t]*\r?\n([\s\S]*?)(?=^#+[ \t]|$(?![\s\S]))/im.exec(text);
+    return m ? m[1].trimEnd() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Marks a motion task (or a fix task of one) done in memory; the caller saves the state. */
+export function markTaskDone(
+  state: ConvertState,
+  taskId: string | undefined
+): { ok: true; task: TaskRecord } | { ok: false; error: string } {
+  const task = taskId ? state.tasks[taskId] : undefined;
+  if (!task) {
+    return { ok: false, error: taskId ? `Unknown task: ${taskId}` : 'Usage: fexport convert done <taskId>' };
+  }
+  const original = task.kind === 'fix' ? state.tasks[task.id.replace(/^fix-/, '').replace(/-\d+$/, '')] : task;
+  if (original?.kind !== 'motion') {
+    return {
+      ok: false,
+      error: `${task.id} is a ${task.kind} task; "done" is only for motion tasks. Run "${CLI_INVOCATION} verify ${task.id}" instead.`,
+    };
+  }
+  task.status = 'done';
+  return { ok: true, task };
+}
+
+/** True when both stdin and stdout are TTYs: the only case where prompts may appear. */
+export function isInteractiveTerminal(): boolean {
+  return !!process.stdin.isTTY && !!process.stdout.isTTY;
 }
 
 export interface ConvertOutput {
@@ -71,6 +112,22 @@ export async function runConvertCommand(
     return 0;
   }
   const args = parseConvertArgs(rest);
+  // --yes always forces the headless path.
+  const wantsDashboard = !args.yes && (args.command === 'ui' || (args.command === 'run' && !args.exportDir));
+  if (wantsDashboard && isInteractiveTerminal()) {
+    try {
+      const { runScreenConvertDashboard } = await import('../cli-v2/screens/convert-dashboard.js');
+      await runScreenConvertDashboard();
+      return 0;
+    } catch (error) {
+      console.error((error as Error).message);
+      return 1;
+    }
+  }
+  if (args.command === 'ui') {
+    console.error('fexport convert ui needs an interactive terminal');
+    return 1;
+  }
   if (args.command === 'run') {
     if (!args.exportDir || args.exportDir.startsWith('-')) {
       console.error(CONVERT_USAGE);
@@ -83,6 +140,20 @@ export async function runConvertCommand(
       return 1;
     }
     const nextDir = args.nextDir ?? path.resolve(args.exportDir) + '-next';
+    if (isInteractiveTerminal() && !args.yes) {
+      try {
+        const { runScreenConvertRun } = await import('../cli-v2/screens/convert-run.js');
+        const { runScreenConvertDashboard } = await import('../cli-v2/screens/convert-dashboard.js');
+        const { uiOutro } = await import('../cli-v2/ui/prompts.js');
+        const root = await runScreenConvertRun(args.exportDir, nextDir);
+        await runScreenConvertDashboard(root, { intro: false });
+        uiOutro('Conversion session closed.');
+        return 0;
+      } catch (error) {
+        console.error((error as Error).message);
+        return 1;
+      }
+    }
     let confirm: ConvertIo['confirm'] = async () => true;
     if (!args.yes) {
       const { uiConfirm } = await import('../cli-v2/ui/prompts.js');
@@ -103,6 +174,18 @@ export async function runConvertCommand(
     console.error('No .convert/state.json found; run "fexport convert <exportDir>" first');
     return 1;
   }
+  if (args.command === 'generate') {
+    const { runGenerate } = await import('./generate/index.js');
+    try {
+      const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) });
+      console.log(`Generated ${r.pages.length} page(s) and ${r.components.length} component(s); left ${r.skipped.length} finished task(s) alone.`);
+      console.log(`Next: run "${CLI_INVOCATION} verify" to check them.`);
+      return 0;
+    } catch (error) {
+      console.error((error as Error).message);
+      return 1;
+    }
+  }
   if (args.command === 'status') {
     console.log(formatStatus(state, await readAnimations(root)));
     return 0;
@@ -115,31 +198,19 @@ export async function runConvertCommand(
     }
     const file = path.join(root, task.file);
     console.log(`Next task: ${task.id} (${task.status})\nFile: ${file}\n`);
-    try {
-      const text = await readFile(file, 'utf8');
-      const m = /^#+[ \t]*Goal[ \t]*\r?\n([\s\S]*?)(?=^#+[ \t]|$(?![\s\S]))/im.exec(text);
-      if (m) console.log('Goal\n' + m[1].trimEnd());
-    } catch {
-      console.log('(task file not readable)');
-    }
+    const goal = await readTaskGoal(file);
+    if (goal !== null) console.log('Goal\n' + goal);
+    else if (!(await stat(file).then(() => true, () => false))) console.log('(task file not readable)');
     return 0;
   }
   if (args.command === 'done') {
-    const task = args.target ? state.tasks[args.target] : undefined;
-    if (!task) {
-      console.error(args.target ? `Unknown task: ${args.target}` : 'Usage: fexport convert done <taskId>');
+    const result = markTaskDone(state, args.target);
+    if (!result.ok) {
+      console.error(result.error);
       return 1;
     }
-    const original = task.kind === 'fix' ? state.tasks[task.id.replace(/^fix-/, '').replace(/-\d+$/, '')] : task;
-    if (original?.kind !== 'motion') {
-      console.error(
-        `${task.id} is a ${task.kind} task; "done" is only for motion tasks. Run "${CLI_INVOCATION} verify ${task.id}" instead.`
-      );
-      return 1;
-    }
-    task.status = 'done';
     await saveState(state);
-    console.log(`Marked ${task.id} done.`);
+    console.log(`Marked ${result.task.id} done.`);
     return 0;
   }
   const ctx: StageContext = { state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) };

@@ -9,6 +9,11 @@
 
 The conversion is a **pipeline**: the tool does the mechanical work (analysis, CMS extraction, scaffolding) and then writes small, numbered **AI task files** that you run one by one in **Claude Code** or **Antigravity**. A built-in **verify** step screenshots the original export and your Next.js app side by side and only accepts a task when they match.
 
+There are two ways to build the pages and components:
+
+- **Automatic (fast, no AI):** `fexport convert generate` copies the original page markup and CSS into real React files in about a minute and a half. Components usually pass verify straight away; pages come out close but need a polish pass (see section 5).
+- **AI tasks:** the numbered task files, run one by one by an agent. Use this for whatever `generate` leaves failing, and for animations.
+
 > Status: **beta**, Framer exports only.
 
 ---
@@ -41,7 +46,33 @@ npm install
 npm run build        # the placeholder scaffold must build before you start
 ```
 
-If `framer-export` is installed globally you can write `fexport convert ...` instead of `node bin/fexport.js convert ...`. Inside generated task files the command is written as `npx -p framer-export fexport convert ...`.
+If `framer-export` is installed globally you can write `fexport convert ...` instead of `node bin/fexport.js convert ...`.
+
+**Which code runs.** When you run from this checkout (after `npm run build`), the generated task files and `AGENTS.md` use `node "<this checkout>\bin\fexport.js" convert ...`, so the local version always runs, not the published npm package (which may have no `convert` command). From an installed copy they use `npx -p framer-export fexport convert ...`. Set `FEXPORT_CLI_INVOCATION` to override.
+
+### Interactive way (recommended)
+
+```bash
+npm run cli:v2        # export a Framer site, answer "Yes" to "Convert to a Next.js project now?"
+# or, for an existing export / converted project:
+node bin/fexport.js convert ui
+```
+
+You get the staged conversion (Stage 1/5 to 4/5) and then the **Conversion Dashboard**, which stays open so you never have to switch commands:
+
+| Dashboard action | What it does |
+|---|---|
+| Install dependencies | `npm install` in the converted project (preselected until `node_modules` exists) |
+| Generate pages & components automatically | the no-AI generator (preselected after install) |
+| Inspect next task | shows the next task and its goal |
+| Run AI agent | runs `agy` or `claude` on the next task, or on all tasks until done or stuck |
+| Run verification | Stage 5/5, build and pixel comparison |
+| View status & task backlog | stages, tasks, warnings |
+| Mark motion task done | after you checked an animation by eye |
+
+The dashboard needs an interactive terminal. In scripts, or with `--yes`, the plain commands below are used instead and print the same text as before.
+
+**Running an AI agent.** The dashboard starts `agy -p "<prompt>" --dangerously-skip-permissions` or `claude -p "<prompt>" --dangerously-skip-permissions` inside the project folder and waits for it. You choose the agent and the mode at run time and confirm a warning once. `--dangerously-skip-permissions` lets the agent run any command in that folder without asking, and there is no sandbox. The agent prints nothing until it finishes, so one task can look frozen for several minutes. In "all tasks" mode the loop stops at motion tasks, at a task that failed 3 times, on an agent or verify error, or when the same task comes back unchanged twice.
 
 ---
 
@@ -51,6 +82,8 @@ If `framer-export` is installed globally you can write `fexport convert ...` ins
 |---|---|---|
 | `fexport convert <exportDir> [nextDir] [--yes]` | anywhere | Runs analyze → CMS extract → scaffold → task generation. `nextDir` defaults to `<exportDir>-next`. Safe to re-run: finished stages are skipped and files you edited are kept (it asks before overwriting; `--yes` auto-confirms). |
 | `fexport convert status` | inside the generated project | Shows stage status, task counts, warnings and the animation checklist. |
+| `fexport convert` (no arguments) / `fexport convert ui` | anywhere, interactive terminal | Opens the Conversion Dashboard (see section 2). Finds the converted project in the current folder, or lets you pick one or convert an export folder. |
+| `fexport convert generate` | inside the generated project | Builds all pages and components automatically, without AI (see section 5). Tasks that are already done are left alone. Run `verify` afterwards. |
 | `fexport convert next` | inside the generated project | Shows the next task to give your AI agent (fix tasks first, then components, pages, motion). |
 | `fexport convert verify [target]` | inside the generated project | Builds the Next.js app, screenshots both sites at 1440 / 1000 / 390 px and compares them section by section. `target` is a task id (e.g. `101-page-home`) or a route (e.g. `/about`); no target = everything. |
 | `fexport convert done <taskId>` | inside the generated project | Marks a **motion** task done after you have checked its animation checklist by eye. |
@@ -60,6 +93,8 @@ Windows + Git Bash tip: when the target is `/`, run `MSYS_NO_PATHCONV=1 fexport 
 ---
 
 ## 4. The working loop
+
+Fastest path: run `fexport convert generate`, then `fexport convert verify`, then give only the failing `fix-*` tasks and the motion tasks to your agent. The loop below works for any task.
 
 ```
 fexport convert next          → shows .convert/tasks/<id>.md
@@ -82,7 +117,28 @@ Task order and what "done" means:
 
 ---
 
-## 5. What gets generated
+## 5. Automatic generation (`convert generate`)
+
+`generate` opens each exported page in a headless browser, restores the finished look of fade-in effects, marks every section with its `data-section`, and writes:
+
+- `src/views/<page>.tsx` (and `src/views/<page>/<slug>.tsx` for each blog or case-study item), plus the page file's `View` import
+- `src/styles/framer/<hash>.css`, the original Framer CSS, shared between pages
+- `src/components/<Name>.tsx` for each component
+- `public/misc`, `public/videos` when the export has them
+
+Links to exported pages become routes, and `assets/...` URLs become `/images/...`. Re-running is safe: it replaces its own output and skips tasks marked done.
+
+What to expect (measured on one real export):
+
+- Components pass verify, and page heights match the original at all three widths.
+- Pages do **not** yet pass the strict gate (≤ 0.5 % pixel difference, no text, link or image mismatch). The original draws some parts with JavaScript after load (live clock, ruler, loader, overlays), and those are not in the page's HTML.
+- The generated code keeps Framer's class names and CSS rather than clean Tailwind. It matches closely but is not tidy to edit by hand.
+
+After `generate`, run `verify`. Each failing page gets a `fix-*` task for your agent; motion tasks still need an agent and your eyes.
+
+---
+
+## 6. What gets generated
 
 ```
 your-site-next/
@@ -90,7 +146,8 @@ your-site-next/
 ├─ src/app/                      one page.tsx per route; [slug] routes for CMS collections
 │  ├─ globals.css                Tailwind v4 @theme: colors, fonts, type scale, breakpoints
 │  └─ fonts.css                  @font-face rules (keeps unicode-range subsets)
-├─ src/components/               filled in by component tasks
+├─ src/components/               filled in by component tasks or `convert generate`
+├─ src/views/, src/styles/       generated page views and Framer CSS (`convert generate`)
 ├─ src/content/                  typed CMS data (e.g. blog.ts, caseStudy.ts)
 ├─ src/lib/motion.ts, gsap.ts    shared animation setup
 ├─ public/fonts, public/images   only the assets the site actually uses
@@ -106,7 +163,7 @@ Breakpoints follow Framer: phone `< 810px`, tablet `810–1199px` (`md:`), deskt
 
 ---
 
-## 6. Options and environment variables
+## 7. Options and environment variables
 
 | Setting | Effect |
 |---|---|
@@ -114,11 +171,11 @@ Breakpoints follow Framer: phone `< 810px`, tablet `810–1199px` (`md:`), deskt
 | `FEXPORT_CONVERT_NO_ANIMATIONS=1` | Skip animation recording during analysis (faster; motion tasks will be empty). |
 | `FEXPORT_E2E=1` | Enables the slow end-to-end test in this repo (`npm install` + `next build` of a generated project). |
 
-The v2 wizard (`npm run cli:v2`) also offers **"Convert to a Next.js project now?"** after a successful Framer export.
+The v2 wizard (`npm run cli:v2`) offers **"Convert to a Next.js project now?"** after a successful Framer export and continues straight into the dashboard.
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Message / symptom | Fix |
 |---|---|
@@ -133,7 +190,7 @@ The v2 wizard (`npm run cli:v2`) also offers **"Convert to a Next.js project now
 
 ---
 
-## 8. Known limitations (beta)
+## 9. Known limitations (beta)
 
 - **Framer only.** Other platforms are planned behind the adapter interface.
 - **Animations are checked by eye.** Recorded timings are estimates; some hero entrance animations are not detected.
