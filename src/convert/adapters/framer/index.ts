@@ -9,7 +9,7 @@ import { derivePages } from './routes.js';
 import { extractTokens } from './tokens.js';
 import { observeAnimations } from './animations.js';
 import { pageSections } from './sections.js';
-import { readSsrAppear, ssrAppearCandidates, withoutObserved } from './ssr-appear.js';
+import { readSsrChanges, ssrAppearCandidates, ssrAppearEntries, withoutObserved, type SsrChange } from './ssr-appear.js';
 import { settleExport } from '../../verify/settle.js';
 import { startExportServer } from '../../verify/serve.js';
 import { warn } from '../../../logger/index.js';
@@ -42,20 +42,29 @@ async function analyze(ctx: StageContext, opts?: { animations?: boolean }): Prom
 
 /**
  * Observe runtime animations on a loaded page, plus appear effects recovered from the export HTML's SSR
- * initial styles (read once the page has settled, before scrolling) that the observer did not already record.
+ * initial styles that the observer did not already record. The SSR state is read once the page has
+ * settled (~2.5 s, before scrolling) and again, back at the top, after observation (for effects that wait
+ * for a loader).
  */
 export async function observePage(page: Page, route: string, html: string): Promise<AnimationEntry[]> {
   const candidates = ssrAppearCandidates(html);
-  let ssr: AnimationEntry[] = [];
-  const found = await observeAnimations(page, route, {
-    onSettled: async () => {
-      try {
-        ssr = await readSsrAppear(page, route, candidates);
-      } catch (err) {
-        warn(`animations: ${route}: SSR appear check failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
+  const changes: SsrChange[] = [];
+  const read = async (only?: Set<number>) => {
+    try {
+      changes.push(...(await readSsrChanges(page, candidates, only)));
+    } catch (err) {
+      warn(`animations: ${route}: SSR appear check failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  });
+  };
+  const found = await observeAnimations(page, route, { onSettled: () => read() });
+  if (candidates.length) {
+    await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+    await new Promise((r) => setTimeout(r, 100));
+    const seen = new Set(changes.map((c) => c.i));
+    await read(new Set(candidates.map((_, i) => i).filter((i) => !seen.has(i))));
+  }
+  changes.sort((a, b) => a.i - b.i);
+  const ssr = ssrAppearEntries(route, candidates, changes);
   return [...found, ...(await withoutObserved(page, ssr, found))];
 }
 

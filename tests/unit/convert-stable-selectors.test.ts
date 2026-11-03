@@ -60,3 +60,22 @@ test('referenceKey changes when only a section selector changes', () => {
   assert.notEqual(a, b);
   assert.equal(a, referenceKey('<html></html>', [{ name: 'Hero', selector: '#main > div:nth-child(2)' }]));
 });
+
+test('split-text spans get a group selector; identical changes collapse into one entry', async () => {
+  const { ssrAppearEntries } = await import('../../src/convert/adapters/framer/ssr-appear.js');
+  const html =
+    '<div id="main"><h1 data-framer-name="Title"><span><span style="opacity:0.001">A</span><span style="opacity:0.001">B</span></span></h1>' +
+    '<div data-framer-name="Card" style="opacity:0">x</div></div>';
+  const c = ssrAppearCandidates(html);
+  assert.equal(c.length, 3);
+  assert.equal(c[0]!.group, `#main > h1:nth-child(1 of ${STABLE_OF}) > span > span`);
+  assert.equal(c[2]!.group, undefined);
+  const ch = (i: number) => ({ i, from: { opacity: c[i]!.from.opacity! }, to: { opacity: '1' } });
+  const entries = ssrAppearEntries('/', c, [ch(0), ch(1), ch(2)]);
+  assert.deepEqual(
+    entries.map((e) => [e.selector, e.framerName]),
+    [[c[0]!.group, undefined], [c[2]!.selector, 'Card']]
+  );
+  // A lone changed span keeps its own selector.
+  assert.equal(ssrAppearEntries('/', c, [ch(1)])[0]!.selector, c[1]!.selector);
+});

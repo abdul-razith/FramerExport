@@ -14,9 +14,14 @@ export interface SsrInitial {
   selector: string;
   name?: string;
   from: { opacity?: string; transform?: string };
+  /**
+   * For a span inside a text block (`h1 > span > span`, Framer's split-text effects), a selector for all
+   * spans at the same depth under that block: changed siblings with identical from/to collapse into one entry.
+   */
+  group?: string;
 }
 
-const MAX_CANDIDATES = 500;
+const MAX_CANDIDATES = 2000;
 
 /** Inline style declarations; `;` inside parentheses or quotes (data URLs) does not split. */
 function declarations(style: string): Map<string, string> {
@@ -83,6 +88,12 @@ export function ssrAppearCandidates(html: string): SsrInitial[] {
     if (!from.opacity && !from.transform) continue;
     const c: SsrInitial = { selector: stablePathFromMain(n, main), from };
     if (n.name !== undefined) c.name = n.name;
+    if (n.tag === 'span') {
+      const chain: string[] = [];
+      let a: Node | undefined = n;
+      for (; a && a.tag === 'span' && a !== main; a = a.parent) chain.unshift('span');
+      if (a && a !== main) c.group = `${stablePathFromMain(a, main)} > ${chain.join(' > ')}`;
+    }
     out.push(c);
   }
   return out;
@@ -95,6 +106,7 @@ const READ = String.raw`((cands) => {
     const y = new DOMMatrix(b).toFloat64Array();
     return x.every((v, i) => Math.abs(v - y[i]) < 0.01);
   };
+  const atRest = (t) => { try { return t === 'none' || close(t, 'none'); } catch (e) { return false; } };
   const out = [];
   for (const c of cands) {
     let el = null;
@@ -130,29 +142,54 @@ const READ = String.raw`((cands) => {
         to.transform = cs.transform;
       }
     }
-    if (Object.keys(to).length) out.push({ i: c.i, from, to });
+    // An appear effect ends at the element's rest state; anything else (JS-positioned items, a rotation
+    // caught mid-loop) is not one.
+    const rest = (to.opacity === undefined || parseFloat(to.opacity) >= 0.99) && (to.transform === undefined || atRest(to.transform));
+    if (Object.keys(to).length && rest) out.push({ i: c.i, from, to });
   }
   return out;
 })`;
 
+export interface SsrChange {
+  /** Index into the candidates array. */
+  i: number;
+  from: Record<string, string>;
+  to: Record<string, string>;
+}
+
 /**
- * Read the settled state of `candidates` on the loaded (not scrolled) page. Entries are emitted for
- * elements within the first viewport whose computed opacity/transform differ from the SSR inline values.
+ * Read the current state of `candidates` (by index; `only` limits which) on a page scrolled to the top.
+ * A change is reported for an element within the first viewport whose computed opacity/transform differ
+ * from the SSR inline values and have reached the rest state (opacity 1, no transform).
  */
-export async function readSsrAppear(page: Page, route: string, candidates: SsrInitial[]): Promise<AnimationEntry[]> {
-  if (!candidates.length) return [];
-  const payload = candidates.map((c, i) => ({ i, selector: c.selector, name: c.name, from: c.from }));
-  const found = (await page.evaluate(`${READ}(${JSON.stringify(payload)})`)) as Array<{
-    i: number;
-    from: Record<string, string>;
-    to: Record<string, string>;
-  }>;
-  return found.map((f) => {
-    const c = candidates[f.i]!;
-    const entry: AnimationEntry = { route, selector: c.selector, trigger: 'appear', from: f.from, to: f.to, confidence: 'low' };
-    if (c.name !== undefined) entry.framerName = c.name;
-    return entry;
-  });
+export async function readSsrChanges(page: Page, candidates: SsrInitial[], only?: Set<number>): Promise<SsrChange[]> {
+  const payload = candidates
+    .map((c, i) => ({ i, selector: c.selector, name: c.name, from: c.from }))
+    .filter((c) => !only || only.has(c.i));
+  if (!payload.length) return [];
+  return (await page.evaluate(`${READ}(${JSON.stringify(payload)})`)) as SsrChange[];
+}
+
+/** Appear entries for `changes`; split-text spans of one block with identical from/to collapse into one entry. */
+export function ssrAppearEntries(route: string, candidates: SsrInitial[], changes: SsrChange[]): AnimationEntry[] {
+  const key = (ch: SsrChange) => [candidates[ch.i]!.group, JSON.stringify(ch.from), JSON.stringify(ch.to)].join('\u0000');
+  const groupSize = new Map<string, number>();
+  for (const ch of changes) if (candidates[ch.i]!.group) groupSize.set(key(ch), (groupSize.get(key(ch)) ?? 0) + 1);
+  const emitted = new Set<string>();
+  const out: AnimationEntry[] = [];
+  for (const ch of changes) {
+    const c = candidates[ch.i]!;
+    let selector = c.selector;
+    if (c.group && groupSize.get(key(ch))! >= 2) {
+      if (emitted.has(key(ch))) continue;
+      emitted.add(key(ch));
+      selector = c.group;
+    }
+    const entry: AnimationEntry = { route, selector, trigger: 'appear', from: ch.from, to: ch.to, confidence: 'low' };
+    if (c.name !== undefined && selector === c.selector) entry.framerName = c.name;
+    out.push(entry);
+  }
+  return out;
 }
 
 /** Drop SSR entries whose element already has an observed appear (or loop) entry. */

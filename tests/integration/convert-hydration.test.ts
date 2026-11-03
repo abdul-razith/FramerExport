@@ -83,6 +83,9 @@ body { margin: 0; } .s { height: 100px; } #spacer { height: 2500px; } #end { hei
 <div class="framer-Root">
 <div data-framer-name="Hero" class="s" style="opacity:0;transform:translateY(40px)">Hello</div>
 <div data-framer-name="Static" class="s" style="transform:translateX(-50%)">Centered</div>
+<div data-framer-name="Late" class="s" style="opacity:0.001;transform:translateY(20px)">After the loader</div>
+<div data-framer-name="Dragged" class="s" style="transform:translate(calc(-50% + 30px), 0)">JS positioned</div>
+<h2 data-framer-name="Split"><span><span style="opacity:0.001">A</span><span style="opacity:0.001">B</span><span style="opacity:0.001">C</span></span></h2>
 <div id="spacer"></div>
 <div data-framer-name="Below" class="s tr" style="opacity:0;transform:translateY(40px)">Below</div>
 <div id="end"></div>
@@ -93,6 +96,11 @@ addEventListener('load', () => {
   const hero = document.querySelector('[data-framer-name="Hero"]');
   hero.style.opacity = '1';
   hero.style.transform = 'none';
+  for (const sp of document.querySelectorAll('h2 span span')) sp.style.opacity = '1';
+  // Runtime-positioned element (not an appear effect: it does not end at rest).
+  document.querySelector('[data-framer-name="Dragged"]').style.transform = 'translate(12px, 0)';
+  // Appears only once a loader has finished, well after the first SSR read.
+  setTimeout(() => { const late = document.querySelector('[data-framer-name="Late"]'); late.style.opacity = '1'; late.style.transform = 'none'; }, 4000);
 });
 new IntersectionObserver((entries, obs) => {
   for (const e of entries) if (e.isIntersecting) { e.target.style.opacity = '1'; e.target.style.transform = 'none'; obs.unobserve(e.target); }
@@ -101,12 +109,13 @@ new IntersectionObserver((entries, obs) => {
 ${HYDRATE}
 </body></html>`;
 
-test('an appear effect rendered from SSR initial styles yields one appear entry', { timeout: 120_000 }, async () => {
+test('appear effects rendered from SSR initial styles yield appear entries (rest state, late, split text)', { timeout: 120_000 }, async () => {
   await page.setContent(APPEAR_HTML, { waitUntil: 'load' });
   const entries = await observePage(page, '/', APPEAR_HTML);
   const appear = entries.filter((e) => e.trigger === 'appear');
-  assert.equal(appear.length, 1, JSON.stringify(entries, null, 1));
-  const a = appear[0]!;
+  assert.equal(appear.length, 3, JSON.stringify(entries, null, 1));
+  const a = appear.find((e) => e.framerName === 'Hero')!;
+  assert.ok(a, JSON.stringify(appear, null, 1));
   assert.equal(a.framerName, 'Hero');
   assert.equal(a.route, '/');
   assert.equal(a.confidence, 'low');
@@ -116,7 +125,13 @@ test('an appear effect rendered from SSR initial styles yields one appear entry'
   assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(a.selector)}).dataset.framerName`), 'Hero');
   // The element below the fold is the scroll trigger's, not a duplicate appear.
   assert.ok(entries.some((e) => e.trigger === 'scroll' && e.framerName === 'Below'), JSON.stringify(entries, null, 1));
-  assert.ok(!entries.some((e) => e.framerName === 'Static'));
+  assert.ok(!entries.some((e) => e.framerName === 'Static' || e.framerName === 'Dragged'));
+  const late = appear.find((e) => e.framerName === 'Late');
+  assert.deepEqual(late?.to, { opacity: '1', transform: 'none' });
+  const split = appear.filter((e) => /h2:nth-child/.test(e.selector));
+  assert.equal(split.length, 1, JSON.stringify(appear, null, 1));
+  assert.match(split[0]!.selector, /h2:nth-child\(\d+ of :not\([^)]*\)\) > span > span$/);
+  assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(split[0]!.selector)}).length`), 3);
 });
 
 const nudge = path.resolve('out/framer-nudge');
