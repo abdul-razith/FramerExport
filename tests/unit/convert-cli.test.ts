@@ -3,6 +3,9 @@ import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
+import { existsSync } from 'node:fs';
+import { pickNextTask } from '../../src/convert/pipeline.js';
+import { initState } from '../../src/convert/state.js';
 import { formatStatus, parseConvertArgs, runConvertCommand, runPipeline } from '../../src/convert/index.js';
 
 const fixture = path.resolve('tests/fixtures/framer-nudge-mini');
@@ -59,4 +62,28 @@ test('runConvertCommand status outside a project returns 1', async () => {
   } finally {
     process.chdir(prev);
   }
+});
+
+test('unknown convert target prints usage and returns 1 without creating dirs', async () => {
+  const lines: string[] = [];
+  const sink = { log: (m: string) => lines.push(m), error: (m: string) => lines.push(m) };
+  const name = 'bogus-not-a-dir';
+  assert.equal(await runConvertCommand([name], sink), 1);
+  const text = lines.join(' ');
+  assert.match(text, /Export folder not found/);
+  assert.match(text, /Usage:/);
+  assert.equal(existsSync(path.resolve(name + '-next')), false);
+});
+
+test('convert --help returns 0', async () => {
+  const lines: string[] = [];
+  assert.equal(await runConvertCommand(['--help'], { log: (m) => lines.push(m), error: (m) => lines.push(m) }), 0);
+  assert.match(lines.join(' '), /Usage:/);
+});
+
+test('pickNextTask prefers fix tasks', () => {
+  const state = initState('/e', '/n');
+  const mk = (id: string) => ({ id, kind: 'fix' as const, file: id + '.md', status: 'pending' as const, attempts: 0, targets: [] });
+  state.tasks = { '001-a': mk('001-a'), 'fix-002': mk('fix-002') };
+  assert.equal(pickNextTask(state)?.id, 'fix-002');
 });

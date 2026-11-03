@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { StageContext } from './adapters/types.js';
 import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipeline.js';
@@ -49,7 +49,16 @@ async function readAnimations(root: string): Promise<AnimationEntry[]> {
   }
 }
 
-export async function runConvertCommand(argv: string[]): Promise<number> {
+export interface ConvertOutput {
+  log(msg: string): void;
+  error(msg: string): void;
+}
+
+export async function runConvertCommand(
+  argv: string[],
+  out: ConvertOutput = { log: (m) => console.log(m), error: (m) => console.error(m) }
+): Promise<number> {
+  const console = { log: out.log, error: out.error };
   const rest = argv[0] === 'convert' ? argv.slice(1) : argv;
   if (rest.includes('--help') || rest.includes('-h')) {
     console.log(CONVERT_USAGE);
@@ -58,6 +67,12 @@ export async function runConvertCommand(argv: string[]): Promise<number> {
   const args = parseConvertArgs(rest);
   if (args.command === 'run') {
     if (!args.exportDir || args.exportDir.startsWith('-')) {
+      console.error(CONVERT_USAGE);
+      return 1;
+    }
+    const isDir = await stat(args.exportDir).then((x) => x.isDirectory(), () => false);
+    if (!isDir) {
+      console.error(`Export folder not found: ${path.resolve(args.exportDir)}`);
       console.error(CONVERT_USAGE);
       return 1;
     }

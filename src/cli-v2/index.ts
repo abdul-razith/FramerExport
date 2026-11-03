@@ -120,7 +120,11 @@ export async function runCliV2Workflow(argv: string[] = process.argv.slice(2)): 
     await runAiPromptAssistant(exportSummary.exporter);
 
     // Step 6: Offer Framer -> Next.js conversion (interactive terminals only)
-    await offerConversion(exportSummary.outDir);
+    try {
+      await offerConversion(exportSummary.outDir);
+    } catch (error) {
+      console.error(`Conversion failed: ${(error as Error).message}`);
+    }
 
     uiOutro(`Export completed successfully in ${exportSummary.outDir}!`);
   } catch (err) {
