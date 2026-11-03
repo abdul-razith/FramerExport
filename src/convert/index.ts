@@ -3,7 +3,8 @@ import path from 'node:path';
 import { framerAdapter } from './adapters/framer/index.js';
 import type { StageContext } from './adapters/types.js';
 import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipeline.js';
-import { findProjectRoot, loadState } from './state.js';
+import { findProjectRoot, loadState, saveState } from './state.js';
+import { CLI_INVOCATION } from './tasks/templates/index.js';
 import { runVerify } from './stages/verify.js';
 import type { AnimationEntry } from './types.js';
 
@@ -11,7 +12,7 @@ export { formatStatus, runPipeline } from './pipeline.js';
 export type { ConvertIo } from './pipeline.js';
 
 export interface ConvertArgs {
-  command: 'run' | 'status' | 'next' | 'verify';
+  command: 'run' | 'status' | 'next' | 'verify' | 'done';
   exportDir?: string;
   nextDir?: string;
   target?: string;
@@ -23,6 +24,7 @@ export const CONVERT_USAGE = `Usage:
   fexport convert status                          show stages, tasks, warnings and the motion checklist
   fexport convert next                            show the next task to give to your AI coding agent
   fexport convert verify [target]                 build and compare against the export, write fix tasks
+  fexport convert done <taskId>                   mark a motion task done after ticking its checklist
 
 nextDir defaults to <exportDir>-next. status/next/verify run from inside the converted project.`;
 
@@ -33,6 +35,9 @@ export function parseConvertArgs(argv: string[]): ConvertArgs {
   const [first, second] = rest.filter((a) => a !== '--yes' && a !== '-y');
   if (first === 'status' || first === 'next') {
     return { command: first, exportDir: undefined, nextDir: undefined, target: undefined, yes };
+  }
+  if (first === 'done') {
+    return { command: 'done', exportDir: undefined, nextDir: undefined, target: second, yes };
   }
   if (first === 'verify') {
     return { command: 'verify', exportDir: undefined, nextDir: undefined, target: second, yes };
@@ -105,7 +110,7 @@ export async function runConvertCommand(
   if (args.command === 'next') {
     const task = pickNextTask(state);
     if (!task) {
-      console.log('No pending tasks.');
+      console.log('No pending tasks');
       return 0;
     }
     const file = path.join(root, task.file);
@@ -117,6 +122,24 @@ export async function runConvertCommand(
     } catch {
       console.log('(task file not readable)');
     }
+    return 0;
+  }
+  if (args.command === 'done') {
+    const task = args.target ? state.tasks[args.target] : undefined;
+    if (!task) {
+      console.error(args.target ? `Unknown task: ${args.target}` : 'Usage: fexport convert done <taskId>');
+      return 1;
+    }
+    const original = task.kind === 'fix' ? state.tasks[task.id.replace(/^fix-/, '').replace(/-\d+$/, '')] : task;
+    if (original?.kind !== 'motion') {
+      console.error(
+        `${task.id} is a ${task.kind} task; "done" is only for motion tasks. Run "${CLI_INVOCATION} verify ${task.id}" instead.`
+      );
+      return 1;
+    }
+    task.status = 'done';
+    await saveState(state);
+    console.log(`Marked ${task.id} done.`);
     return 0;
   }
   const ctx: StageContext = { state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) };

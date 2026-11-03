@@ -39,7 +39,7 @@ Rebuild the Framer component \`{{name}}\` as a React component that is visually 
 {{rules}}
 
 ## Done when
-Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes.
+Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes: the target file exists and the app builds. Pixel parity is checked through the page tasks that use this component (the reference crops above are your visual target).
 `,
 
   page: `# Task {{taskId}}: rebuild page {{route}}
@@ -87,7 +87,7 @@ Implement each animation below (framer-motion is available); entries marked low 
 {{rules}}
 
 ## Done when
-Tick every item in the checklist above, then run \`${CLI_INVOCATION} verify {{route}}\`.
+Tick every item in the checklist above, then run \`${CLI_INVOCATION} done {{taskId}}\`.
 `,
 
   fix: `# Fix {{taskId}} (attempt {{attempt}})

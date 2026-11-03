@@ -26,12 +26,16 @@ async function readPlatform(exportDir: string): Promise<string> {
   }
 }
 
-/** First actionable task by id, preferring fix-* tasks. */
+const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, component: 1, page: 2, motion: 3 };
+
+/**
+ * First actionable task: fix tasks, then components, pages and motion, by id within a kind. The `build`
+ * record only counts build failures (its fix-build-<n> tasks are the actionable ones).
+ */
 export function pickNextTask(state: ConvertState): TaskRecord | undefined {
-  const open = Object.values(state.tasks)
-    .filter((t) => t.status === 'pending' || t.status === 'in-progress')
-    .sort((a, b) => a.id.localeCompare(b.id));
-  return open.find((t) => t.id.startsWith('fix-')) ?? open[0];
+  return Object.values(state.tasks)
+    .filter((t) => t.id !== 'build' && (t.status === 'pending' || t.status === 'in-progress'))
+    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.id.localeCompare(b.id))[0];
 }
 
 export async function runPipeline(exportDir: string, nextDir: string, io: ConvertIo): Promise<ConvertState> {

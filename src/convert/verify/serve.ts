@@ -119,7 +119,7 @@ export async function startNextServer(
   if (outcome.code !== 0) throw new BuildFailedError(buildLog);
 
   const port = await freePort();
-  const proc = spawnManaged(npmCommand, ['run', 'start', '--', '-p', String(port)], { cwd: nextDir });
+  const proc = spawnManaged(npmCommand, ['run', 'start', '--', '-p', String(port), '-H', '127.0.0.1'], { cwd: nextDir });
   const output = collectOutput(proc.child);
   const url = `http://127.0.0.1:${port}`;
   try {

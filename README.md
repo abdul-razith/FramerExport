@@ -199,6 +199,7 @@ fexport convert <export-dir> [next-dir] [--yes]   run the code stages (next-dir 
 fexport convert status                            stages, task counts, warnings, motion checklist
 fexport convert next                              the next task to give to your agent
 fexport convert verify [target]                   build, diff against the export, write fix tasks
+fexport convert done <taskId>                     mark a motion task done after ticking its checklist
 ```
 
 The loop: run `convert`, then `npm install` inside the generated project (the converter never installs packages itself, and `verify` refuses to run until `node_modules` exists), work through `fexport convert next` in your agent, run `fexport convert verify`, repeat with the generated `fix-*` tasks until nothing fails. Generated task files call the CLI as `npx -p framer-export fexport convert ...`, so `npx` always resolves this package. The v2 wizard also offers conversion after a Framer export.

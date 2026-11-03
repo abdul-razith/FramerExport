@@ -276,7 +276,8 @@ export async function runVerify(
         selectedRoutes = jobs.map((j) => j.route);
       } else {
         selected = [original];
-        selectedRoutes = routesOfTask(original);
+        // Components are judged by file + build; their pixels are judged through the page tasks.
+        selectedRoutes = original.kind === 'component' ? [] : routesOfTask(original);
       }
     }
     // Fix tasks are resolved through their original task.
@@ -349,7 +350,7 @@ export async function runVerify(
       for (const t of tasks) if (t.kind === 'fix' && t.id.startsWith('fix-build-')) t.status = 'done';
 
       let page: Page | undefined;
-      try {
+      if (verifyJobs.length) try {
         exportServer = await startExportServer(exportDir);
         browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
         page = await browser.newPage();
@@ -452,26 +453,6 @@ export async function runVerify(
         );
       });
     };
-    const componentPasses = (name: string, routesUsed: string[]): boolean =>
-      routesUsed.length > 0 &&
-      routesUsed.every((route) => {
-        const perWidth = outcomes.get(route);
-        if (!perWidth) return false;
-        return VERIFY_WIDTHS.every((w) => {
-          const o = perWidth.get(w);
-          if (!o || o.error || o.http) return false;
-          const owning = Object.entries(o.components)
-            .filter(([, names]) => names.includes(name))
-            .map(([section]) => section);
-          // No section holds the component: fall back to the whole route.
-          if (!owning.length) return routePasses(route);
-          return (
-            o.sections.filter((s) => owning.includes(s.name)).every((s) => s.pass) &&
-            o.dom.every((d) => !owning.includes(d.section))
-          );
-        });
-      });
-
     const fixesOf = (id: string): TaskRecord[] =>
       tasks.filter(
         (t) => t.kind === 'fix' && t.id.startsWith(`fix-${id}-`) && /^\d+$/.test(t.id.slice(`fix-${id}-`.length))
@@ -482,22 +463,24 @@ export async function runVerify(
         report.manualChecklist.push({ taskId: task.id, route: task.route, file: task.file, status: task.status });
         continue;
       }
+      if (task.kind === 'component') {
+        // The build above succeeded; the component is done once its target file exists.
+        const missing = [];
+        for (const t of task.targets) if (!(await exists(path.join(nextDir, t)))) missing.push(t);
+        if (!missing.length) {
+          recordAttempt(state, task.id, true);
+          report.passed.push(task.id);
+        } else {
+          // Not a failed attempt: nothing was judged yet.
+          report.failed.push(task.id);
+          warn(`verify: ${task.id} not done: missing ${missing.join(', ')}`);
+        }
+        continue;
+      }
       // Infrastructure errors give no verdict: the task keeps its status and no attempt is used.
       if (routesOfTask(task).some((r) => erroredRoutes.has(r))) {
         report.skipped.push(task.id);
         ctx.log(`verify: ${task.id} not judged (infrastructure errors; see report.json errors)`);
-        continue;
-      }
-      if (task.kind === 'component') {
-        const name = task.targets[0]?.replace(/^src\/components\//, '').replace(/\.tsx$/, '') ?? '';
-        const used = routesOfTask(task);
-        if (componentPasses(name, used)) {
-          recordAttempt(state, task.id, true);
-          report.passed.push(task.id);
-        } else {
-          // Not a failed attempt: the component stays pending until its pages pass.
-          report.failed.push(task.id);
-        }
         continue;
       }
       // page task

@@ -92,7 +92,7 @@ test('convert --help returns 0', async () => {
 
 test('pickNextTask prefers fix tasks', () => {
   const state = initState('/e', '/n');
-  const mk = (id: string) => ({ id, kind: 'fix' as const, file: id + '.md', status: 'pending' as const, attempts: 0, targets: [] });
-  state.tasks = { '001-a': mk('001-a'), 'fix-002': mk('fix-002') };
+  const mk = (id: string, kind: 'fix' | 'component') => ({ id, kind, file: id + '.md', status: 'pending' as const, attempts: 0, targets: [] });
+  state.tasks = { '001-a': mk('001-a', 'component'), 'fix-002': mk('fix-002', 'fix') };
   assert.equal(pickNextTask(state)?.id, 'fix-002');
 });

@@ -106,7 +106,7 @@ test('every task file has six headings in order and exact Done when', async () =
     assert.doesNotMatch(text, /\{\{/);
     const done = text.slice(text.indexOf('## Done when'));
     if (r.kind === 'motion') {
-      assert.match(done, /Tick every item in the checklist above, then run `npx -p framer-export fexport convert verify \/about`\./);
+      assert.match(done, new RegExp(`Tick every item in the checklist above, then run \`npx -p framer-export fexport convert done ${r.id}\`\.`));
     } else {
       assert.match(done, new RegExp(`Run \`npx -p framer-export fexport convert verify ${r.id}\` and confirm it passes\.`));
       assert.match(text, /\.convert\/analysis\/slices\/_base\.css/);
