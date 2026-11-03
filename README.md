@@ -192,6 +192,8 @@ Every run writes `export.log` with untruncated messages from its retained log hi
 
 ## Convert to Next.js (beta)
 
+Full step-by-step guide: [CONVERT_GUIDE.md](CONVERT_GUIDE.md).
+
 `fexport convert` turns a Framer export into a Next.js (App Router, Tailwind) project. Code stages analyse the export, extract CMS data, scaffold the project and write one task file per component, page and motion into `.convert/tasks/`. You then hand those tasks to an AI coding agent (Claude Code, Antigravity, ...), and `verify` compares the result with the original and writes fix tasks for anything that differs.
 
 ```
