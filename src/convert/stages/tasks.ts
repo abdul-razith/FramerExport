@@ -74,10 +74,21 @@ async function readOrWarn(ctx: StageContext, file: string, label: string): Promi
 
 const toPosix = (p: string): string => p.split(path.sep).join('/');
 
-/** Ordered section names of a page (see pageSections). */
+/** Name of the single section used when no sections are detected: the whole page. */
+export const FALLBACK_SECTION = 'page';
+
+/**
+ * Sections of an exported page; when none are detected, one `page` section covering `#main` (the Next
+ * side marks it with `data-section="page"` on the page root). Shared by tasks and verify so both agree.
+ */
+export function sectionsWithFallback(sections: Array<{ name: string; selector: string }>): Array<{ name: string; selector: string }> {
+  return sections.length ? sections : [{ name: FALLBACK_SECTION, selector: '#main' }];
+}
+
+/** Ordered section names of a page (see pageSections), with the `page` fallback. */
 async function sectionsFor(ctx: StageContext, page: PageInfo): Promise<string[]> {
   const html = (await readOrWarn(ctx, path.join(ctx.exportDir, page.sourceFile), page.sourceFile)) ?? '';
-  return pageSections(html).map((s) => s.name);
+  return sectionsWithFallback(pageSections(html)).map((s) => s.name);
 }
 
 export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
@@ -151,9 +162,10 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
           ...(contentFile ? [`CMS content: ${code(contentFile)}`] : []),
           ...WIDTHS.map((w) => `Reference screenshot at ${w}px: ${code(`.convert/reference/${slug}/${w}.png`)}`),
         ]),
-        sections: sections.length
-          ? bullets(sections.map((s) => `${code(s)}: \`data-section="${s}"\``), '  ')
-          : '  - (no sections detected; render the page content in a single section)',
+        sections:
+          sections.length === 1 && sections[0] === FALLBACK_SECTION
+            ? `  - ${code(FALLBACK_SECTION)}: \`data-section="${FALLBACK_SECTION}"\` on the root element (no sections detected; render the whole page inside it)`
+            : bullets(sections.map((s) => `${code(s)}: \`data-section="${s}"\``), '  '),
         components: used.length
           ? `- Reuse the components built in \`src/components/\`: ${used.map(code).join(', ')}.`
           : '- No shared components are used on this page.',

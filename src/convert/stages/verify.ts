@@ -11,7 +11,7 @@ import { capturePage, type CaptureResult } from '../verify/capture.js';
 import { compareSections, crop, type SectionResult } from '../verify/diff.js';
 import { compareDom, extractSectionDom, nextSections, type DomMismatch, type SectionDom } from '../verify/dom-check.js';
 import { BuildFailedError, startExportServer, startNextServer } from '../verify/serve.js';
-import { renderTemplate, routeSlug } from './tasks.js';
+import { renderTemplate, routeSlug, sectionsWithFallback } from './tasks.js';
 
 export const VERIFY_WIDTHS = [1440, 1000, 390] as const;
 const BUILD_LOG_LINES = 80;
@@ -363,7 +363,7 @@ export async function runVerify(
         outcomes.set(job.route, perWidth);
         report.routes[job.route] = {};
         const html = await readFile(path.join(exportDir, job.exportFile), 'utf8').catch(() => '');
-        const sections = adapter.sections(html);
+        const sections = sectionsWithFallback(adapter.sections(html));
         const pageComponents = components.filter((c) => c.pages.includes(job.route));
         const refRouteDir = path.join(refDir, job.slug);
         const refJsonFile = path.join(refRouteDir, 'sections.json');

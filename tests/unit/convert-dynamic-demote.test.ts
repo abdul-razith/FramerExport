@@ -122,3 +122,21 @@ test('scaffold refuses a dynamic page without a collection', () => {
     /dynamic route \/blog\/\[slug\] has no CMS collection/,
   );
 });
+
+test('page without detected sections: task and verify share one `page` section on #main', async () => {
+  const { sectionsWithFallback } = await import('../../src/convert/stages/tasks.js');
+  assert.deepEqual(sectionsWithFallback(framerAdapter.sections(doc('Empty', ''))), [{ name: 'page', selector: '#main' }]);
+  const exportDir = await makeExport({ 'index.html': doc('Empty', '') });
+  const nextDir = exportDir + '-next';
+  tmps.push(nextDir);
+  const prev = process.env.FEXPORT_CONVERT_NO_ANIMATIONS;
+  process.env.FEXPORT_CONVERT_NO_ANIMATIONS = '1';
+  try {
+    await runPipeline(exportDir, nextDir, { confirm: async () => true, log: () => {} });
+  } finally {
+    if (prev === undefined) delete process.env.FEXPORT_CONVERT_NO_ANIMATIONS;
+    else process.env.FEXPORT_CONVERT_NO_ANIMATIONS = prev;
+  }
+  const task = await readFile(path.join(nextDir, '.convert', 'tasks', '101-page-home.md'), 'utf8');
+  assert.match(task, /`page`: `data-section="page"` on the root element/);
+});
