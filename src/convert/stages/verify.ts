@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import puppeteer, { type Browser, type Page } from 'puppeteer';
+import puppeteer, { type Browser, type HTTPResponse, type Page } from 'puppeteer';
 import { PNG } from 'pngjs';
 import { framerAdapter } from '../adapters/framer/index.js';
 import type { StageContext } from '../adapters/types.js';
-import { recordAttempt, saveState } from '../state.js';
+import { recordAttempt, saveState, writeFileAtomic } from '../state.js';
 import type { ComponentInfo, PageInfo, TaskRecord } from '../types.js';
 import { SHARED_RULES } from '../tasks/templates/index.js';
 import { capturePage, type CaptureResult } from '../verify/capture.js';
@@ -16,6 +17,13 @@ import { renderTemplate, routeSlug } from './tasks.js';
 export const VERIFY_WIDTHS = [1440, 1000, 390] as const;
 const BUILD_LOG_LINES = 80;
 const MAX_TEXT = 400;
+/** Synthetic task tracking consecutive build failures (capped by recordAttempt like any task). */
+const BUILD_TASK = 'build';
+
+export interface VerifyOptions {
+  /** Page navigation timeout in ms (default 60 000). */
+  navigationTimeoutMs?: number;
+}
 
 type Box = CaptureResult['sections'][number]['box'];
 
@@ -27,7 +35,7 @@ interface RouteJob {
   nextPath: string;
 }
 
-/** Cached reference data of one route at one width (`.convert/reference/<slug>/sections.json`). */
+/** Cached reference data of one route at one width. */
 interface ReferenceWidth {
   sections: CaptureResult['sections'];
   dom: SectionDom[];
@@ -37,22 +45,37 @@ interface ReferenceWidth {
   componentBoxes: Record<string, Box | null>;
 }
 
+/** `.convert/reference/<slug>/sections.json`: widths are valid only while `key` matches the export page. */
+interface ReferenceCache {
+  key: string;
+  widths: Record<string, ReferenceWidth>;
+}
+
 type ReportSection = Omit<SectionResult, 'diffPng' | 'expectedPng' | 'actualPng'>;
 
 interface WidthOutcome {
   sections: SectionResult[];
   dom: DomMismatch[];
+  /** Infrastructure error (navigation timeout, browser, export server): no verdict for this width. */
   error?: string;
+  /** Next answered the page with a 5xx status (`HTTP <status>`): a code defect, so a failure. */
+  http?: string;
   /** Reference section -> component names, for component-task scoping. */
   components: Record<string, string[]>;
 }
 
 interface Report {
   generatedAt: string;
-  build?: { failed: true; fixTask?: string };
-  routes: Record<string, Record<string, { sections: ReportSection[]; dom: DomMismatch[]; error?: string }>>;
+  build?: { failed: true; fixTask?: string; attempts: number };
+  routes: Record<
+    string,
+    Record<string, { sections: ReportSection[]; dom: DomMismatch[]; http?: string; error?: string }>
+  >;
+  errors: Array<{ route: string; width: number; message: string }>;
   passed: string[];
   failed: string[];
+  /** Tasks left untouched because infrastructure errors prevented a verdict. */
+  skipped: string[];
   manualChecklist: Array<{ taskId: string; route?: string; file: string; status: string }>;
 }
 
@@ -74,6 +97,7 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
+const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 const code = (s: string): string => `\`${s}\``;
 const bullets = (items: string[]): string => items.map((i) => `- ${i}`).join('\n');
 const fileSafe = (s: string): string => s.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
@@ -150,14 +174,44 @@ async function componentLayout(
   )) as Pick<ReferenceWidth, 'components' | 'componentBoxes'>;
 }
 
-export async function runVerify(ctx: StageContext, target?: string): Promise<{ passed: string[]; failed: string[] }> {
+/** Load a route's reference cache; a missing, stale (key mismatch) or corrupt file is a cache miss. */
+async function readReference(file: string, key: string, warn: (msg: string) => void): Promise<ReferenceCache> {
+  let raw: string;
+  try {
+    raw = await readFile(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { key, widths: {} };
+    throw error;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<ReferenceCache>;
+    if (parsed && parsed.key === key && parsed.widths && typeof parsed.widths === 'object') {
+      return { key, widths: parsed.widths };
+    }
+  } catch {
+    warn(`verify: corrupt reference cache ${file}; recapturing`);
+  }
+  return { key, widths: {} };
+}
+
+export async function runVerify(
+  ctx: StageContext,
+  target?: string,
+  opts: VerifyOptions = {}
+): Promise<{ passed: string[]; failed: string[] }> {
   const { state, nextDir, exportDir } = ctx;
+  const navigationTimeoutMs = opts.navigationTimeoutMs ?? 60_000;
   const convertDir = path.join(nextDir, '.convert');
   const analysisDir = path.join(convertDir, 'analysis');
   const diffsDir = path.join(convertDir, 'diffs');
   const refDir = path.join(convertDir, 'reference');
+  const warn = (msg: string): void => {
+    ctx.log(msg);
+    if (!state.warnings.includes(msg)) state.warnings.push(msg);
+  };
 
   try {
+    state.warnings = state.warnings.filter((w) => !w.startsWith('verify:'));
     await rm(diffsDir, { recursive: true, force: true });
     await mkdir(diffsDir, { recursive: true });
 
@@ -169,8 +223,13 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
 
     // ---- target selection -------------------------------------------------------------------------
     const tasks = Object.values(state.tasks);
-    const originalOf = (t: TaskRecord): TaskRecord | undefined =>
-      t.kind === 'fix' ? state.tasks[t.id.replace(/^fix-/, '').replace(/-\d+$/, '')] : t;
+    /** A fix task resolves to the (non-fix) task it fixes; build fixes resolve to nothing. */
+    const originalOf = (t: TaskRecord): TaskRecord | undefined => {
+      if (t.kind !== 'fix') return t;
+      if (!t.id.startsWith('fix-')) return undefined;
+      const original = state.tasks[t.id.replace(/^fix-/, '').replace(/-\d+$/, '')];
+      return original && original.kind !== 'fix' ? original : undefined;
+    };
     const routesOfTask = (t: TaskRecord): string[] => {
       if (t.kind === 'component') {
         const name = t.targets[0]?.replace(/^src\/components\//, '').replace(/\.tsx$/, '');
@@ -178,11 +237,13 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
       }
       return t.route ? [t.route] : [];
     };
+    // Untargeted runs leave tasks that already need a human alone.
+    const outstanding = (): TaskRecord[] => tasks.filter((t) => t.status !== 'done' && t.status !== 'needs-human');
 
     let selected: TaskRecord[];
     let selectedRoutes: string[];
     if (target === undefined) {
-      selected = tasks.filter((t) => t.status !== 'done');
+      selected = outstanding();
       selectedRoutes = jobs.map((j) => j.route);
     } else if (target.startsWith('/')) {
       const job = jobs.find((j) => j.route === target || j.nextPath === target);
@@ -193,13 +254,13 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
       const task = state.tasks[target];
       if (!task) throw new Error(`verify: unknown task or route ${target}`);
       const original = originalOf(task);
-      if (task.kind === 'fix' && !original) {
-        // fix-build-<n> (or an orphaned fix): verify everything.
-        selected = tasks.filter((t) => t.status !== 'done');
+      if (!original) {
+        // The build task, fix-build-<n> or an orphaned fix: verify everything outstanding.
+        selected = outstanding();
         selectedRoutes = jobs.map((j) => j.route);
       } else {
-        selected = [original!];
-        selectedRoutes = routesOfTask(original!);
+        selected = [original];
+        selectedRoutes = routesOfTask(original);
       }
     }
     // Fix tasks are resolved through their original task.
@@ -213,8 +274,21 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
     ];
     const verifyJobs = jobs.filter((j) => selectedRoutes.includes(j.route));
 
-    const report: Report = { generatedAt: new Date().toISOString(), routes: {}, passed: [], failed: [], manualChecklist: [] };
+    const report: Report = {
+      generatedAt: new Date().toISOString(),
+      routes: {},
+      errors: [],
+      passed: [],
+      failed: [],
+      skipped: [],
+      manualChecklist: []
+    };
+    const writeReport = () => writeFileAtomic(path.join(diffsDir, 'report.json'), JSON.stringify(report, null, 2) + '\n');
     const outcomes = new Map<string, Map<number, WidthOutcome>>();
+    const infraError = (route: string, width: number, message: string): void => {
+      report.errors.push({ route, width, message });
+      warn(`verify: ${route}${width ? ` @ ${width}px` : ''}: ${message}`);
+    };
 
     // ---- servers, browser, capture ----------------------------------------------------------------
     let nextServer: Awaited<ReturnType<typeof startNextServer>> | undefined;
@@ -226,24 +300,49 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
         nextServer = await startNextServer(nextDir);
       } catch (error) {
         if (!(error instanceof BuildFailedError)) throw error;
-        const fixId = await writeBuildFix(ctx, error.log);
-        ctx.log(`verify: build failed, wrote ${fixId}`);
-        report.build = { failed: true, fixTask: fixId };
+        state.tasks[BUILD_TASK] ??= {
+          id: BUILD_TASK,
+          kind: 'fix',
+          file: '.convert/tasks/fix-build.md',
+          status: 'pending',
+          attempts: 0,
+          targets: []
+        };
+        const status = recordAttempt(state, BUILD_TASK, false);
+        const attempts = state.tasks[BUILD_TASK]!.attempts;
         report.failed.push('build');
-        await writeFile(path.join(diffsDir, 'report.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');
-        state.stages.verify = 'needs-ai';
+        if (status === 'needs-human') {
+          warn(`verify: build failed ${attempts} times; needs human`);
+          report.build = { failed: true, attempts };
+          state.stages.verify = 'failed';
+        } else {
+          const fixId = await writeBuildFix(ctx, error.log, attempts);
+          ctx.log(`verify: build failed, wrote ${fixId}`);
+          report.build = { failed: true, fixTask: fixId, attempts };
+          state.stages.verify = 'needs-ai';
+        }
+        await writeReport();
         await saveState(state);
         return { passed: [], failed: ['build'] };
       }
-      // A successful build resolves any outstanding build fixes.
+      // A successful build resolves the build task and any outstanding build fixes.
+      if (state.tasks[BUILD_TASK]) {
+        recordAttempt(state, BUILD_TASK, true);
+        state.tasks[BUILD_TASK]!.attempts = 0; // the cap counts consecutive failures
+      }
       for (const t of tasks) if (t.kind === 'fix' && t.id.startsWith('fix-build-')) t.status = 'done';
 
-      exportServer = await startExportServer(exportDir);
-      browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-      const page = await browser.newPage();
-      page.setDefaultNavigationTimeout(60_000);
+      let page: Page | undefined;
+      try {
+        exportServer = await startExportServer(exportDir);
+        browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+        page = await browser.newPage();
+        page.setDefaultNavigationTimeout(navigationTimeoutMs);
+      } catch (error) {
+        for (const job of verifyJobs) infraError(job.route, 0, `verify could not start: ${errMsg(error)}`);
+      }
 
-      for (const job of verifyJobs) {
+      for (const job of page ? verifyJobs : []) {
         const perWidth = new Map<number, WidthOutcome>();
         outcomes.set(job.route, perWidth);
         report.routes[job.route] = {};
@@ -252,43 +351,68 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
         const pageComponents = components.filter((c) => c.pages.includes(job.route));
         const refRouteDir = path.join(refDir, job.slug);
         const refJsonFile = path.join(refRouteDir, 'sections.json');
-        const refJson = await readJson<Record<string, ReferenceWidth>>(refJsonFile, {});
+        const refKey = sha256(html + '\u0000' + JSON.stringify(sections.map((s) => s.name)));
+        const cache = await readReference(refJsonFile, refKey, warn);
 
         for (const width of VERIFY_WIDTHS) {
           ctx.log(`verify: ${job.route} @ ${width}px`);
           let outcome: WidthOutcome;
           try {
             const refPng = path.join(refRouteDir, `${width}.png`);
-            let ref = refJson[String(width)];
+            let ref = cache.widths[String(width)];
             let expected: CaptureResult;
             if (ref && (await exists(refPng))) {
               expected = { png: await readFile(refPng), sections: ref.sections };
             } else {
-              expected = await capturePage(page, exportUrl(exportServer.url, job.exportFile), width, 'export', sections);
-              const dom = await extractSectionDom(page, sections);
-              const layout = await componentLayout(page, sections, pageComponents);
+              expected = await capturePage(
+                page!,
+                exportUrl(exportServer!.url, job.exportFile),
+                width,
+                'export',
+                sections,
+                navigationTimeoutMs
+              );
+              const dom = await extractSectionDom(page!, sections);
+              const layout = await componentLayout(page!, sections, pageComponents);
               ref = { sections: expected.sections, dom, ...layout };
-              await mkdir(refRouteDir, { recursive: true });
-              await writeFile(refPng, expected.png);
-              refJson[String(width)] = ref;
-              await writeFile(refJsonFile, JSON.stringify(refJson, null, 2) + '\n', 'utf8');
+              await writeFileAtomic(refPng, expected.png);
+              cache.widths[String(width)] = ref;
+              await writeFileAtomic(refJsonFile, JSON.stringify(cache, null, 2) + '\n');
             }
-            await writeComponentCrops(ctx, refDir, job.route, width, expected.png, ref, components);
+            await writeComponentCrops(refDir, job.route, html, width, expected.png, ref, components, warn);
 
-            const actual = await capturePage(page, nextServer.url + job.nextPath, width, 'next');
-            const actualDom = await extractSectionDom(page, await nextSections(page));
+            let status: number | undefined;
+            const onResponse = (res: HTTPResponse): void => {
+              if (res.request().isNavigationRequest() && res.frame() === page!.mainFrame()) status = res.status();
+            };
+            page!.on('response', onResponse);
+            let actual: CaptureResult;
+            try {
+              actual = await capturePage(page!, nextServer.url + job.nextPath, width, 'next', undefined, navigationTimeoutMs);
+            } finally {
+              page!.off('response', onResponse);
+            }
+            const actualDom = await extractSectionDom(page!, await nextSections(page!));
             const results = compareSections(expected, actual, width);
             const dom = compareDom(ref.dom, actualDom, { routes, images });
             outcome = { sections: results, dom, components: ref.components };
+            if (status !== undefined && status >= 500) outcome.http = `HTTP ${status}`;
           } catch (error) {
-            ctx.log(`verify: ${job.route} @ ${width}px failed: ${errMsg(error)}`);
+            infraError(job.route, width, errMsg(error));
             outcome = { sections: [], dom: [], error: errMsg(error), components: {} };
+            // A timed-out or crashed tab can stay wedged (later CDP calls hang until the protocol timeout):
+            // continue in a fresh tab and let the old one close in the background.
+            const wedged = page!;
+            page = await browser!.newPage();
+            page.setDefaultNavigationTimeout(navigationTimeoutMs);
+            void wedged.close().catch(() => {});
           }
           perWidth.set(width, outcome);
           await writeDiffPngs(diffsDir, job.slug, width, outcome.sections);
           report.routes[job.route]![String(width)] = {
             sections: outcome.sections.map(({ diffPng: _d, expectedPng: _e, actualPng: _a, ...rest }) => rest),
             dom: outcome.dom,
+            ...(outcome.http ? { http: outcome.http } : {}),
             ...(outcome.error ? { error: outcome.error } : {})
           };
         }
@@ -301,12 +425,15 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
 
     // ---- task outcomes ----------------------------------------------------------------------------
     const jobOf = new Map(jobs.map((j) => [j.route, j]));
+    const erroredRoutes = new Set(report.errors.map((e) => e.route));
     const routePasses = (route: string): boolean => {
       const perWidth = outcomes.get(route);
       if (!perWidth) return false;
       return VERIFY_WIDTHS.every((w) => {
         const o = perWidth.get(w);
-        return !!o && !o.error && o.sections.length > 0 && o.sections.every((s) => s.pass) && o.dom.length === 0;
+        return (
+          !!o && !o.error && !o.http && o.sections.length > 0 && o.sections.every((s) => s.pass) && o.dom.length === 0
+        );
       });
     };
     const componentPasses = (name: string, routesUsed: string[]): boolean =>
@@ -316,23 +443,33 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
         if (!perWidth) return false;
         return VERIFY_WIDTHS.every((w) => {
           const o = perWidth.get(w);
-          if (!o || o.error) return false;
+          if (!o || o.error || o.http) return false;
           const owning = Object.entries(o.components)
             .filter(([, names]) => names.includes(name))
             .map(([section]) => section);
           // No section holds the component: fall back to the whole route.
           if (!owning.length) return routePasses(route);
-          return o.sections.filter((s) => owning.includes(s.name)).every((s) => s.pass) &&
-            o.dom.every((d) => !owning.includes(d.section));
+          return (
+            o.sections.filter((s) => owning.includes(s.name)).every((s) => s.pass) &&
+            o.dom.every((d) => !owning.includes(d.section))
+          );
         });
       });
 
     const fixesOf = (id: string): TaskRecord[] =>
-      tasks.filter((t) => t.kind === 'fix' && t.id.startsWith(`fix-${id}-`) && /^\d+$/.test(t.id.slice(`fix-${id}-`.length)));
+      tasks.filter(
+        (t) => t.kind === 'fix' && t.id.startsWith(`fix-${id}-`) && /^\d+$/.test(t.id.slice(`fix-${id}-`.length))
+      );
 
     for (const task of evaluated) {
       if (task.kind === 'motion') {
         report.manualChecklist.push({ taskId: task.id, route: task.route, file: task.file, status: task.status });
+        continue;
+      }
+      // Infrastructure errors give no verdict: the task keeps its status and no attempt is used.
+      if (routesOfTask(task).some((r) => erroredRoutes.has(r))) {
+        report.skipped.push(task.id);
+        ctx.log(`verify: ${task.id} not judged (infrastructure errors; see report.json errors)`);
         continue;
       }
       if (task.kind === 'component') {
@@ -362,11 +499,10 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
         continue;
       }
       const job = jobOf.get(route);
-      const failures = describeFailures(route, job?.slug ?? routeSlug(route), outcomes.get(route));
+      const failures = describeFailures(route, job?.slug ?? routeSlug(route), job?.nextPath ?? route, outcomes.get(route));
       const fixId = `fix-${task.id}-${task.attempts}`;
       const file = `.convert/tasks/${fixId}.md`;
-      await mkdir(path.join(convertDir, 'tasks'), { recursive: true });
-      await writeFile(
+      await writeFileAtomic(
         path.join(nextDir, file),
         renderTemplate('fix', {
           taskId: task.id,
@@ -375,8 +511,7 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
           failures,
           doneWhen: `Run \`npx fexport convert verify ${task.id}\` and confirm it passes.`,
           rules: SHARED_RULES
-        }),
-        'utf8'
+        })
       );
       // Earlier fix files for this task are superseded by the new one.
       for (const f of fixesOf(task.id)) f.status = 'done';
@@ -394,12 +529,17 @@ export async function runVerify(ctx: StageContext, target?: string): Promise<{ p
 
     // Motion tasks for every verified route belong on the manual checklist, even when not targeted.
     for (const t of tasks) {
-      if (t.kind === 'motion' && t.route && outcomes.has(t.route) && !report.manualChecklist.some((m) => m.taskId === t.id)) {
+      if (
+        t.kind === 'motion' &&
+        t.route &&
+        outcomes.has(t.route) &&
+        !report.manualChecklist.some((m) => m.taskId === t.id)
+      ) {
         report.manualChecklist.push({ taskId: t.id, route: t.route, file: t.file, status: t.status });
       }
     }
 
-    await writeFile(path.join(diffsDir, 'report.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');
+    await writeReport();
     state.stages.verify = Object.values(state.tasks).every((t) => t.kind === 'motion' || t.status === 'done')
       ? 'done'
       : 'needs-ai';
@@ -424,33 +564,46 @@ async function writeDiffPngs(diffsDir: string, slug: string, width: number, resu
   }
 }
 
-/** Crop `.convert/reference/components/<Name>/<width>.png` for components whose first page is `route`. */
+/**
+ * Crop `.convert/reference/components/<Name>/<width>.png` for components whose first page is `route`.
+ * `key.json` holds, per width, sha256(first page HTML + selector); a crop is redone when its key changes.
+ */
 async function writeComponentCrops(
-  ctx: StageContext,
   refDir: string,
   route: string,
+  html: string,
   width: number,
   png: Buffer,
   ref: ReferenceWidth,
-  components: ComponentInfo[]
+  components: ComponentInfo[],
+  warn: (msg: string) => void
 ): Promise<void> {
   let decoded: PNG | undefined;
   for (const c of components) {
     if (c.pages[0] !== route) continue;
-    const out = path.join(refDir, 'components', c.name, `${width}.png`);
-    if (await exists(out)) continue;
+    const dir = path.join(refDir, 'components', c.name);
+    const out = path.join(dir, `${width}.png`);
+    const keyFile = path.join(dir, 'key.json');
+    const key = sha256(html + '\u0000' + c.selector);
+    const keys = await readJson<Record<string, string>>(keyFile, {}).catch(() => ({}) as Record<string, string>);
+    if (keys[String(width)] === key && (await exists(out))) continue;
     const box = ref.componentBoxes?.[c.name];
     if (!box) {
-      ctx.log(`verify: warning: component ${c.name} not found (or zero-size) on ${route} at ${width}px; no reference crop`);
+      warn(`verify: component ${c.name} not found (or zero-size) on ${route} at ${width}px; no reference crop`);
       continue;
     }
     decoded ??= PNG.sync.read(png);
-    await mkdir(path.dirname(out), { recursive: true });
-    await writeFile(out, PNG.sync.write(crop(decoded, box)));
+    await writeFileAtomic(out, PNG.sync.write(crop(decoded, box)));
+    await writeFileAtomic(keyFile, JSON.stringify({ ...keys, [String(width)]: key }, null, 2) + '\n');
   }
 }
 
-function describeFailures(route: string, slug: string, perWidth: Map<number, WidthOutcome> | undefined): string {
+function describeFailures(
+  route: string,
+  slug: string,
+  nextPath: string,
+  perWidth: Map<number, WidthOutcome> | undefined
+): string {
   const lines: string[] = [];
   if (!perWidth) return `- Route ${code(route)} was not verified.`;
   const dom = new Map<string, { m: DomMismatch; widths: number[] }>();
@@ -461,6 +614,7 @@ function describeFailures(route: string, slug: string, perWidth: Map<number, Wid
       lines.push(`- Route ${code(route)} at ${width}px: capture failed: ${o.error}`);
       continue;
     }
+    if (o.http) lines.push(`- Route ${code(route)} at ${width}px: the Next.js app answered ${code(nextPath)} with ${o.http}.`);
     if (!o.sections.length) lines.push(`- Route ${code(route)} at ${width}px: no sections could be compared.`);
     for (const s of o.sections) {
       if (s.pass) continue;
@@ -494,12 +648,10 @@ function describeFailures(route: string, slug: string, perWidth: Map<number, Wid
   return lines.join('\n') || `- Route ${code(route)} failed verification.`;
 }
 
-/** `fix-build-<n>.md` with the last lines of the build log. */
-async function writeBuildFix(ctx: StageContext, log: string): Promise<string> {
+/** `fix-build-<attempt>.md` with the last lines of the build log; earlier build fixes are superseded. */
+async function writeBuildFix(ctx: StageContext, log: string, attempt: number): Promise<string> {
   const { state, nextDir } = ctx;
-  const existing = Object.keys(state.tasks).filter((id) => /^fix-build-\d+$/.test(id));
-  const n = existing.reduce((max, id) => Math.max(max, Number(id.slice('fix-build-'.length))), 0) + 1;
-  const id = `fix-build-${n}`;
+  const id = `fix-build-${attempt}`;
   const file = `.convert/tasks/${id}.md`;
   const targets = [
     ...new Set(
@@ -510,18 +662,16 @@ async function writeBuildFix(ctx: StageContext, log: string): Promise<string> {
   ];
   const tail = log.replace(/\s+$/, '').split(/\r?\n/).slice(-BUILD_LOG_LINES).join('\n');
   const fence = tail.includes('```') ? '~~~~' : '```';
-  await mkdir(path.join(nextDir, '.convert', 'tasks'), { recursive: true });
-  await writeFile(
+  await writeFileAtomic(
     path.join(nextDir, file),
     renderTemplate('fix', {
       taskId: 'build',
-      attempt: String(n),
+      attempt: String(attempt),
       targets: targets.length ? bullets(targets.map(code)) : '- any file under `src/`',
       failures: `\`npm run build\` failed. Last ${BUILD_LOG_LINES} lines of the build output:\n\n${fence}\n${tail}\n${fence}`,
       doneWhen: 'Run `npx fexport convert verify` and confirm the build succeeds and verification passes.',
       rules: SHARED_RULES
-    }),
-    'utf8'
+    })
   );
   for (const [key, t] of Object.entries(state.tasks)) if (/^fix-build-\d+$/.test(key)) t.status = 'done';
   state.tasks[id] = { id, kind: 'fix', file, status: 'pending', attempts: 0, targets };

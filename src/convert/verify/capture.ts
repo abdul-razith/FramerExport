@@ -11,18 +11,19 @@ type Box = CaptureResult['sections'][number]['box'];
 /**
  * Load `url` at `width × 900`, settle it and take a full-page screenshot plus document-space section boxes.
  * Export mode boxes the adapter-defined `sections` (required); next mode boxes every `[data-section]` element.
- * Sections with a zero-width or zero-height box are dropped.
+ * Sections with a zero-width or zero-height box are dropped. `timeoutMs` bounds the navigation (default 60 s).
  */
 export async function capturePage(
   page: Page,
   url: string,
   width: number,
   mode: 'export' | 'next',
-  sections?: Array<{ name: string; selector: string }>
+  sections?: Array<{ name: string; selector: string }>,
+  timeoutMs = 60_000
 ): Promise<CaptureResult> {
   if (mode === 'export' && !sections) throw new Error('capturePage: export mode requires the page sections');
   await page.setViewport({ width, height: 900 });
-  await page.goto(mode === 'next' ? withVerifyFlag(url) : url, { waitUntil: 'load', timeout: 60_000 });
+  await page.goto(mode === 'next' ? withVerifyFlag(url) : url, { waitUntil: 'load', timeout: timeoutMs });
   if (mode === 'next') await settleNext(page);
   else await settleExport(page);
 

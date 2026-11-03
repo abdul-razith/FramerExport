@@ -33,16 +33,20 @@ export async function loadState(nextDir: string): Promise<ConvertState | null> {
   }
 }
 
-export async function saveState(state: ConvertState): Promise<void> {
-  const file = stateFile(state.nextDir);
+/** Write `data` to a sibling temp file, then rename it over `file` (creating parent dirs). */
+export async function writeFileAtomic(file: string, data: string | Uint8Array): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = path.join(path.dirname(file), `.state.json.${randomUUID()}.tmp`);
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
   try {
-    await fs.writeFile(temporary, JSON.stringify(state, null, 2) + '\n', 'utf8');
+    await fs.writeFile(temporary, data);
     await fs.rename(temporary, file);
   } finally {
     await fs.rm(temporary, { force: true });
   }
+}
+
+export async function saveState(state: ConvertState): Promise<void> {
+  await writeFileAtomic(stateFile(state.nextDir), JSON.stringify(state, null, 2) + '\n');
 }
 
 export async function findProjectRoot(fromDir: string): Promise<string | null> {

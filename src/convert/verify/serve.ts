@@ -90,7 +90,8 @@ export async function startExportServer(exportDir: string): Promise<{ url: strin
 }
 
 /**
- * `npm run build` then `npm run start -- -p <port>`; resolves when `GET /` answers below 500.
+ * `npm run build` then `npm run start -- -p <port>`; resolves when `GET /` gets any HTTP response (a page that
+ * answers 5xx is a code defect for verify to report, not a server that failed to start).
  * The build is stopped after `buildTimeoutMs` (default 10 min); the server after `readyTimeoutMs` (default 60 s).
  */
 export async function startNextServer(
@@ -122,7 +123,7 @@ export async function startNextServer(
   const output = collectOutput(proc.child);
   const url = `http://127.0.0.1:${port}`;
   try {
-    await waitForHttp(url + '/', proc, (s) => s < 500, readyTimeoutMs, output, 'next server');
+    await waitForHttp(url + '/', proc, () => true, readyTimeoutMs, output, 'next server');
   } catch (err) {
     await proc.stop();
     throw err;
