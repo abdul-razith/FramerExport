@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+`fexport convert <exportDir> [nextDir]` (beta, Framer exports only) turns a finished export into a Next.js project. It analyzes pages, design tokens, reusable components and observed animations, extracts Framer CMS collections into typed content modules, and scaffolds a Next.js 16 App Router project with Tailwind CSS 4, framer-motion, GSAP and Lenis, local fonts and the images the pages actually use. Each page, component and animation then becomes a task file under `.convert/tasks/` for an AI coding agent to implement. `fexport convert status` and `fexport convert next` show progress; `fexport convert verify [route]` builds the app, compares each section against the original export with pixel and DOM checks, and writes `fix-*.md` tasks for what still differs. The generated project installs and builds as scaffolded, and `npm run lint` works with TypeScript 7 through its side-by-side TypeScript 6 package.
+
 ## 5.0.1
 
 The stable release uses 5.0.1 because npm permanently reserves 5.0.0 from an earlier publication that is no longer available. This changes the release version without changing the validated application behavior.
