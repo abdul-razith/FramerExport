@@ -177,10 +177,26 @@ test('formatLiveLine copes with a fix task, an unknown task and a missing agent'
 test('startTicker calls update on an interval and stops cleanly', async () => {
   let calls = 0;
   const stop = startTicker(() => calls++, 10);
-  await new Promise((r) => setTimeout(r, 55));
+  for (let i = 0; i < 100 && calls < 2; i++) await new Promise((r) => setTimeout(r, 20));
   stop();
   const after = calls;
-  await new Promise((r) => setTimeout(r, 40));
+  await new Promise((r) => setTimeout(r, 60));
   assert.ok(after >= 2, `expected at least 2 ticks, got ${after}`);
   assert.equal(calls, after);
+});
+
+import { applySectionProgress } from '../../src/convert/stages/verify.js';
+
+test('applySectionProgress: the checklist becomes the sections verify actually judged', () => {
+  const t = task('107-page-contact', 'page', { sections: ['section-1', 'section-2', 'Header', 'section-7'] });
+  applySectionProgress(t, { names: ['section-1', 'Header'], passed: ['section-1'] });
+  assert.deepEqual(t.sections, ['section-1', 'Header']);
+  assert.deepEqual(t.passedSections, ['section-1']);
+});
+
+test('applySectionProgress: nothing judged keeps the existing checklist and passes nothing', () => {
+  const t = task('107-page-contact', 'page', { sections: ['A', 'B'], passedSections: ['A'] });
+  applySectionProgress(t, { names: [], passed: [] });
+  assert.deepEqual(t.sections, ['A', 'B']);
+  assert.deepEqual(t.passedSections, []);
 });
