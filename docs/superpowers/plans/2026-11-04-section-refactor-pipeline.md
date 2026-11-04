@@ -25,6 +25,19 @@
 - Agents must never run `npm run build`, `next dev`, `next start` or `npm install`.
 - Windows and POSIX: kill process trees with `taskkill /pid <pid> /T /F` on Windows, process-group signals elsewhere (reuse `src/convert/verify/proc.ts`).
 
+## Execution Notes (pre-flight rulings — read before Task 1)
+
+These resolve conflicts between tasks found before execution. They bind every task.
+
+1. **Task 1 must not break the old pipeline loop.** The new `STAGES` order puts `install` after `scaffold`; the current `runPipeline` loop (`pipeline.ts`) would spin forever on a stage it does not run. Until Task 21 rewrites it, `runPipeline` marks `install`, `generate` and `baseline` as `skipped` when it reaches them and still stops after `tasks`. Keep the legacy `verify` key in `initState().stages` and `'needs-ai'` in `StageStatus` until Task 23. Update `KIND_ORDER` in `pipeline.ts` (and any other `Record` keyed by task kind or status) for the new union members so typecheck stays green.
+2. **Task 6** may skip the optional integration-test extension; Task 8's integration test covers script-drawn detection end to end.
+3. **Task 8** changes `runGenerate`'s return type: update the dashboard's generate action in `src/cli-v2/screens/convert-dashboard.ts` to show manifest counts (pages, sections, stubs) so typecheck stays green until Task 22 removes that action.
+4. **Task 15** moves `detectAgents`, `pickBinaryLine` and the binary lookup into `runner/agent-process.ts`; `cli-v2/screens/convert-agent.ts` imports them from there until Task 22 deletes it, and existing tests import the new path.
+5. **`fix-build` task (Task 20)** has no `fixOf`: it uses `pageTimeoutMin`, and its check is a production build — Task 21's default `check` dependency runs `npm run build` for `fix-build` and passes on exit code 0.
+6. **Tests never launch real `agy` or `claude`.** Runner tests use `tests/fixtures/fake-agent.mjs` (Task 15) via `FEXPORT_AGENT_CMD`.
+7. **Task 25 is run by the user** (real agents, real quota, manual pause and terminal kill); executors stop after Task 24.
+8. **One task per agent session.** Start each task by reading this plan's Global Constraints, Execution Notes and Review Focus, then only that task's section; finish with `npm test` and `npm run typecheck` green and one commit.
+
 ## Review Focus
 
 1. **Animation selectors recorded on the hydrated page do not match the static (JS-off) DOM** → the anchor is reported as unmatched (warning + task lists it by Framer name), generate never crashes. Test in Task 5.
