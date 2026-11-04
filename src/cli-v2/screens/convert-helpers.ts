@@ -1,6 +1,7 @@
 import path from 'node:path';
 import chalk from 'chalk';
 import { pickNextTask } from '../../convert/pipeline.js';
+import { formatDuration, startTicker } from '../../convert/progress.js';
 import type { ConvertState, PageInfo, StageName, TaskRecord } from '../../convert/types.js';
 
 export const STAGE_LABELS: Record<StageName, string> = {
@@ -96,4 +97,32 @@ export function formatVerifyResult(r: { passed: string[]; failed: string[] }, ro
 export function formatVerifyError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.startsWith('Dependencies not installed') ? `${msg}\nChoose "Install dependencies" from the menu.` : msg;
+}
+
+/** Shortens a line to fit the terminal, so a spinner message never wraps. */
+export function fitLine(text: string, columns: number = process.stdout.columns || 100): string {
+  const max = Math.max(20, columns - 8);
+  return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+/**
+ * Keeps a spinner's message fresh while a long step runs: the current text plus a ticking elapsed time.
+ * `update` changes the text; `stop` ends the ticker (call it before stopping the spinner).
+ */
+export function tickingMessage(
+  spinner: { message(m: string): void },
+  initial: string,
+  everyMs = 1000
+): { update(msg: string): void; stop(): void } {
+  let text = initial;
+  const start = Date.now();
+  const render = (): void => spinner.message(fitLine(`${text} · ${formatDuration(Date.now() - start)}`));
+  const stop = startTicker(render, everyMs);
+  return {
+    update(msg: string) {
+      text = msg;
+      render();
+    },
+    stop,
+  };
 }

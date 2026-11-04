@@ -85,6 +85,30 @@ Rebuild the Framer component \`{{name}}\` as a React component that is visually 
 Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes: the target file exists and the app builds. Pixel parity is checked through the page tasks that use this component (the reference crops above are your visual target).
 `,
 
+  shell: `# Task {{taskId}}: site shell
+
+## Goal
+Build once the parts that every page shares (navigation, footer, loader, cursor, smooth scroll) so the page tasks can reuse them instead of rebuilding them.
+
+## Edit only
+{{targets}}
+
+## Inputs
+{{inputs}}
+
+## Requirements
+- Export each shared part below as a named React component from the target file, visually identical to the original at 1440, 1000 and 390 px wide.
+- Shared sections (they appear on two or more pages):
+{{shared}}
+- Keep the root element of each part stable so the page tasks can wrap it in its \`data-section\`.
+
+## Rules
+{{rules}}
+
+## Done when
+Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes: the target file exists and the app builds.
+`,
+
   page: `# Task {{taskId}}: rebuild page {{route}}
 
 ## Goal

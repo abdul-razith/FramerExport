@@ -467,3 +467,81 @@ test('pickBinaryLine prefers a launchable file on Windows (.exe/.cmd/.bat) over 
   assert.equal(pickBinaryLine('/usr/bin/claude\n', 'linux'), '/usr/bin/claude');
   assert.equal(pickBinaryLine('', 'win32'), null);
 });
+
+test('runAgentLoop books the agent time on the task and reports start and end of each task', async () => {
+  const root = await loopProject(task('101-page-home', 'page', { route: '/' }));
+  const events: string[] = [];
+  let clock = 1_000;
+  await runAgentLoop(root, 'agy', 'one', {
+    now: () => clock,
+    runAgent: async () => {
+      clock += 90_000;
+      return { exitCode: 0, outside: [] };
+    },
+    verify: async (_r, state, id) => {
+      state.tasks[id].status = 'done';
+      await saveState(state);
+      return { passed: [id], failed: [] };
+    },
+    onTaskStart: ({ task: t, state }) => events.push(`start ${t.id} ${state.timing?.byTask[t.id] ?? 0}`),
+    onTaskEnd: ({ task: t, ms }) => events.push(`end ${t.id} ${ms}`),
+  });
+  assert.deepEqual(events, ['start 101-page-home 0', 'end 101-page-home 90000']);
+  const { loadState } = await import('../../src/convert/state.js');
+  assert.equal((await loadState(root))!.timing!.byTask['101-page-home'], 90_000);
+});
+
+test('runAgentLoop books the time of a fix task on the task it fixes', async () => {
+  const root = await loopProject(
+    task('101-page-home', 'page', { route: '/', status: 'in-progress' }),
+    task('fix-101-page-home-1', 'fix', { route: '/' })
+  );
+  let clock = 0;
+  await runAgentLoop(root, 'agy', 'one', {
+    now: () => clock,
+    runAgent: async () => {
+      clock += 30_000;
+      return { exitCode: 0, outside: [] };
+    },
+    verify: async (_r, state) => ({ passed: [], failed: [] }),
+  });
+  const { loadState } = await import('../../src/convert/state.js');
+  assert.equal((await loadState(root))!.timing!.byTask['101-page-home'], 30_000);
+});
+
+test('runAgentOnTask with a log file keeps the agent output off the terminal and reports the last line', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'agent-log-'));
+  const stub = path.join(root, 'talker.mjs');
+  await writeFile(stub, "console.log('first line'); console.log('second line');");
+  const lines: string[] = [];
+  const logFile = path.join(root, '.convert', 'logs', 'task.log');
+  const result = await runAgentOnTask(root, 'claude', '.convert/tasks/001.md', [], {
+    buildCommand: () => ({ command: process.execPath, args: [stub] }),
+    logFile,
+    onOutput: (l) => lines.push(l),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(await readFileText(logFile, 'utf8'), /first line\r?\nsecond line/);
+  assert.equal(lines.at(-1), 'second line');
+});
+
+import { fitLine, tickingMessage } from '../../src/cli-v2/screens/convert-helpers.js';
+
+test('fitLine truncates to the terminal width and leaves short lines alone', () => {
+  assert.equal(fitLine('short', 80), 'short');
+  const cut = fitLine('x'.repeat(200), 60);
+  assert.ok(cut.length <= 60 - 8 && cut.endsWith('…'));
+});
+
+test('tickingMessage keeps the text and a growing elapsed time on the spinner', async () => {
+  const seen: string[] = [];
+  const t = tickingMessage({ message: (m) => seen.push(m) }, 'Verifying', 10);
+  t.update('route 2/9');
+  await new Promise((r) => setTimeout(r, 40));
+  t.stop();
+  const n = seen.length;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(seen.length, n);
+  assert.match(seen[0]!, /route 2\/9 · \d+s/);
+  assert.ok(seen.length >= 2);
+});

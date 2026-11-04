@@ -4,6 +4,7 @@ import path from 'node:path';
 import puppeteer, { type Browser, type HTTPResponse, type Page } from 'puppeteer';
 import { PNG } from 'pngjs';
 import type { PlatformAdapter, StageContext } from '../adapters/types.js';
+import { addTime } from '../progress.js';
 import { recordAttempt, saveState, writeFileAtomic } from '../state.js';
 import type { ComponentInfo, PageInfo, TaskRecord } from '../types.js';
 import { CLI_INVOCATION, SHARED_RULES } from '../tasks/templates/index.js';
@@ -61,6 +62,29 @@ interface WidthOutcome {
   http?: string;
   /** Reference section -> component names, for component-task scoping. */
   components: Record<string, string[]>;
+}
+
+/**
+ * Section checklist of one page: all section names seen, and those that pass at every given width
+ * (no error, section pixel-matches, no DOM mismatch in that section).
+ */
+export function sectionOutcomes(
+  perWidth: Map<number, { sections: Array<{ name: string; pass: boolean }>; dom: Array<{ section: string }>; error?: string }>,
+  widths: readonly number[]
+): { names: string[]; passed: string[] } {
+  const names: string[] = [];
+  for (const w of widths) {
+    for (const s of perWidth.get(w)?.sections ?? []) if (!names.includes(s.name)) names.push(s.name);
+  }
+  const passed = names.filter((name) =>
+    widths.every((w) => {
+      const o = perWidth.get(w);
+      if (!o || o.error) return false;
+      const s = o.sections.find((x) => x.name === name);
+      return !!s && s.pass && !o.dom.some((d) => d.section === name);
+    })
+  );
+  return { names, passed };
 }
 
 interface Report {
@@ -277,7 +301,7 @@ export async function runVerify(
       } else {
         selected = [original];
         // Components are judged by file + build; their pixels are judged through the page tasks.
-        selectedRoutes = original.kind === 'component' ? [] : routesOfTask(original);
+        selectedRoutes = original.kind === 'component' || original.kind === 'shell' ? [] : routesOfTask(original);
       }
     }
     // Fix tasks are resolved through their original task.
@@ -302,6 +326,9 @@ export async function runVerify(
     };
     const writeReport = () => writeFileAtomic(path.join(diffsDir, 'report.json'), JSON.stringify(report, null, 2) + '\n');
     const outcomes = new Map<string, Map<number, WidthOutcome>>();
+    const verifyStart = Date.now();
+    /** Active time spent verifying each route; the rest of the run (build, servers) is booked as `build`. */
+    const jobMs = new Map<string, number>();
     const infraError = (route: string, width: number, message: string): void => {
       report.errors.push({ route, width, message });
       warn(`verify: ${route}${width ? ` @ ${width}px` : ''}: ${message}`);
@@ -360,6 +387,7 @@ export async function runVerify(
       }
 
       for (const job of page ? verifyJobs : []) {
+        const jobStart = Date.now();
         const perWidth = new Map<number, WidthOutcome>();
         outcomes.set(job.route, perWidth);
         report.routes[job.route] = {};
@@ -433,6 +461,7 @@ export async function runVerify(
             ...(outcome.error ? { error: outcome.error } : {})
           };
         }
+        jobMs.set(job.route, Date.now() - jobStart);
       }
     } finally {
       await browser?.close().catch(() => {});
@@ -458,13 +487,28 @@ export async function runVerify(
         (t) => t.kind === 'fix' && t.id.startsWith(`fix-${id}-`) && /^\d+$/.test(t.id.slice(`fix-${id}-`.length))
       );
 
+    // Time and per-section progress, recorded for every verified page.
+    let routesMs = 0;
+    for (const [route, ms] of jobMs) {
+      routesMs += ms;
+      for (const t of tasks) if (t.kind === 'page' && t.route === route) addTime(state, t.id, ms);
+    }
+    addTime(state, 'build', Math.max(0, Date.now() - verifyStart - routesMs));
+    for (const t of tasks) {
+      const perWidth = t.kind === 'page' && t.route ? outcomes.get(t.route) : undefined;
+      if (!perWidth) continue;
+      const r = sectionOutcomes(perWidth, VERIFY_WIDTHS);
+      t.sections = t.sections?.length ? t.sections : r.names;
+      t.passedSections = r.passed.filter((s) => t.sections!.includes(s));
+    }
+
     for (const task of evaluated) {
       if (task.kind === 'motion') {
         report.manualChecklist.push({ taskId: task.id, route: task.route, file: task.file, status: task.status });
         continue;
       }
-      if (task.kind === 'component') {
-        // The build above succeeded; the component is done once its target file exists.
+      if (task.kind === 'component' || task.kind === 'shell') {
+        // The build above succeeded; the component (or the shell) is done once its target file exists.
         const missing = [];
         for (const t of task.targets) if (!(await exists(path.join(nextDir, t)))) missing.push(t);
         if (!missing.length) {
