@@ -1,7 +1,7 @@
 # Section-Refactor Conversion Pipeline — Design
 
 Date: 2026-11-04
-Status: Draft for review
+Status: Approved 2026-11-04
 Supersedes: the AI-task and verify parts of `2026-11-02-framer-to-nextjs-converter-design.md`
 (analyze, extract-cms and scaffold stay as they are, with the changes listed in section 12).
 
@@ -253,10 +253,59 @@ not inside any section (Lenis smooth scroll, page loader, custom cursor).
    `"<agent> quota reached (<reset hint if present>). Switch to <other agent> and continue?"`.
 6. **Never blocks**: a task failing its check after its fix attempt (or timing out twice) becomes
    `needs-review`; the queue continues.
-7. **Resume**: state saved after every status change; `in-progress` tasks become `pending` on the next start.
+7. **Resume**: state saved after every status change; interrupted tasks are recovered on the next start
+   (section 7a).
 8. **Live display**: one line per worker, e.g.
    `W1 · / · Hero + About · claude · 4m 12s · editing HeroAbout.tsx`, above the overall progress line.
 9. **Logs**: `.convert/logs/<taskId>.log` as today.
+
+## 7a. Pause and resume
+
+Each task is small and its status is saved on every change, so any interruption loses at most the tasks
+running at that moment, and those are recoverable.
+
+### Interruptions
+
+| Interruption | Behaviour |
+|---|---|
+| User presses `P` or Ctrl+C once | Prompt: **Finish running tasks, then pause** (default) or **Pause now** (kill agent process trees) |
+| Ctrl+C twice | Pause now |
+| Agent quota / rate limit (section 7, item 5) | Stop dispatch, let running workers finish, then `Paused: <agent> quota (<reset hint>)` with **Switch to <other agent> and continue** or **Stay paused** |
+| Crash, closed terminal, reboot, power loss | Nothing at the time; recovery on next start |
+
+`state.run` records `{ status: 'running' | 'paused' | 'done', reason?: 'user' | 'quota' | 'crash',
+quotaResetHint?, pausedAt? }`.
+
+### Nothing is deleted
+
+- Finished tasks stay finished; completed work is never redone or rolled back.
+- Before a task starts, its targets are copied to `.convert/snapshots/<taskId>/` (on disk, so a crash cannot
+  lose it).
+- An **interrupted task** (pause now, crash, quota error mid-task): its current target files are copied to
+  `.convert/partial/<taskId>/<timestamp>/`, then the targets are restored from the snapshot, and the task is
+  set back to `pending`. The next run restarts it from the clean generated file (decision: restart, not
+  continue from partial edits).
+- Pause, quota stops and crashes **do not count as attempts** and never write fix tasks.
+- Paused time is not counted in timing.
+
+### Safe resume
+
+On every start of the agent loop:
+
+1. `.convert/run.lock` holds `{ runnerPid, startedAt }` plus the PIDs of running agents and the dev server.
+   If the lock's runner is alive, refuse ("another run is active"). If it is stale, kill any recorded agent
+   or dev-server process tree that is still alive (checked by PID and command line), so two agents never
+   edit the project at once.
+2. Every task still `in-progress` is treated as interrupted (above).
+3. Start a fresh dev server, regenerate `AGENTS.md`, `CLAUDE.md` and task files (section 12), continue the
+   queue.
+
+### Resume UX
+
+- Opening the dashboard on a paused project shows `Paused at Sections 14/31 · reason: agy quota`, with
+  **Resume** preselected; agent and concurrency can be changed first.
+- `fexport convert run` resumes headlessly.
+- Works after moving the project to another machine (relative paths, section 12).
 
 ## 8. Dev server and checks
 
@@ -345,7 +394,10 @@ CLI: `fexport convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent 
   token rewriting; matrix decomposition; variant / motion / CMS annotations; script-drawn detection diffing;
   shell detection; quota-pattern detection; runner timeout and process-tree kill; scope snapshot and revert
   with concurrent tasks; `check` call limit; state v1→v2 migration and moved-folder resolution;
-  visible-only DOM comparison; link normalization; dependency ordering of the worker pool.
+  visible-only DOM comparison; link normalization; dependency ordering of the worker pool; pause after
+  running tasks; pause now (partial copy kept, targets restored, no attempt used); quota pause and agent
+  switch; simulated crash (runner killed mid-task with the fake agent, then resume); stale `run.lock`;
+  orphaned agent and dev-server processes killed on resume.
 - **Fake agent**: a small Node script standing in for `agy` / `claude` that, per scenario, edits its target,
   edits an out-of-scope file, hangs, or prints a quota error. All runner tests use it; no real agent in tests.
 - **Integration** (puppeteer, `test:browser`): `framer-nudge-mini` (multi-page, CMS, shell) and the
@@ -357,7 +409,8 @@ CLI: `fexport convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent 
 ## 12. Portability and migration
 
 - `state.json` **version 2**: `exportDir` stored relative to the project; `nextDir` not stored (derived from
-  the project location); new fields `options`, per-task `checkCalls`, `needs-review` status.
+  the project location); new fields `options`, `run` (section 7a), per-task `checkCalls`, `needs-review`
+  status.
 - Loading **version 1**: paths are migrated; if the stored absolute `exportDir` does not exist, try
   `<project>/../<basename>`, else ask. Projects whose tasks use the old kinds (`component`, `motion`, or the
   old page-task model) cannot run the new agent loop: the dashboard offers "Re-convert with the new
@@ -374,7 +427,8 @@ New:
 - `src/convert/generate/script-drawn.ts`
 - `src/convert/generate/shell.ts`
 - `src/convert/tasks/motion-values.ts` (matrix decomposition)
-- `src/convert/runner/` (`pool.ts`, `agent-process.ts`, `scope.ts`, `quota.ts`)
+- `src/convert/runner/` (`pool.ts`, `agent-process.ts`, `scope.ts`, `quota.ts`, `lock.ts`,
+  `interrupt.ts` for pause, snapshots, partial copies and recovery)
 - `src/convert/verify/env.ts`, `baseline.ts`, `check.ts`, `report.ts`, `dev-server.ts`
 - `src/convert/state-migrate.ts`
 - `tests/fixtures/fake-agent.mjs` and unit / integration tests listed in section 11
