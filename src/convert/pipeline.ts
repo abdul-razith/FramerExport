@@ -6,6 +6,7 @@ import { runAnalyze } from './stages/analyze.js';
 import { runExtractCms } from './stages/extract-cms.js';
 import { runScaffold } from './stages/scaffold/index.js';
 import { runTasks } from './stages/tasks.js';
+import { addTime, formatTimeSummary } from './progress.js';
 import { initState, loadState, nextStage, saveState } from './state.js';
 import { CLI_INVOCATION } from './tasks/templates/index.js';
 import type { AnimationEntry, ConvertState, TaskRecord } from './types.js';
@@ -26,7 +27,7 @@ async function readPlatform(exportDir: string): Promise<string> {
   }
 }
 
-const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, component: 1, page: 2, motion: 3 };
+const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, shell: 1, component: 2, page: 3, motion: 4 };
 
 /**
  * First actionable task: fix tasks, then components, pages and motion, by id within a kind. The `build`
@@ -54,11 +55,13 @@ export async function runPipeline(exportDir: string, nextDir: string, io: Conver
   for (let stage = nextStage(state); stage && stage !== 'verify'; stage = nextStage(state)) {
     if (stage === 'tasks' && state.stages.tasks === 'needs-ai') break;
     io.log(`Running ${stage}...`);
+    const stageStart = Date.now();
     if (stage === 'analyze') await runAnalyze(ctx, framerAdapter);
     else if (stage === 'extract-cms') await runExtractCms(ctx);
     else if (stage === 'scaffold') {
       await runScaffold(ctx, { confirmOverwrite: (file) => io.confirm('Overwrite edited file ' + file + '?') });
     } else if (stage === 'tasks') await runTasks(ctx);
+    addTime(state, 'setup', Date.now() - stageStart);
     await saveState(state);
   }
   const first = pickNextTask(state);
@@ -93,6 +96,9 @@ export function formatStatus(state: ConvertState, animations: AnimationEntry[] =
   );
   for (const t of tasks.filter((x) => x.status !== 'done').sort((a, b) => a.id.localeCompare(b.id))) {
     lines.push(`  ${t.id}  ${t.status}  attempts ${t.attempts}`);
+  }
+  if (state.timing || tasks.some((t) => t.kind === 'page' && t.sections?.length)) {
+    lines.push('', 'Progress', ...formatTimeSummary(state).split('\n').map((l) => (l ? '  ' + l : l)));
   }
   if (state.warnings.length) {
     lines.push('', 'Warnings');

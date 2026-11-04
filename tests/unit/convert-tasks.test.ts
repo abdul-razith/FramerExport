@@ -45,7 +45,7 @@ async function ran() {
   if (!shared) {
     shared = await prepare();
     await writeFile(path.join(shared.nextDir, '.convert/analysis/animations.json'), JSON.stringify([motion]));
-    shared.records = await runTasks(shared);
+    shared.records = await runTasks(shared, { mode: 'component-first' });
   }
   return shared as typeof shared & { records: Awaited<ReturnType<typeof runTasks>> };
 }
@@ -168,7 +168,7 @@ test('re-run keeps status/attempts and fix files', async () => {
   ctx.state.tasks['101-page-home']!.attempts = 2;
   await mkdir(path.join(ctx.nextDir, '.convert/tasks'), { recursive: true });
   await writeFile(path.join(ctx.nextDir, '.convert/tasks/fix-001.md'), 'keep me');
-  await runTasks(ctx);
+  await runTasks(ctx, { mode: 'component-first' });
   assert.equal(ctx.state.tasks['101-page-home']!.status, 'in-progress');
   assert.equal(ctx.state.tasks['101-page-home']!.attempts, 2);
   assert.equal(await read(ctx, '.convert/tasks/fix-001.md'), 'keep me');
@@ -198,10 +198,79 @@ test('missing slice and source are reported as warnings, not swallowed', async (
   await writeFile(path.join(ctx.nextDir, '.convert/analysis/pages.json'), JSON.stringify(pages));
   const logs: string[] = [];
   ctx.log = (m: string) => logs.push(m);
-  await runTasks(ctx);
+  await runTasks(ctx, { mode: 'component-first' });
   assert.ok(ctx.state.warnings.includes('tasks: missing .convert/analysis/slices/Arrow.html'));
   assert.ok(ctx.state.warnings.includes('tasks: missing subpages/gone.html'));
   assert.equal(logs.length, 2);
-  await runTasks(ctx);
+  await runTasks(ctx, { mode: 'component-first' });
   assert.equal(ctx.state.warnings.filter((w) => w.startsWith('tasks:')).length, 2);
+});
+
+// ---- page-first mode (default) -------------------------------------------------------------------------
+
+async function pageFirst() {
+  const ctx = await prepare();
+  const records = await runTasks(ctx);
+  return { ctx, records };
+}
+
+test('page-first: a shell task, then one task per page, no component tasks', async () => {
+  const { records } = await pageFirst();
+  assert.equal(records[0]!.id, '001-shell');
+  assert.equal(records[0]!.kind, 'shell');
+  assert.deepEqual(records[0]!.targets, ['src/components/shell/index.tsx']);
+  assert.ok(!records.some((r) => r.kind === 'component'));
+  assert.ok(records.some((r) => r.id === '101-page-home'));
+});
+
+test('page-first: page tasks carry their section checklist', async () => {
+  const { ctx, records } = await pageFirst();
+  const home = records.find((r) => r.id === '101-page-home')!;
+  assert.ok(home.sections && home.sections.includes('Hero + About'));
+  const state = await loadState(ctx.nextDir);
+  assert.deepEqual(state!.tasks['101-page-home']!.sections, home.sections);
+});
+
+test('page-first: every task file has the six headings and no unreplaced placeholders', async () => {
+  const { ctx, records } = await pageFirst();
+  for (const r of records) {
+    const text = await read(ctx, r.file);
+    let at = -1;
+    for (const h of HEADINGS) {
+      const i = text.indexOf(`\n${h}\n`);
+      assert.ok(i > at, `${r.id}: ${h}`);
+      at = i;
+    }
+    assert.doesNotMatch(text, /\{\{/);
+  }
+});
+
+test('page-first: shell task lists the sections shared by two or more pages', async () => {
+  const { ctx } = await pageFirst();
+  const text = await read(ctx, '.convert/tasks/001-shell.md');
+  assert.match(text, /Shared sections/);
+  assert.match(text, /src\/components\/shell\/index\.tsx/);
+});
+
+test('page-first: component-first mode is still available and unchanged', async () => {
+  const ctx = await ran();
+  assert.match(ctx.records[0]!.id, /^001-component-/);
+  assert.ok(!ctx.records.some((r) => r.kind === 'shell'));
+});
+
+test('sharedSectionNames: only named sections on two or more pages', async () => {
+  const { sharedSectionNames } = await import('../../src/convert/stages/tasks.js');
+  assert.deepEqual(
+    sharedSectionNames([['Nav', 'Hero', 'section-2', 'page'], ['Nav', 'Work', 'section-2', 'page'], ['Nav', 'Footer']]),
+    ['Nav'],
+  );
+});
+
+test('page-first: re-run keeps status and passed sections', async () => {
+  const { ctx } = await pageFirst();
+  ctx.state.tasks['101-page-home']!.status = 'in-progress';
+  ctx.state.tasks['101-page-home']!.passedSections = ['Hero + About'];
+  await runTasks(ctx);
+  assert.equal(ctx.state.tasks['101-page-home']!.status, 'in-progress');
+  assert.deepEqual(ctx.state.tasks['101-page-home']!.passedSections, ['Hero + About']);
 });

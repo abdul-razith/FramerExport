@@ -5,6 +5,7 @@ import path from 'node:path';
 import { framerAdapter } from '../../convert/adapters/framer/index.js';
 import { markTaskDone, readAnimations, readTaskGoal } from '../../convert/index.js';
 import { formatStatus, pickNextTask } from '../../convert/pipeline.js';
+import { addTime, formatProgressLine, formatTimeSummary } from '../../convert/progress.js';
 import { findProjectRoot, loadState, saveState } from '../../convert/state.js';
 import { runVerify } from '../../convert/stages/verify.js';
 import type { PageInfo } from '../../convert/types.js';
@@ -16,6 +17,7 @@ import {
   getDashboardChoices,
   getMotionChoices,
   getVerifyTargetChoices,
+  tickingMessage,
   type DashboardAction,
 } from './convert-helpers.js';
 import { runAgentFlow } from './convert-agent.js';
@@ -96,12 +98,16 @@ export async function runScreenConvertDashboard(
     const hasModules = await exists(path.join(root, 'node_modules'));
     const choices = getDashboardChoices(state, hasModules);
     const action = await uiSelect<DashboardAction>(
-      'What next?',
+      `What next?
+${formatProgressLine(state)}`,
       choices,
       initial ?? (!hasModules ? 'install' : (await exists(path.join(root, 'src', 'views'))) ? 'next' : 'generate')
     );
     initial = undefined;
-    if (action === 'exit') break;
+    if (action === 'exit') {
+      if (state.timing) uiNote(formatTimeSummary(state), 'Time spent');
+      break;
+    }
 
     if (action === 'status') {
       uiNote(formatStatus(state, await readAnimations(root)), 'Conversion status');
@@ -125,7 +131,12 @@ export async function runScreenConvertDashboard(
     } else if (action === 'install') {
       const spinner = uiSpinner();
       spinner.start('Installing dependencies…');
+      const live = tickingMessage(spinner, 'Installing dependencies…');
+      const installStart = Date.now();
       const { code, tail } = await npmInstall(root);
+      live.stop();
+      addTime(state, 'setup', Date.now() - installStart);
+      await saveState(state);
       if (code === 0) spinner.stop('Dependencies installed');
       else {
         spinner.stop(`npm install failed (exit ${code})`);
@@ -134,8 +145,10 @@ export async function runScreenConvertDashboard(
     } else if (action === 'generate') {
       const spinner = uiSpinner();
       spinner.start('Generating pages and components…');
+      const live = tickingMessage(spinner, 'Generating pages and components…');
       try {
-        const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => spinner.message(m.slice(0, 80)) });
+        const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => live.update(m.slice(0, 80)) });
+        live.stop();
         spinner.stop('Generation finished');
         uiNote(
           `Pages: ${r.pages.length}
@@ -146,6 +159,7 @@ Now choose "Run verification" to see which pages still need work.`,
           'Generated'
         );
       } catch (error) {
+        live.stop();
         spinner.stop('Generation failed');
         uiNote((error as Error).message, 'Generate');
       }
@@ -153,15 +167,18 @@ Now choose "Run verification" to see which pages still need work.`,
       const target = await uiSelect('Verify which target?', getVerifyTargetChoices(state, await readPages(root)) as any);
       const spinner = uiSpinner();
       spinner.start(STAGE_LABELS.verify);
+      const live = tickingMessage(spinner, STAGE_LABELS.verify);
       try {
         const result = await runVerify(
-          { state, exportDir: state.exportDir, nextDir: root, log: (m) => spinner.message(m.slice(0, 80)) },
+          { state, exportDir: state.exportDir, nextDir: root, log: (m) => live.update(m.slice(0, 80)) },
           framerAdapter,
           target as string | undefined
         );
+        live.stop();
         spinner.stop('Verification finished');
         uiNote(formatVerifyResult(result, root), 'Verification result');
       } catch (error) {
+        live.stop();
         spinner.stop('Verification failed');
         uiNote(formatVerifyError(error), 'Verification error');
       }

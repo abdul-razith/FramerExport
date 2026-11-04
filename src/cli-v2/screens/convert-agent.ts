@@ -1,13 +1,15 @@
 import { execFile, spawn } from 'node:child_process';
-import { readdir, stat } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { framerAdapter } from '../../convert/adapters/framer/index.js';
 import { pickNextTask } from '../../convert/pipeline.js';
+import { addTime, formatDuration, formatLiveLine, startTicker, timeTaskId } from '../../convert/progress.js';
 import { loadState, saveState } from '../../convert/state.js';
 import { runVerify } from '../../convert/stages/verify.js';
 import type { ConvertState, TaskRecord } from '../../convert/types.js';
 import { uiConfirm, uiNote, uiSelect, uiSpinner } from '../ui/prompts.js';
-import { STAGE_LABELS, formatVerifyError, formatVerifyResult } from './convert-helpers.js';
+import { STAGE_LABELS, fitLine, formatVerifyError, formatVerifyResult, tickingMessage } from './convert-helpers.js';
 
 export type AgentId = 'agy' | 'claude';
 export type AgentMode = 'one' | 'all';
@@ -92,6 +94,10 @@ function killTree(pid: number | undefined): void {
 
 export interface AgentRunDeps {
   buildCommand?: typeof buildAgentCommand;
+  /** When set, the agent's output goes to this file (and `onOutput`) instead of the terminal. */
+  logFile?: string;
+  /** Called with each complete output line when `logFile` is set. */
+  onOutput?: (line: string) => void;
 }
 
 /**
@@ -118,8 +124,32 @@ export async function runAgentOnTask(
   }
   const spawnArgs = shell ? args.map((a) => (/\s/.test(a) ? `"${a}"` : a)) : args;
   const before = await snapshot(root);
+  let log: ReturnType<typeof createWriteStream> | undefined;
+  if (deps.logFile) {
+    await mkdir(path.dirname(deps.logFile), { recursive: true });
+    log = createWriteStream(deps.logFile, { flags: 'w' });
+  }
   const exitCode = await new Promise<number>((resolve) => {
-    const child = spawn(shell ? `"${file}"` : file, spawnArgs, { cwd: root, stdio: 'inherit', shell });
+    const child = spawn(shell ? `"${file}"` : file, spawnArgs, {
+      cwd: root,
+      stdio: log ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      shell,
+    });
+    if (log) {
+      let pending = '';
+      const onData = (chunk: Buffer): void => {
+        log!.write(chunk);
+        pending += chunk.toString();
+        const parts = pending.split(/\r?\n/);
+        pending = parts.pop() ?? '';
+        for (const line of parts) if (line.trim()) deps.onOutput?.(line);
+      };
+      child.stdout?.on('data', onData);
+      child.stderr?.on('data', onData);
+      child.on('close', () => {
+        if (pending.trim()) deps.onOutput?.(pending);
+      });
+    }
     const onSigint = (): void => killTree(child.pid);
     process.once('SIGINT', onSigint);
     child.on('error', () => {
@@ -131,6 +161,7 @@ export async function runAgentOnTask(
       resolve(code ?? 1);
     });
   });
+  await new Promise<void>((done) => (log ? log.end(() => done()) : done()));
   const after = await snapshot(root);
   const allowed = new Set(targets.map((t) => t.split(path.sep).join('/')));
   const changed = new Set<string>();
@@ -143,6 +174,14 @@ export interface AgentLoopDeps {
   runAgent?: (root: string, agent: AgentId, task: TaskRecord) => Promise<{ exitCode: number; outside: string[] }>;
   verify?: (root: string, state: ConvertState, taskId: string) => Promise<{ passed: string[]; failed: string[] }>;
   maxTasks?: number;
+  /** Clock, injectable for tests. */
+  now?: () => number;
+  /** Output lines of the agent (only when the default runner logs to a file). */
+  onOutput?: (line: string) => void;
+  /** Called just before the agent starts; `state` holds the time booked so far. */
+  onTaskStart?: (info: { task: TaskRecord; state: ConvertState; index: number }) => void;
+  /** Called when the agent has finished, with its running time. */
+  onTaskEnd?: (info: { task: TaskRecord; ms: number }) => void;
   onResult?: (info: {
     task: TaskRecord;
     exitCode: number;
@@ -169,12 +208,17 @@ export async function runAgentLoop(
 ): Promise<{ stoppedFor: StopReason; ran: string[] }> {
   const runAgent =
     deps.runAgent ??
-    ((r, a, t) => runAgentOnTask(r, a, t.file.split('\\').join('/'), t.targets));
+    ((r, a, t) =>
+      runAgentOnTask(r, a, t.file.split('\\').join('/'), t.targets, {
+        logFile: path.join(r, '.convert', 'logs', `${t.id}.log`),
+        onOutput: deps.onOutput,
+      }));
   const verify =
     deps.verify ??
     ((r, state, id) =>
       runVerify({ state, exportDir: state.exportDir, nextDir: r, log: () => {} }, framerAdapter, id));
   const limit = deps.maxTasks ?? DEFAULT_MAX_TASKS;
+  const now = deps.now ?? Date.now;
   const ran: string[] = [];
   let lastTaskId = '';
   let lastSignature = '';
@@ -187,7 +231,13 @@ export async function runAgentLoop(
     if (isMotion(state, task)) return { stoppedFor: 'motion', ran };
     if (ran.length >= limit) return { stoppedFor: 'limit', ran };
 
+    deps.onTaskStart?.({ task, state, index: ran.length });
+    const startedAt = now();
     const result = await runAgent(root, agent, task);
+    const ms = now() - startedAt;
+    addTime(state, timeTaskId(state, task.id), ms);
+    await saveState(state);
+    deps.onTaskEnd?.({ task, ms });
     ran.push(task.id);
     if (result.exitCode !== 0) {
       deps.onResult?.({ task, exitCode: result.exitCode, outside: result.outside });
@@ -257,20 +307,43 @@ export async function runAgentFlow(root: string): Promise<void> {
     warned = true;
   }
 
+  let lastLine = '';
+  let agentSpinner: ReturnType<typeof uiSpinner> | undefined;
+  let stopTicker: (() => void) | undefined;
   const result = await runAgentLoop(root, agent, mode, {
+    onOutput: (line) => {
+      lastLine = line.trim().slice(0, 60);
+    },
+    onTaskStart: ({ task, state }) => {
+      lastLine = '';
+      const spinner = uiSpinner();
+      spinner.start(`Starting ${task.id}`);
+      const render = (ms: number): void =>
+        spinner.message(fitLine(formatLiveLine(state, task.id, { agent, runMs: ms, lastLine })));
+      render(0);
+      stopTicker = startTicker(render);
+      agentSpinner = spinner;
+    },
+    onTaskEnd: ({ task, ms }) => {
+      stopTicker?.();
+      agentSpinner?.stop(`${task.id} · agent finished in ${formatDuration(ms)}`);
+    },
     verify: async (r, state, id) => {
       const spinner = uiSpinner();
       spinner.start(STAGE_LABELS.verify);
+      const live = tickingMessage(spinner, STAGE_LABELS.verify);
       try {
         const out = await runVerify(
-          { state, exportDir: state.exportDir, nextDir: r, log: (m) => spinner.message(m.slice(0, 80)) },
+          { state, exportDir: state.exportDir, nextDir: r, log: (m) => live.update(m.slice(0, 80)) },
           framerAdapter,
           id
         );
+        live.stop();
         spinner.stop('Verification finished');
         await saveState(state);
         return out;
       } catch (error) {
+        live.stop();
         spinner.stop('Verification failed');
         throw error;
       }

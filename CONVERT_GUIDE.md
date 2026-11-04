@@ -70,9 +70,38 @@ You get the staged conversion (Stage 1/5 to 4/5) and then the **Conversion Dashb
 | View status & task backlog | stages, tasks, warnings |
 | Mark motion task done | after you checked an animation by eye |
 
+### Progress and time
+
+The dashboard shows one progress line above its menu, for example:
+
+```
+▓▓▓░░░░░░ Pages 3/9 · Sections 18/42 · Motion 0/7 · Overall 1h 02m
+```
+
+While a step runs, a live line ticks every second, and while the agent works it also shows the last line the agent printed:
+
+```
+Page 3/9 · /blog · agy · this run 4m 12s · page 11m 40s · overall 1h 02m · editing Hero
+```
+
+Time is **active working time**: setup (analyze, CMS, scaffold, task writing, `npm install`, generate), agent runs and verify runs. Time you spend away between sessions is not counted. It is stored in `.convert/state.json` (`timing`) and printed by `fexport convert status` and when you leave the dashboard:
+
+```
+Overall   1h 02m
+Setup     1m 41s
+Builds    6m 10s (shared by all pages)
+
+/          21m 05s  ✓  6/6 sections
+/about      9m 10s  ✓  5/5 sections
+/blog      11m 40s  …  3/7 sections
+Slowest: / (21m 05s)
+```
+
+A page's time is its agent time + verify time + generate time; the time of a `fix-*` task counts toward the page it fixes. The build that verify runs once per run is shown as its own line.
+
 The dashboard needs an interactive terminal. In scripts, or with `--yes`, the plain commands below are used instead and print the same text as before.
 
-**Running an AI agent.** The dashboard starts `agy -p "<prompt>" --dangerously-skip-permissions` or `claude -p "<prompt>" --dangerously-skip-permissions` inside the project folder and waits for it. You choose the agent and the mode at run time and confirm a warning once. `--dangerously-skip-permissions` lets the agent run any command in that folder without asking, and there is no sandbox. The agent prints nothing until it finishes, so one task can look frozen for several minutes. In "all tasks" mode the loop stops at motion tasks, at a task that failed 3 times, on an agent or verify error, or when the same task comes back unchanged twice.
+**Running an AI agent.** The dashboard starts `agy -p "<prompt>" --dangerously-skip-permissions` or `claude -p "<prompt>" --dangerously-skip-permissions` inside the project folder and waits for it. You choose the agent and the mode at run time and confirm a warning once. `--dangerously-skip-permissions` lets the agent run any command in that folder without asking, and there is no sandbox. The agent's output goes to `.convert/logs/<taskId>.log` instead of the screen, and a live line shows what is happening (see "Progress and time" below), so a long task no longer looks frozen. In "all tasks" mode the loop stops at motion tasks, at a task that failed 3 times, on an agent or verify error, or when the same task comes back unchanged twice.
 
 ---
 
@@ -110,9 +139,12 @@ Prompt to give your agent for each task:
 
 Task order and what "done" means:
 
-1. **Component tasks** (`001-component-*`) — build `src/components/<Name>.tsx` from the HTML/CSS slice and reference screenshots. Done when the file exists and the project builds. Their visual accuracy is judged through the pages that use them.
-2. **Page tasks** (`101-page-*`) — compose each route from the components. Every page section needs its `data-section="<name>"` attribute (listed in the task). Done when every section matches the original at all three widths (≤ 0.5 % pixel difference, ≤ 2 px height difference) and text, links and images match.
+The work is **page by page**. One conversion of a site with 9 pages gives about 1 shell task, 9 page tasks and one motion task per page, instead of one task per component.
+
+1. **Shell task** (`001-shell`) — builds once what every page shares (navigation, footer, loader, cursor, smooth scroll) in `src/components/shell/index.tsx`. Done when the file exists and the project builds. The task lists the sections that appear on two or more pages.
+2. **Page tasks** (`101-page-*`) — build each route as one task. The task carries a **section checklist**; every section needs its `data-section="<name>"` attribute. Components are only reference material (their slices stay in `.convert/analysis/slices/`); pull one out into `src/components/` only when two or more pages use it. Done when every section matches the original at all three widths (≤ 0.5 % pixel difference, ≤ 2 px height difference) and text, links and images match. After every `verify`, the sections that pass are saved, so status and the dashboard show `Sections 18/42` and a page that is finished can be opened in the browser straight away.
 3. **Motion tasks** (`201-motion-*`) — recreate the animations listed in the checklist with framer-motion (appear, hover) and GSAP ScrollTrigger (scroll). Check them by eye, then run `fexport convert done <id>`.
+   Older projects converted before this change keep their `001-component-*` tasks and keep working unchanged.
 4. **Fix tasks** (`fix-*`) — written by `verify` when something does not match. They list the failing sections and point to expected / actual / diff images. After 3 failed attempts a task becomes `needs-human`: fix it yourself, then run `verify <id>` again.
 
 ---
@@ -123,7 +155,7 @@ Task order and what "done" means:
 
 - `src/views/<page>.tsx` (and `src/views/<page>/<slug>.tsx` for each blog or case-study item), plus the page file's `View` import
 - `src/styles/framer/<hash>.css`, the original Framer CSS, shared between pages
-- `src/components/<Name>.tsx` for each component
+- `src/components/<Name>.tsx` for each component, only in older projects that have component tasks; in page-first projects the pages already contain everything, and `generate` just writes a placeholder for the shell task
 - `public/misc`, `public/videos` when the export has them
 
 Links to exported pages become routes, and `assets/...` URLs become `/images/...`. Re-running is safe: it replaces its own output and skips tasks marked done.

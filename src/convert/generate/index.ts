@@ -6,6 +6,7 @@ import type { StageContext } from '../adapters/types.js';
 import { ssrAppearCandidates } from '../adapters/framer/ssr-appear.js';
 import { pageSections } from '../adapters/framer/sections.js';
 import { routeSlug, sectionsWithFallback } from '../stages/tasks.js';
+import { addTime } from '../progress.js';
 import { saveState } from '../state.js';
 import type { ComponentInfo, PageInfo } from '../types.js';
 import { settleExport } from '../verify/settle.js';
@@ -163,6 +164,8 @@ export async function runGenerate(ctx: StageContext): Promise<GenerateResult> {
   };
 
   const result: GenerateResult = { pages: [], components: [], skipped: [] };
+  const generateStart = Date.now();
+  let pagesMs = 0;
   const server = await startExportServer(exportDir);
   let browser: Browser | undefined;
   try {
@@ -190,6 +193,7 @@ export async function runGenerate(ctx: StageContext): Promise<GenerateResult> {
         result.skipped.push(task.id);
         continue;
       }
+      const pageStart = Date.now();
       const base = fileSafe(routeSlug(p.route));
       const items: Item[] = p.dynamic
         ? p.dynamic.members.map((m) => ({ view: `${base}/${fileSafe(m.slug)}`, sourceFile: m.sourceFile, slug: m.slug }))
@@ -216,12 +220,17 @@ export async function runGenerate(ctx: StageContext): Promise<GenerateResult> {
           )
         : patchPage(source, `import View from '@/views/${base}';`, 'return <View />;');
       await writeFile(pageFile, patched, 'utf8');
+      const pageMs = Date.now() - pageStart;
+      pagesMs += pageMs;
+      if (task) addTime(state, task.id, pageMs);
       result.pages.push(p.route);
       ctx.log(`generate: page ${p.route}${p.dynamic ? ` (${items.length} items)` : ''}`);
     }
 
+    // Page-first projects have no component tasks: pages already contain everything, so skip the components.
+    const hasComponentTasks = Object.values(state.tasks).some((t) => t.kind === 'component');
     const sliceTab = still;
-    for (const c of components) {
+    for (const c of hasComponentTasks ? components : []) {
       const task = Object.values(state.tasks).find((t) => t.kind === 'component' && t.targets.includes(`src/components/${c.name}.tsx`));
       if (task?.status === 'done') {
         result.skipped.push(task.id);
@@ -242,10 +251,27 @@ export async function runGenerate(ctx: StageContext): Promise<GenerateResult> {
       result.components.push(c.name);
     }
     ctx.log(`generate: ${result.components.length} component(s)`);
+    const shell = Object.values(state.tasks).find((t) => t.kind === 'shell');
+    if (shell && shell.status !== 'done') {
+      for (const target of shell.targets) {
+        const file = path.join(nextDir, target);
+        if (await exists(file)) continue;
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(
+          file,
+          `${FILE_HEADER}// The generated pages already contain the shared sections inline, so the shell adds nothing here.
+export {};
+`,
+          'utf8',
+        );
+      }
+      ctx.log('generate: shell placeholder');
+    }
   } finally {
     await browser?.close().catch(() => {});
     await server.stop().catch(() => {});
   }
+  addTime(state, 'setup', Math.max(0, Date.now() - generateStart - pagesMs));
   await saveState(state);
   return result;
 }

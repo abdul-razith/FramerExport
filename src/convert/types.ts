@@ -4,12 +4,23 @@ export type TaskStatus = 'pending' | 'in-progress' | 'done' | 'needs-human';
 
 export interface TaskRecord {
   id: string;
-  kind: 'component' | 'page' | 'motion' | 'fix';
+  kind: 'shell' | 'component' | 'page' | 'motion' | 'fix';
   route?: string;
   file: string;
   status: TaskStatus;
   attempts: number;
   targets: string[];
+  /** Page tasks: ordered section names (the checklist). */
+  sections?: string[];
+  /** Page tasks: sections that passed at every width in the last verify. */
+  passedSections?: string[];
+}
+
+/** Active working time (never idle time between sessions). Optional: older projects have none. */
+export interface ConvertTiming {
+  startedAt: string;
+  /** Milliseconds of active work per task id; `setup` holds analyze, CMS, scaffold and task writing; `build` the shared build. */
+  byTask: Record<string, number>;
 }
 
 export interface ConvertState {
@@ -20,6 +31,7 @@ export interface ConvertState {
   tasks: Record<string, TaskRecord>;
   fileHashes: Record<string, string>;
   warnings: string[];
+  timing?: ConvertTiming;
 }
 
 export interface PageInfo {

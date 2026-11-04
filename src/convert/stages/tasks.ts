@@ -91,7 +91,25 @@ async function sectionsFor(ctx: StageContext, page: PageInfo): Promise<string[]>
   return sectionsWithFallback(pageSections(html)).map((s) => s.name);
 }
 
-export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
+export type TaskMode = 'page-first' | 'component-first';
+
+/** Section names that appear on two or more pages: the site shell (navigation, footer, ...). */
+export function sharedSectionNames(perPage: string[][]): string[] {
+  const count = new Map<string, number>();
+  for (const names of perPage) {
+    for (const n of new Set(names)) count.set(n, (count.get(n) ?? 0) + 1);
+  }
+  return [...count]
+    .filter(([n, c]) => c >= 2 && n !== FALLBACK_SECTION && !/^section-\d+$/.test(n))
+    .map(([n]) => n);
+}
+
+/**
+ * `page-first` (default): one shell task, then one task per page that carries its section checklist; components are
+ * only reference material. `component-first`: the original layout with a task per component before the pages.
+ */
+export async function runTasks(ctx: StageContext, opts: { mode?: TaskMode } = {}): Promise<TaskRecord[]> {
+  const mode = opts.mode ?? 'page-first';
   ctx.state.warnings = ctx.state.warnings.filter((w) => !w.startsWith('tasks:'));
   const analysis = path.join(ctx.nextDir, '.convert', 'analysis');
   const pages = await readJson<PageInfo[]>(path.join(analysis, 'pages.json'), []);
@@ -99,27 +117,63 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
   const animations = await readJson<AnimationEntry[]>(path.join(analysis, 'animations.json'), []);
 
   const slices = new Map<string, string>();
-  for (const c of components) {
-    const html = await readOrWarn(ctx, path.join(ctx.nextDir, c.slice), c.slice);
-    if (html !== undefined) slices.set(c.name, html);
+  if (mode === 'component-first') {
+    for (const c of components) {
+      const html = await readOrWarn(ctx, path.join(ctx.nextDir, c.slice), c.slice);
+      if (html !== undefined) slices.set(c.name, html);
+    }
   }
 
   await mkdir(path.join(ctx.nextDir, '.convert', 'tasks'), { recursive: true });
   const records: TaskRecord[] = [];
   // Only files for ids generated here are written, so fix-*.md files are never touched.
   const emit = async (
-    rec: Pick<TaskRecord, 'id' | 'kind' | 'targets'> & { route?: string },
+    rec: Pick<TaskRecord, 'id' | 'kind' | 'targets'> & { route?: string; sections?: string[] },
     text: string,
   ): Promise<void> => {
     const file = `.convert/tasks/${rec.id}.md`;
     await writeFile(path.join(ctx.nextDir, file), text, 'utf8');
     const prev = ctx.state.tasks[rec.id];
-    const record: TaskRecord = { ...rec, file, status: prev?.status ?? 'pending', attempts: prev?.attempts ?? 0 };
+    const record: TaskRecord = {
+      ...rec,
+      file,
+      status: prev?.status ?? 'pending',
+      attempts: prev?.attempts ?? 0,
+      ...(prev?.passedSections ? { passedSections: prev.passedSections } : {}),
+    };
     ctx.state.tasks[rec.id] = record;
     records.push(record);
   };
 
-  for (const [i, c] of orderComponents(components, slices).entries()) {
+  const sortedPages = [...pages].sort((a, b) => routeOrder(a.route, b.route));
+  const sectionsOf = new Map<string, string[]>();
+  for (const p of sortedPages) sectionsOf.set(p.route, await sectionsFor(ctx, p));
+
+  if (mode === 'page-first') {
+    const shared = sharedSectionNames([...sectionsOf.values()]);
+    const first = sortedPages[0];
+    const target = 'src/components/shell/index.tsx';
+    await emit(
+      { id: '001-shell', kind: 'shell', targets: [target] },
+      renderTemplate('shell', {
+        taskId: '001-shell',
+        targets: bullets([code(target)]),
+        inputs: bullets([
+          `Shared Framer base styles stripped from slices: ${code(BASE_CSS)}`,
+          ...(first
+            ? [`Original page HTML (read-only reference): ${code(toPosix(path.relative(ctx.nextDir, path.join(ctx.exportDir, first.sourceFile))))}`]
+            : []),
+          ...WIDTHS.map((w) => `Reference screenshot at ${w}px: ${code(`.convert/reference/${routeSlug(first?.route ?? '/')}/${w}.png`)}`),
+        ]),
+        shared: shared.length
+          ? bullets(shared.map(code))
+          : '- none detected: build the navigation, footer and any loader or cursor as you find them',
+        rules: SHARED_RULES,
+      }),
+    );
+  }
+
+  for (const [i, c] of (mode === 'component-first' ? orderComponents(components, slices) : []).entries()) {
     const id = `${pad(i + 1)}-component-${c.name}`;
     const target = `src/components/${c.name}.tsx`;
     await emit(
@@ -142,16 +196,15 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
     );
   }
 
-  const sortedPages = [...pages].sort((a, b) => routeOrder(a.route, b.route));
   for (const [i, p] of sortedPages.entries()) {
     const slug = routeSlug(p.route);
     const id = `${101 + i}-page-${slug}`;
     const target = pageFile(p.route);
-    const sections = await sectionsFor(ctx, p);
+    const sections = sectionsOf.get(p.route) ?? [];
     const contentFile = p.dynamic ? `src/content/${p.dynamic.collection}.ts` : undefined;
     const used = components.filter((c) => c.pages.includes(p.route)).map((c) => c.name);
     await emit(
-      { id, kind: 'page', route: p.route, targets: [target] },
+      { id, kind: 'page', route: p.route, targets: [target], sections },
       renderTemplate('page', {
         taskId: id,
         route: p.route,
@@ -166,9 +219,14 @@ export async function runTasks(ctx: StageContext): Promise<TaskRecord[]> {
           sections.length === 1 && sections[0] === FALLBACK_SECTION
             ? `  - ${code(FALLBACK_SECTION)}: \`data-section="${FALLBACK_SECTION}"\` on the root element (no sections detected; render the whole page inside it)`
             : bullets(sections.map((s) => `${code(s)}: \`data-section="${s}"\``), '  '),
-        components: used.length
-          ? `- Reuse the components built in \`src/components/\`: ${used.map(code).join(', ')}.`
-          : '- No shared components are used on this page.',
+        components:
+          mode === 'page-first'
+            ? used.length
+              ? `- Reference only (no separate tasks): this page uses ${used.map(code).join(', ')}; slices are in \`.convert/analysis/slices/\`. Reuse what the shell task built in \`src/components/shell/\`.`
+              : '- No shared components are used on this page.'
+            : used.length
+              ? `- Reuse the components built in \`src/components/\`: ${used.map(code).join(', ')}.`
+              : '- No shared components are used on this page.',
         dynamic: p.dynamic
           ? `- Dynamic route: read items from ${code(contentFile!)} (param \`${p.dynamic.param}\`) and implement \`generateStaticParams\` for slugs: ${p.dynamic.slugs.map(code).join(', ')}.`
           : '- Static page.',
