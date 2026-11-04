@@ -87,6 +87,15 @@ export function sectionOutcomes(
   return { names, passed };
 }
 
+/**
+ * Records a verify run on a page task. The checklist becomes the sections verify actually judged: sections
+ * without a visible size are never compared, so counting them would keep a page below 100% forever.
+ */
+export function applySectionProgress(task: TaskRecord, result: { names: string[]; passed: string[] }): void {
+  if (result.names.length) task.sections = result.names;
+  task.passedSections = result.passed.filter((s) => task.sections?.includes(s));
+}
+
 interface Report {
   generatedAt: string;
   build?: { failed: true; fixTask?: string; attempts: number };
@@ -497,9 +506,7 @@ export async function runVerify(
     for (const t of tasks) {
       const perWidth = t.kind === 'page' && t.route ? outcomes.get(t.route) : undefined;
       if (!perWidth) continue;
-      const r = sectionOutcomes(perWidth, VERIFY_WIDTHS);
-      t.sections = t.sections?.length ? t.sections : r.names;
-      t.passedSections = r.passed.filter((s) => t.sections!.includes(s));
+      applySectionProgress(t, sectionOutcomes(perWidth, VERIFY_WIDTHS));
     }
 
     for (const task of evaluated) {
