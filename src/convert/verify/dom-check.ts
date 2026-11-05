@@ -26,7 +26,7 @@ export async function nextSections(page: Page): Promise<Array<{ name: string; se
   }));
 }
 
-/** Rendered text (innerText), `a[href]` hrefs and `img` currentSrc/src per section. Missing sections yield empty entries. */
+/** Rendered text (innerText), `a[href]` hrefs and `img` currentSrc/src per section. Missing sections yield empty entries. Only visible elements are counted. */
 export async function extractSectionDom(
   page: Page,
   sections: Array<{ name: string; selector: string }>
@@ -36,11 +36,16 @@ export async function extractSectionDom(
       let el = null;
       try { el = document.querySelector(s.selector); } catch (e) {}
       if (!el) return { name: s.name, text: '', links: [], images: [] };
+      const isVis = (n) => (n.checkVisibility ? n.checkVisibility() : true);
       return {
         name: s.name,
         text: el.innerText || '',
-        links: Array.from(el.querySelectorAll('a[href]')).map((a) => a.getAttribute('href') || ''),
-        images: Array.from(el.querySelectorAll('img')).map((i) => i.currentSrc || i.src || '')
+        links: Array.from(el.querySelectorAll('a[href]'))
+          .filter(isVis)
+          .map((a) => a.getAttribute('href') || ''),
+        images: Array.from(el.querySelectorAll('img'))
+          .filter(isVis)
+          .map((i) => i.currentSrc || i.src || '')
       };
     }))(${JSON.stringify(sections)})`
   )) as SectionDom[];
@@ -49,6 +54,31 @@ export async function extractSectionDom(
 const normText = (s: string): string => s.replace(/\s+/g, ' ').trim();
 const basename = (p: string): string => p.slice(p.lastIndexOf('/') + 1);
 const isAbsolute = (u: string): boolean => /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(u);
+
+/**
+ * Normalizes link href for fair comparison:
+ * - Drops origin (e.g. http://127.0.0.1:5)
+ * - Drops query (?a) and fragment (#b)
+ * - Drops leading `./` prefixes
+ * - Drops `.html` extension
+ * - Drops trailing `/` except root `/`
+ * - Empty string maps to `/`
+ */
+export function normalizeLink(href: string): string {
+  if (!href) return '/';
+  let p = href.replace(/^(?:[a-z][a-z0-9+.-]*:)?\/\/[^/]+/i, '');
+  p = p.split(/[?#]/)[0];
+  p = p.replace(/^(?:\.\/)+/, '');
+  if (!p) return '/';
+  if (p.endsWith('.html')) {
+    p = p.slice(0, -5);
+  }
+  if (!p.startsWith('/')) {
+    p = '/' + p;
+  }
+  p = p.replace(/\/+$/, '');
+  return p || '/';
+}
 
 /** Strip http(s) origin, query/hash, leading `./`, `../` and `/` from an export-side URL. */
 function exportRelative(url: string): string {
@@ -115,7 +145,7 @@ export function compareDom(
     const at = normText(a.text);
     if (et !== at) out.push({ section, kind: 'text', expected: et, actual: at });
     const lists: Array<['link' | 'image', string[], string[]]> = [
-      ['link', e.links.map((l) => normalizeExportLink(l, maps.routes)), a.links],
+      ['link', e.links.map((l) => normalizeLink(normalizeExportLink(l, maps.routes))), a.links.map(normalizeLink)],
       ['image', e.images.map((s) => normalizeExportImage(s, maps.images)), a.images.map(normalizeNextImage)]
     ];
     for (const [kind, el, al] of lists) {

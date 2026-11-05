@@ -1,5 +1,7 @@
 import type { Page } from 'puppeteer';
 
+export { FIXED_TIME, prepareCapture } from './env.js';
+
 const FREEZE_CSS = '*{animation-duration:0s!important;transition-duration:0s!important}';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
