@@ -2,7 +2,20 @@
 
 ## Unreleased
 
-`fexport convert <exportDir> [nextDir]` (beta, Framer exports only) turns a finished export into a Next.js project. It analyzes pages, design tokens, reusable components and observed animations, extracts Framer CMS collections into typed content modules, and scaffolds a Next.js 16 App Router project with Tailwind CSS 4, framer-motion, GSAP and Lenis, local fonts and the images the pages actually use. Each page, component and animation then becomes a task file under `.convert/tasks/` for an AI coding agent to implement. `fexport convert status` and `fexport convert next` show progress; `fexport convert verify [route]` builds the app, compares each section against the original export with pixel and DOM checks, and writes `fix-*.md` tasks for what still differs. The generated project installs and builds as scaffolded, and `npm run lint` works with TypeScript 7 through its side-by-side TypeScript 6 package.
+### Section-Refactor Conversion Pipeline (fexport convert)
+
+The Framer-to-Next.js converter has been redesigned around a granular, bounded section-refactor architecture that turns a Framer export into clean, editable Tailwind CSS v4 React components:
+
+- **Section-by-section generation:** Deterministic generator splits pages into isolated section components under `src/sections/<page>/<Section>.tsx` with provably no-op inline style slimming (redundant computed styles removed, color/font variables mapped to `@theme` tokens), extracts shared shell sections into `src/components/shell/<Name>.tsx`, stubs dynamic route CMS templates, and detects script-drawn widgets (e.g., ticking clocks and rulers).
+- **Automated pipeline stages:** Runs `analyze` → `extract-cms` → `scaffold` → `install` (`npm install`) → `generate` → `tasks` → `[baseline]` → `agent loop` → `finalize`. Scaffolded projects build and run immediately on `next dev` even before AI refactoring starts.
+- **Automated AI agent runner:** `fexport convert run` provides a headless multi-worker pool supporting 1–3 concurrent agents with Claude Code (`claude`) or Antigravity (`agy`). Enforces hard wall-clock timeouts per task (`sectionTimeoutMin`, `pageTimeoutMin`), automatic process tree termination, and scope enforcement that snapshots project files and reverts out-of-scope edits.
+- **Pause, resume, and crash recovery:** Gracefully pause after current tasks finish or immediately with `P` or Ctrl+C. Target files of interrupted tasks are preserved in `.convert/partial/` and cleanly restored to pending state without losing completed work. Safe runner locks (`.convert/run.lock`) clean up stale orphan processes on restart.
+- **Quota resilience:** Automatically detects API rate limits and quota errors (`429`, `RESOURCE_EXHAUSTED`), halts task dispatch safely, and allows instant agent switching (`agy` ↔ `claude`) to resume the conversion.
+- **Interactive dashboard (`fexport convert ui`):** Live per-worker task progress lines, active working time tracking, backlog inspection, runner option configuration, report viewer, and manual task reviews.
+- **Lenient, fast verification:** `fexport convert check <taskId> [--smoke]` validates compiled sections against baseline captures with visible DOM checks, link normalization, anti-aliased pixel matching, and motion presence detection, guarded by strict call limits.
+- **Side-by-side visual comparison report:** `fexport convert report [route]` (alias: `verify`) serves the production build alongside the original export, automatically masks dynamic and ticking regions via 2-second capture diffing, records animation filmstrips on load and scroll, and generates an interactive HTML report at `.convert/report/index.html`.
+- **Non-blocking human review:** Complex tasks failing their single fix attempt or timing out transition to `needs-review`, allowing the queue to proceed. Tasks can be inspected and marked done via `fexport convert review <taskId>` or the dashboard.
+- **State v2 & migration:** Schema v2 stores relative paths for full portability across machines and folders. Automatically detects legacy v1 projects and offers clean re-conversion to `<project>.old`.
 
 ## 5.0.1
 

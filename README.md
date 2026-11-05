@@ -194,19 +194,22 @@ Every run writes `export.log` with untruncated messages from its retained log hi
 
 Full step-by-step guide: [CONVERT_GUIDE.md](CONVERT_GUIDE.md).
 
-`fexport convert` turns a Framer export into a Next.js (App Router, Tailwind) project. Code stages analyse the export, extract CMS data, scaffold the project and write one task file per component, page and motion into `.convert/tasks/`. You then hand those tasks to an AI coding agent (Claude Code, Antigravity, ...), and `verify` compares the result with the original and writes fix tasks for anything that differs.
+`fexport convert` turns a Framer export into a clean, editable Next.js (App Router, Tailwind CSS v4) project using a section-refactor pipeline. Deterministic stages extract CMS data, scaffold the project, install dependencies, split pages into section components, and generate AI refactoring tasks (`shell`, `section`, `page`). AI coding agents refactor sections in parallel to clean Tailwind code while preserving animations and responsive layouts.
 
 ```
-fexport convert <export-dir> [next-dir] [--yes]   run the code stages (next-dir defaults to <export-dir>-next)
-fexport convert status                            stages, task counts, warnings, motion checklist
-fexport convert next                              the next task to give to your agent
-fexport convert verify [target]                   build, diff against the export, write fix tasks
-fexport convert done <taskId>                     mark a motion task done after ticking its checklist
+fexport convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent agy|claude] [--concurrency 1|2|3]
+fexport convert status                          show stages, tasks, warnings and progress
+fexport convert next                            show the next task to give to your AI coding agent
+fexport convert check <taskId> [--smoke]        run checks on a completed task (exit 0/1/2)
+fexport convert run                             headless AI agent runner (Ctrl+C pauses)
+fexport convert report [route]                  visual comparison report against export (alias: verify)
+fexport convert review <taskId>                 mark a needs-review task done
+fexport convert ui                              open the interactive Conversion Dashboard
 ```
 
-The loop: run `convert`, then `npm install` inside the generated project (the converter never installs packages itself, and `verify` refuses to run until `node_modules` exists), work through `fexport convert next` in your agent, run `fexport convert verify`, repeat with the generated `fix-*` tasks until nothing fails. Generated task files call the CLI as `npx -p framer-export fexport convert ...`, so `npx` always resolves this package. The v2 wizard also offers conversion after a Framer export.
+The flow: run `fexport convert <exportDir>` to run automated setup stages through baseline capture. Then run `fexport convert run` (or `fexport convert ui` for the interactive dashboard) to let AI agents (`agy` or `claude`) refactor sections in parallel. You can pause anytime with Ctrl+C or `P`. When complete, inspect the visual comparison report in `.convert/report/index.html` with `fexport convert report`.
 
-Limitations: Framer exports only; animations are detected and listed but must be checked by hand.
+Limitations: Framer exports only; forms, auth, and backend integrations must be implemented separately.
 
 ## The AI conversion assistant
 
