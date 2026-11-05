@@ -1,6 +1,71 @@
 import { kebab } from '../stages/scaffold/files.js';
 
 /**
+ * Page-side function `slim(root: Element): number` (count of removed properties).
+ * For each element with inline style, removes each property; keeps the removal only if
+ * every computed property of that element is unchanged; otherwise restores it.
+ */
+export const SLIM_SRC = String.raw`(function () {
+  return function slim(root) {
+    if (!root) return 0;
+    var elements = [];
+    if (root.getAttribute && root.getAttribute('style')) elements.push(root);
+    var styled = root.querySelectorAll ? root.querySelectorAll('[style]') : [];
+    for (var k = 0; k < styled.length; k++) elements.push(styled[k]);
+
+    var removed = 0;
+    for (var e = 0; e < elements.length; e++) {
+      var el = elements[e];
+      var style = el.style;
+      if (!style || !style.length) continue;
+
+      var props = [];
+      for (var i = 0; i < style.length; i++) {
+        props.push(style[i]);
+      }
+
+      for (var i = 0; i < props.length; i++) {
+        var prop = props[i];
+        var cs = window.getComputedStyle(el);
+        var beforeValues = [];
+        for (var j = 0; j < cs.length; j++) {
+          beforeValues.push(cs.getPropertyValue(cs[j]));
+        }
+        var beforeVar = prop.indexOf('--') === 0 ? cs.getPropertyValue(prop) : null;
+        var val = style.getPropertyValue(prop);
+        var priority = style.getPropertyPriority(prop);
+
+        style.removeProperty(prop);
+
+        var changed = false;
+        var csAfter = window.getComputedStyle(el);
+        if (beforeVar !== null && csAfter.getPropertyValue(prop) !== beforeVar) {
+          changed = true;
+        } else {
+          for (var j = 0; j < csAfter.length; j++) {
+            if (csAfter.getPropertyValue(csAfter[j]) !== beforeValues[j]) {
+              changed = true;
+              break;
+            }
+          }
+        }
+
+        if (changed) {
+          style.setProperty(prop, val, priority);
+        } else {
+          removed++;
+        }
+      }
+
+      if (style.length === 0) {
+        el.removeAttribute('style');
+      }
+    }
+    return removed;
+  };
+})()`;
+
+/**
  * Rewrites Framer color token variables (e.g. `var(--token-4f4e-12, rgb(17, 18, 18))`)
  * in generated JSX to Tailwind v4 theme color variables (`var(--color-<kebab-name>)`).
  *

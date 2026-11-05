@@ -150,3 +150,124 @@ export function variantLabel(
   const visible = ALL_BREAKPOINTS.filter((b) => !hidden.has(b));
   return visible.join(' ');
 }
+
+/**
+ * Page-side function `annotate(root: Element, plan: SnapshotPlan): { unmatchedMotion: string[] }`.
+ * Applies `data-variant`, `data-motion`, `data-cms`, `data-script-drawn`.
+ */
+export const ANNOTATE_SRC = String.raw`(function () {
+  return function annotate(root, plan) {
+    if (!root || !plan) return { unmatchedMotion: [] };
+
+    // 1. data-variant
+    var hiddenMap = plan.hiddenMap || {};
+    var hiddenKeys = Object.keys(hiddenMap);
+    if (hiddenKeys.length > 0) {
+      var elements = Array.prototype.slice.call(root.querySelectorAll('[class]'));
+      if (root.hasAttribute && root.hasAttribute('class')) elements.unshift(root);
+      var allBp = ['desktop', 'tablet', 'phone'];
+      for (var e = 0; e < elements.length; e++) {
+        var el = elements[e];
+        var classAttr = el.getAttribute('class') || '';
+        var classNames = classAttr.split(/\s+/);
+        var hidden = {};
+        var hasHiddenClass = false;
+        for (var i = 0; i < classNames.length; i++) {
+          var c = classNames[i].replace(/^\./, '');
+          var bps = hiddenMap[c];
+          if (bps && bps.length > 0) {
+            hasHiddenClass = true;
+            for (var b = 0; b < bps.length; b++) {
+              hidden[bps[b]] = true;
+            }
+          }
+        }
+        if (hasHiddenClass) {
+          var visible = [];
+          for (var b = 0; b < allBp.length; b++) {
+            if (!hidden[allBp[b]]) visible.push(allBp[b]);
+          }
+          el.setAttribute('data-variant', visible.join(' '));
+        }
+      }
+    }
+
+    // 2. data-motion
+    var unmatchedMotion = [];
+    var motionList = plan.motion || [];
+    for (var m = 0; m < motionList.length; m++) {
+      var item = motionList[m];
+      if (!item || !item.id) continue;
+      var el = null;
+      if (item.selector) {
+        try {
+          if (root.matches && root.matches(item.selector)) {
+            el = root;
+          } else {
+            el = root.querySelector(item.selector);
+          }
+        } catch (err) {}
+        if (!el) {
+          try {
+            el = document.querySelector(item.selector);
+          } catch (err) {}
+        }
+      }
+      if (el) {
+        var prevMotion = el.getAttribute('data-motion');
+        el.setAttribute('data-motion', prevMotion ? prevMotion + ' ' + item.id : item.id);
+      } else {
+        unmatchedMotion.push(item.id);
+      }
+    }
+
+    // 3. data-cms
+    var cmsList = plan.cms || [];
+    for (var c = 0; c < cmsList.length; c++) {
+      var entry = cmsList[c];
+      if (!entry || !entry.field || !entry.value) continue;
+      var targetVal = entry.value.trim();
+      if (!targetVal) continue;
+
+      var allEls = Array.prototype.slice.call(root.querySelectorAll('*'));
+      if (root.textContent && root.textContent.trim() === targetVal) allEls.unshift(root);
+
+      for (var i = 0; i < allEls.length; i++) {
+        var el = allEls[i];
+        if ((el.textContent || '').trim() === targetVal) {
+          var hasChildMatch = false;
+          for (var k = 0; k < el.children.length; k++) {
+            if ((el.children[k].textContent || '').trim() === targetVal) {
+              hasChildMatch = true;
+              break;
+            }
+          }
+          if (!hasChildMatch) {
+            var prevCms = el.getAttribute('data-cms');
+            el.setAttribute('data-cms', prevCms ? prevCms + ' ' + entry.field : entry.field);
+          }
+        }
+      }
+    }
+
+    // 4. data-script-drawn
+    var sdList = plan.scriptDrawn || [];
+    for (var s = 0; s < sdList.length; s++) {
+      var sd = sdList[s];
+      if (!sd || !sd.id) continue;
+      var el = null;
+      if (typeof document.elementFromPoint === 'function' && typeof sd.x === 'number' && typeof sd.y === 'number') {
+        try {
+          el = document.elementFromPoint(sd.x, sd.y);
+        } catch (err) {}
+      }
+      if (el) {
+        var prevSd = el.getAttribute('data-script-drawn');
+        el.setAttribute('data-script-drawn', prevSd ? prevSd + ' ' + sd.id : sd.id);
+      }
+    }
+
+    return { unmatchedMotion: unmatchedMotion };
+  };
+})()`;
+
