@@ -88,7 +88,12 @@ test('default npm uses spawnManaged and handles nextDir with spaces', async () =
     nextDir: tmpDir,
     log: () => {},
   };
-  // Running default npm in an empty directory without package.json will fail quickly with ENOENT
+  // A package.json in the temp dir stops npm walking up to the home folder; the
+  // file: dependency cannot resolve, so npm fails offline without touching anything else.
+  await fs.writeFile(
+    path.join(tmpDir, 'package.json'),
+    JSON.stringify({ name: 't', version: '1.0.0', private: true, dependencies: { missing: 'file:./does-not-exist.tgz' } }),
+  );
   await runInstall(ctx);
   assert.equal(ctx.state.stages.install, 'failed');
   assert.ok(ctx.state.warnings.length > 0);
