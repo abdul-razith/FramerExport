@@ -3,7 +3,6 @@ import test from 'node:test';
 import { parseNodes } from '../../src/convert/adapters/framer/components.js';
 import { STABLE_OF, stableNthChild } from '../../src/convert/adapters/framer/selectors.js';
 import { isIdentityTransform, ssrAppearCandidates } from '../../src/convert/adapters/framer/ssr-appear.js';
-import { referenceKey } from '../../src/convert/stages/verify.js';
 
 test('STABLE_OF excludes exactly the non-visual tags', () => {
   assert.equal(STABLE_OF, ':not(script, style, link, meta, template, noscript)');
@@ -51,14 +50,6 @@ test('isIdentityTransform', () => {
   for (const v of ['translateY(40px)', 'scale(0.9)', 'rotate(5deg)', 'translateX(-50%)', 'perspective(1200px)', 'weird']) {
     assert.equal(isIdentityTransform(v), false, v);
   }
-});
-
-test('referenceKey changes when only a section selector changes', () => {
-  const a = referenceKey('<html></html>', [{ name: 'Hero', selector: '#main > div:nth-child(2)' }]);
-  const b = referenceKey('<html></html>', [{ name: 'Hero', selector: `#main > div:nth-child(1 of ${STABLE_OF})` }]);
-  assert.match(a, /^[0-9a-f]{64}$/);
-  assert.notEqual(a, b);
-  assert.equal(a, referenceKey('<html></html>', [{ name: 'Hero', selector: '#main > div:nth-child(2)' }]));
 });
 
 test('split-text spans get a group selector; identical changes collapse into one entry', async () => {

@@ -418,7 +418,7 @@ export async function runReport(
   }
 
   const needsReview = Object.values(ctx.state.tasks)
-    .filter((t) => t.status === 'needs-review' || t.status === 'needs-human')
+    .filter((t) => t.status === 'needs-review')
     .map((t) => t.id);
 
   const stubs = manifest?.stubs ?? [];

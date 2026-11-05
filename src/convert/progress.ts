@@ -46,8 +46,6 @@ export interface Progress {
   pagesTotal: number;
   sectionsDone: number;
   sectionsTotal: number;
-  motionDone: number;
-  motionTotal: number;
   shellDone: boolean | undefined;
   overallMs: number;
   setupMs: number;
@@ -75,15 +73,12 @@ export function summarizeProgress(state: ConvertState): Progress {
         sectionsTotal: sections.length,
       };
     });
-  const motion = tasks.filter((t) => t.kind === 'motion');
   const shell = tasks.find((t) => t.kind === 'shell');
   return {
     pagesDone: pages.filter((p) => p.status === 'done').length,
     pagesTotal: pages.length,
     sectionsDone: pages.reduce((n, p) => n + p.sectionsDone, 0),
     sectionsTotal: pages.reduce((n, p) => n + p.sectionsTotal, 0),
-    motionDone: motion.filter((t) => t.status === 'done').length,
-    motionTotal: motion.length,
     shellDone: shell ? shell.status === 'done' : undefined,
     overallMs: Object.values(by).reduce((n, v) => n + v, 0),
     setupMs: by.setup ?? 0,
@@ -98,7 +93,6 @@ export function formatProgressLine(state: ConvertState): string {
   const p = summarizeProgress(state);
   const parts = [`${progressBar(p.pagesDone, p.pagesTotal)} Pages ${p.pagesDone}/${p.pagesTotal}`];
   if (p.sectionsTotal) parts.push(`Sections ${p.sectionsDone}/${p.sectionsTotal}`);
-  if (p.motionTotal) parts.push(`Motion ${p.motionDone}/${p.motionTotal}`);
   const reviewCount = Object.values(state.tasks).filter((t) => t.status === 'needs-review').length;
   if (reviewCount > 0) parts.push(`Review ${reviewCount}`);
   parts.push(`Overall ${formatDuration(p.overallMs)}`);
@@ -157,7 +151,6 @@ const MARK: Record<TaskStatus, string> = {
   done: '✓',
   'in-progress': '…',
   pending: '–',
-  'needs-human': '!',
   'awaiting-fix': '!',
   'needs-review': '?',
 };

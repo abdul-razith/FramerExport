@@ -69,7 +69,7 @@ test(
 
     const state = await loadState(nextDir);
     assert.equal(state?.stages.scaffold, 'done');
-    assert.equal(state?.stages.tasks, 'needs-ai');
+    assert.equal(state?.stages.tasks, 'done');
 
     const install = await npm(['install', '--no-audit', '--no-fund'], nextDir);
     assert.equal(install.code, 0, install.output);

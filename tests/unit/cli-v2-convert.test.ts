@@ -4,7 +4,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { markTaskDone, readTaskGoal } from '../../src/convert/index.js';
+import { readTaskGoal } from '../../src/convert/index.js';
 import { initState } from '../../src/convert/state.js';
 import type { TaskRecord } from '../../src/convert/types.js';
 
@@ -17,39 +17,6 @@ function stateWith(...tasks: TaskRecord[]) {
   for (const t of tasks) state.tasks[t.id] = t;
   return state;
 }
-
-// ---- Task 1: shared helpers --------------------------------------------------------------------------
-
-test('markTaskDone: missing id returns the usage error', () => {
-  assert.deepEqual(markTaskDone(stateWith(), undefined), {
-    ok: false,
-    error: 'Usage: fexport convert done <taskId>',
-  });
-});
-
-test('markTaskDone: unknown id returns Unknown task', () => {
-  assert.deepEqual(markTaskDone(stateWith(), 'nope'), { ok: false, error: 'Unknown task: nope' });
-});
-
-test('markTaskDone: refuses a page task', () => {
-  const r = markTaskDone(stateWith(task('101-page-home', 'page')), '101-page-home');
-  assert.equal(r.ok, false);
-  assert.ok(!r.ok && r.error.includes('"done" is only for motion tasks'));
-});
-
-test('markTaskDone: marks a motion task done', () => {
-  const state = stateWith(task('201-motion-home', 'motion'));
-  const r = markTaskDone(state, '201-motion-home');
-  assert.equal(r.ok, true);
-  assert.equal(state.tasks['201-motion-home'].status, 'done');
-});
-
-test('markTaskDone: accepts a fix task whose original is motion', () => {
-  const state = stateWith(task('201-motion-home', 'motion'), task('fix-201-motion-home-1', 'fix'));
-  const r = markTaskDone(state, 'fix-201-motion-home-1');
-  assert.equal(r.ok, true);
-  assert.equal(state.tasks['fix-201-motion-home-1'].status, 'done');
-});
 
 test('readTaskGoal returns the Goal section body, or null for missing file / section', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'goal-'));
@@ -66,22 +33,16 @@ test('readTaskGoal returns the Goal section body, or null for missing file / sec
 
 import {
   STAGE_LABELS,
-  formatVerifyError,
-  formatVerifyResult,
   getDashboardChoices,
-  getMotionChoices,
-  getVerifyTargetChoices,
   stageFromLog,
   stripNextSteps,
 } from '../../src/cli-v2/screens/convert-helpers.js';
-import type { PageInfo } from '../../src/convert/types.js';
 
 test('STAGE_LABELS has the v2 "Stage N/5" wording', () => {
   assert.equal(STAGE_LABELS.analyze, 'Stage 1/5: Analyze export');
   assert.equal(STAGE_LABELS['extract-cms'], 'Stage 2/5: Extract CMS');
   assert.equal(STAGE_LABELS.scaffold, 'Stage 3/5: Scaffold Next.js project');
   assert.equal(STAGE_LABELS.tasks, 'Stage 4/5: Write AI task files');
-  assert.equal(STAGE_LABELS.verify, 'Stage 5/5: Verify against export');
 });
 
 test('stageFromLog matches only "Running <stage>..." lines', () => {
@@ -154,43 +115,6 @@ test('getDashboardChoices: open-report only offered when report exists', () => {
   const state = stateWith(task('101-page-home', 'page'));
   assert.ok(!getDashboardChoices(state, { reportExists: false }).some((c) => c.value === 'open-report'));
   assert.ok(getDashboardChoices(state, { reportExists: true }).some((c) => c.value === 'open-report'));
-});
-
-test('getMotionChoices lists incomplete motion tasks and their fix tasks only', () => {
-  const state = stateWith(
-    task('201-motion-home', 'motion', { route: '/' }),
-    task('202-motion-about', 'motion', { status: 'done' }),
-    task('fix-201-motion-home-1', 'fix', { route: '/' }),
-    task('101-page-home', 'page')
-  );
-  assert.deepEqual(getMotionChoices(state).map((c) => c.value).sort(), ['201-motion-home', 'fix-201-motion-home-1']);
-});
-
-test('getVerifyTargetChoices: pending task first, then all, tasks and page routes', () => {
-  const pages = [{ route: '/about' }, { route: '/' }] as PageInfo[];
-  const state = stateWith(task('001-component-A', 'component'));
-  const choices = getVerifyTargetChoices(state, pages);
-  assert.equal(choices[0].value, '001-component-A');
-  assert.ok(choices[0].label.startsWith('Next pending task'));
-  assert.ok(choices.some((c) => c.value === undefined && c.label === 'All outstanding tasks'));
-  assert.ok(choices.some((c) => c.value === '/about' && c.hint === 'page route'));
-  const empty = getVerifyTargetChoices(stateWith(), pages);
-  assert.equal(empty[0].label, 'All outstanding tasks');
-});
-
-test('formatVerifyResult shows counts, failed ids and the report path', () => {
-  const text = formatVerifyResult({ passed: ['a'], failed: ['b'] }, '/n');
-  assert.ok(text.includes('Passed: 1'));
-  assert.ok(text.includes('Failed: 1'));
-  assert.ok(text.includes('b'));
-  assert.ok(text.includes(path.join('/n', '.convert', 'diffs', 'report.json')));
-});
-
-test('formatVerifyError points a missing-dependencies error at the install action', () => {
-  const msg = formatVerifyError(new Error('Dependencies not installed: run "npm install" in /n'));
-  assert.ok(msg.includes('Dependencies not installed'));
-  assert.ok(msg.includes('Install dependencies'));
-  assert.equal(formatVerifyError('boom'), 'boom');
 });
 
 // ---- Task 3: routing ---------------------------------------------------------------------------------

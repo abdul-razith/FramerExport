@@ -6,7 +6,6 @@ import { after, before, test } from 'node:test';
 import { framerAdapter } from '../../src/convert/adapters/framer/index.js';
 import { initState } from '../../src/convert/state.js';
 import { runAnalyze } from '../../src/convert/stages/analyze.js';
-import { routesMap } from '../../src/convert/stages/verify.js';
 import type { ConvertState, PageInfo } from '../../src/convert/types.js';
 import { stopAllManaged } from '../../src/convert/verify/proc.js';
 import { runReport } from '../../src/convert/verify/report.js';
@@ -32,6 +31,23 @@ const START = `const i = process.argv.indexOf('-p');
 if (i > 0) process.env.PORT = process.argv[i + 1];
 await import('./serve.js');
 `;
+
+function dynamicParent(route: string): string {
+  return route.replace(/\/\[slug\]$/, '').replace(/^\//, '');
+}
+
+function routesMap(pages: PageInfo[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const p of pages) {
+    if (p.dynamic) {
+      const parent = dynamicParent(p.route);
+      for (const s of p.dynamic.slugs) map[`subpages/${parent.split('/').join('_')}_${s}.html`] = `/${parent}/${s}`;
+    } else {
+      map[p.sourceFile] = p.route;
+    }
+  }
+  return map;
+}
 
 function standInScript(secs: Array<{ name: string; selector: string }>, routeMap: Record<string, string>): string {
   return `<script>(() => {

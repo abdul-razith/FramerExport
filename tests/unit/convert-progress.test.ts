@@ -32,10 +32,9 @@ const stateWith = (...tasks: TaskRecord[]): ConvertState => ({
     scaffold: 'done',
     install: 'pending',
     generate: 'pending',
-    tasks: 'needs-ai',
+    tasks: 'done',
     baseline: 'pending',
     finalize: 'pending',
-    verify: 'pending',
   },
   tasks: Object.fromEntries(tasks.map((t) => [t.id, t])),
   fileHashes: {},
@@ -77,12 +76,11 @@ test('addTime accumulates active time and stamps the start once', () => {
   assert.equal(s.timing!.byTask.x ?? 0, 0);
 });
 
-test('summarizeProgress counts pages, sections and motion, with per-page time', () => {
+test('summarizeProgress counts pages and sections, with per-page time', () => {
   const s = stateWith(
     task('001-shell', 'shell', { status: 'done' }),
     task('101-page-home', 'page', { status: 'done', route: '/', sections: ['A', 'B'], passedSections: ['A', 'B'] }),
     task('102-page-about', 'page', { status: 'in-progress', route: '/about', sections: ['A', 'B', 'C'], passedSections: ['A'] }),
-    task('201-motion-home', 'motion', { status: 'pending', route: '/' }),
     task('fix-102-page-about-1', 'fix', { route: '/about' }),
   );
   addTime(s, 'setup', 60_000);
@@ -90,8 +88,8 @@ test('summarizeProgress counts pages, sections and motion, with per-page time', 
   addTime(s, '102-page-about', 30_000);
   const p = summarizeProgress(s);
   assert.deepEqual(
-    { d: p.pagesDone, t: p.pagesTotal, sd: p.sectionsDone, st: p.sectionsTotal, md: p.motionDone, mt: p.motionTotal },
-    { d: 1, t: 2, sd: 3, st: 5, md: 0, mt: 1 },
+    { d: p.pagesDone, t: p.pagesTotal, sd: p.sectionsDone, st: p.sectionsTotal },
+    { d: 1, t: 2, sd: 3, st: 5 },
   );
   assert.equal(p.overallMs, 210_000);
   assert.deepEqual(
@@ -186,31 +184,6 @@ test('formatTimeSummary lists each page and names the slowest', () => {
   assert.match(text, /Setup\s+30s/);
 });
 
-import { sectionOutcomes } from '../../src/convert/stages/verify.js';
-
-const outcome = (sections: Array<[string, boolean]>, dom: string[] = [], error?: string) => ({
-  sections: sections.map(([name, pass]) => ({ name, pass })),
-  dom: dom.map((section) => ({ section })),
-  ...(error ? { error } : {}),
-});
-
-test('sectionOutcomes: a section passes only when it passes at every width without DOM mismatches', () => {
-  const perWidth = new Map([
-    [1440, outcome([['Hero', true], ['CTA', true], ['Footer', true]], ['CTA'])],
-    [1000, outcome([['Hero', true], ['CTA', true], ['Footer', false]])],
-    [390, outcome([['Hero', true], ['CTA', true], ['Footer', true]])],
-  ]);
-  const r = sectionOutcomes(perWidth, [1440, 1000, 390]);
-  assert.deepEqual(r.names, ['Hero', 'CTA', 'Footer']);
-  assert.deepEqual(r.passed, ['Hero']);
-});
-
-test('sectionOutcomes: a width with an error passes nothing; a missing width passes nothing', () => {
-  const ok = outcome([['Hero', true]]);
-  assert.deepEqual(sectionOutcomes(new Map([[1440, ok], [390, outcome([], [], 'boom')]]), [1440, 390]).passed, []);
-  assert.deepEqual(sectionOutcomes(new Map([[1440, ok]]), [1440, 390]).passed, []);
-});
-
 import { formatLiveLine, startTicker } from '../../src/convert/progress.js';
 
 test('formatLiveLine shows task, agent, this-run, page and overall time on one line', () => {
@@ -248,18 +221,3 @@ test('startTicker calls update on an interval and stops cleanly', async () => {
   assert.equal(calls, after);
 });
 
-import { applySectionProgress } from '../../src/convert/stages/verify.js';
-
-test('applySectionProgress: the checklist becomes the sections verify actually judged', () => {
-  const t = task('107-page-contact', 'page', { sections: ['section-1', 'section-2', 'Header', 'section-7'] });
-  applySectionProgress(t, { names: ['section-1', 'Header'], passed: ['section-1'] });
-  assert.deepEqual(t.sections, ['section-1', 'Header']);
-  assert.deepEqual(t.passedSections, ['section-1']);
-});
-
-test('applySectionProgress: nothing judged keeps the existing checklist and passes nothing', () => {
-  const t = task('107-page-contact', 'page', { sections: ['A', 'B'], passedSections: ['A'] });
-  applySectionProgress(t, { names: [], passed: [] });
-  assert.deepEqual(t.sections, ['A', 'B']);
-  assert.deepEqual(t.passedSections, []);
-});

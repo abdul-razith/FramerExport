@@ -6,7 +6,7 @@ import type { StageContext } from './adapters/types.js';
 import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipeline.js';
 import { DEFAULT_OPTIONS, findProjectRoot, loadState, saveState } from './state.js';
 import { CLI_INVOCATION } from './tasks/templates/index.js';
-import type { AnimationEntry, ConvertState, RunOptions, TaskRecord } from './types.js';
+import type { AnimationEntry, ConvertState, RunOptions } from './types.js';
 import type { AgentId } from './runner/agent-process.js';
 
 export { formatStatus, runPipeline } from './pipeline.js';
@@ -22,7 +22,6 @@ export interface ConvertArgs {
     | 'report'
     | 'review'
     | 'ui'
-    | 'done'
     | 'generate';
   exportDir?: string;
   nextDir?: string;
@@ -119,9 +118,6 @@ export function parseConvertArgs(argv: string[]): ConvertArgs {
   if (first === 'review') {
     return { command: 'review', taskId: second, yes };
   }
-  if (first === 'done') {
-    return { command: 'done', target: second, yes };
-  }
   if (first === 'convert') {
     return {
       command: 'convert',
@@ -163,26 +159,6 @@ export async function readTaskGoal(file: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-/** Marks a motion task (or a fix task of one) done in memory; the caller saves the state. */
-export function markTaskDone(
-  state: ConvertState,
-  taskId: string | undefined
-): { ok: true; task: TaskRecord } | { ok: false; error: string } {
-  const task = taskId ? state.tasks[taskId] : undefined;
-  if (!task) {
-    return { ok: false, error: taskId ? `Unknown task: ${taskId}` : 'Usage: fexport convert done <taskId>' };
-  }
-  const original = task.kind === 'fix' ? state.tasks[task.id.replace(/^fix-/, '').replace(/-\d+$/, '')] : task;
-  if (original?.kind !== 'motion') {
-    return {
-      ok: false,
-      error: `${task.id} is a ${task.kind} task; "done" is only for motion tasks. Run "${CLI_INVOCATION} verify ${task.id}" instead.`,
-    };
-  }
-  task.status = 'done';
-  return { ok: true, task };
 }
 
 /** True when both stdin and stdout are TTYs: the only case where prompts may appear. */
@@ -365,7 +341,7 @@ export async function runConvertCommand(
   if (args.command === 'report') {
     if (
       state.stages.scaffold !== 'done' ||
-      (state.stages.tasks !== 'needs-ai' && state.stages.tasks !== 'done')
+      state.stages.tasks !== 'done'
     ) {
       console.error('Pipeline incomplete: run "fexport convert <exportDir>" first');
       return 1;
@@ -434,16 +410,6 @@ export async function runConvertCommand(
     const goal = await readTaskGoal(file);
     if (goal !== null) console.log('Goal\n' + goal);
     else if (!(await stat(file).then(() => true, () => false))) console.log('(task file not readable)');
-    return 0;
-  }
-  if (args.command === 'done') {
-    const result = markTaskDone(state, args.target);
-    if (!result.ok) {
-      console.error(result.error);
-      return 1;
-    }
-    await saveState(state);
-    console.log(`Marked ${result.task.id} done.`);
     return 0;
   }
 

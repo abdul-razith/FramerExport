@@ -31,7 +31,7 @@ async function readPlatform(exportDir: string): Promise<string> {
   }
 }
 
-const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, shell: 1, section: 2, component: 3, page: 4, motion: 5 };
+const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, shell: 1, section: 2, page: 3 };
 
 /**
  * First actionable task: fix tasks, then components, pages and motion, by id within a kind. The `build`
@@ -72,8 +72,7 @@ export async function runPipeline(
 
   const ctx: StageContext = { state, exportDir: state.exportDir, nextDir, log: io.log };
 
-  for (let stage = nextStage(state); stage && stage !== 'finalize' && stage !== 'verify'; stage = nextStage(state)) {
-    if (stage === 'tasks' && state.stages.tasks === 'needs-ai') break;
+  for (let stage = nextStage(state); stage && stage !== 'finalize'; stage = nextStage(state)) {
     io.log(`Running ${stage}...`);
     const stageStart = Date.now();
     if (stage === 'analyze') {

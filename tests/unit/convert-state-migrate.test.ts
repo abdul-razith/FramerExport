@@ -122,8 +122,7 @@ test('v1 stage mapping: keep analyze, extract-cms, scaffold statuses; every othe
         analyze: 'done',
         'extract-cms': 'done',
         scaffold: 'done',
-        tasks: 'needs-ai',
-        verify: 'done',
+        tasks: 'done',
       },
     },
     nextDir
@@ -137,7 +136,6 @@ test('v1 stage mapping: keep analyze, extract-cms, scaffold statuses; every othe
   assert.equal(state.stages.tasks, 'pending');
   assert.equal(state.stages.baseline, 'pending');
   assert.equal(state.stages.finalize, 'pending');
-  assert.equal(state.stages.verify, 'pending');
 });
 
 test('missing export folder sets exportMissing', async () => {

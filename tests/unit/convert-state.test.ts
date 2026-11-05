@@ -10,7 +10,6 @@ import {
   initState,
   loadState,
   nextStage,
-  recordAttempt,
   saveState,
 } from '../../src/convert/state.js';
 
@@ -22,7 +21,7 @@ function withTask(id = 't1') {
   const state = initState('/export', '/next');
   state.tasks[id] = {
     id,
-    kind: 'component',
+    kind: 'section',
     file: 'a.tsx',
     status: 'pending',
     attempts: 0,
@@ -46,7 +45,6 @@ test('initState sets all stages pending', () => {
   const state = initState('/export', '/next');
   assert.equal(state.version, 2);
   for (const stage of STAGES) assert.equal(state.stages[stage], 'pending');
-  assert.equal(state.stages.verify, 'pending');
   assert.equal(state.options, null);
   assert.deepEqual(state.run, { status: 'idle' });
 });
@@ -110,13 +108,3 @@ test('nextStage treats skipped as finished', () => {
   assert.equal(nextStage(state), 'finalize');
 });
 
-test('recordAttempt escalates to needs-human after 3 failures', () => {
-  const state = withTask();
-  assert.equal(recordAttempt(state, 't1', false), 'in-progress');
-  assert.equal(recordAttempt(state, 't1', false), 'in-progress');
-  assert.equal(recordAttempt(state, 't1', false), 'needs-human');
-  assert.equal(state.tasks.t1.attempts, 3);
-  const other = withTask();
-  assert.equal(recordAttempt(other, 't1', true), 'done');
-  assert.equal(other.tasks.t1.status, 'done');
-});

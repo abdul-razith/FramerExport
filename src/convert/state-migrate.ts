@@ -49,7 +49,6 @@ export function fromPersisted(raw: unknown, nextDir: string): ConvertState {
         tasks: 'pending',
         baseline: 'pending',
         finalize: 'pending',
-        verify: 'pending',
       }
     : {
         analyze: data.stages?.analyze ?? 'pending',
@@ -60,7 +59,6 @@ export function fromPersisted(raw: unknown, nextDir: string): ConvertState {
         tasks: data.stages?.tasks ?? 'pending',
         baseline: data.stages?.baseline ?? 'pending',
         finalize: data.stages?.finalize ?? 'pending',
-        verify: data.stages?.verify ?? 'pending',
       };
 
   const state: ConvertState = {

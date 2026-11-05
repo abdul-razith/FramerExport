@@ -6,14 +6,13 @@ export type StageName =
   | 'generate'
   | 'tasks'
   | 'baseline'
-  | 'finalize'
-  | 'verify';
+  | 'finalize';
 
-export type StageStatus = 'pending' | 'done' | 'needs-ai' | 'failed' | 'skipped';
+export type StageStatus = 'pending' | 'done' | 'failed' | 'skipped';
 
-export type TaskKind = 'shell' | 'section' | 'page' | 'fix' | 'component' | 'motion';
+export type TaskKind = 'shell' | 'section' | 'page' | 'fix';
 
-export type TaskStatus = 'pending' | 'in-progress' | 'awaiting-fix' | 'done' | 'needs-review' | 'needs-human';
+export type TaskStatus = 'pending' | 'in-progress' | 'awaiting-fix' | 'done' | 'needs-review';
 
 export interface TaskRecord {
   id: string;

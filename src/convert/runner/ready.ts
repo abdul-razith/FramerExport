@@ -4,14 +4,12 @@ const KIND_ORDER: Record<TaskKind, number> = {
   fix: 0,
   shell: 1,
   section: 2,
-  component: 3,
-  page: 4,
-  motion: 5,
+  page: 3,
 };
 
 /**
  * Returns pending tasks whose dependencies are all done or needs-review.
- * Ordered: fix tasks first, then shell, section, component, page, motion, and id within kind.
+ * Ordered: fix tasks first, then shell, section, page, and id within kind.
  * While any shell task is in `running`, no other shell task is ready.
  */
 export function readyTasks(state: ConvertState, running: ReadonlySet<string>): TaskRecord[] {

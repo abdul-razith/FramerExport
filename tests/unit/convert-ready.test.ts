@@ -26,7 +26,6 @@ test('readyTasks: returns only pending tasks', () => {
   state.tasks['t-awaiting-fix'] = makeTask({ id: 't-awaiting-fix', kind: 'section', status: 'awaiting-fix' });
   state.tasks['t-done'] = makeTask({ id: 't-done', kind: 'section', status: 'done' });
   state.tasks['t-needs-review'] = makeTask({ id: 't-needs-review', kind: 'section', status: 'needs-review' });
-  state.tasks['t-needs-human'] = makeTask({ id: 't-needs-human', kind: 'section', status: 'needs-human' });
 
   const ready = readyTasks(state, new Set());
   assert.deepEqual(ready.map((t) => t.id), ['t-pending']);

@@ -1,9 +1,8 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import chalk from 'chalk';
 import { pickNextTask } from '../../convert/pipeline.js';
 import { formatDuration, startTicker } from '../../convert/progress.js';
-import type { ConvertState, PageInfo, StageName, TaskRecord } from '../../convert/types.js';
+import type { ConvertState, StageName } from '../../convert/types.js';
 
 export const STAGE_LABELS: Record<StageName, string> = {
   analyze: 'Stage 1/5: Analyze export',
@@ -14,7 +13,6 @@ export const STAGE_LABELS: Record<StageName, string> = {
   tasks: 'Stage 4/5: Write AI task files',
   baseline: 'Capture baseline screenshots',
   finalize: 'Finalize conversion',
-  verify: 'Stage 5/5: Verify against export',
 };
 
 export type DashboardAction =
@@ -39,7 +37,7 @@ export interface Choice<T> {
 
 /** Maps the pipeline's "Running <stage>..." log line to its stage. */
 export function stageFromLog(msg: string): StageName | null {
-  const m = /^Running (analyze|extract-cms|scaffold|install|generate|tasks|baseline|finalize|verify)\.\.\.$/.exec(msg.trim());
+  const m = /^Running (analyze|extract-cms|scaffold|install|generate|tasks|baseline|finalize)\.\.\.$/.exec(msg.trim());
   return m ? (m[1] as StageName) : null;
 }
 
@@ -57,19 +55,6 @@ export function stripNextSteps(lines: string[]): string[] {
     out.push(line);
   }
   return out;
-}
-
-/** A fix task resolves to the task it fixes (`fix-<id>-<n>`); other tasks resolve to themselves. */
-function originalOf(state: ConvertState, t: TaskRecord): TaskRecord | undefined {
-  if (t.kind !== 'fix') return t;
-  return state.tasks[t.id.replace(/^fix-/, '').replace(/-\d+$/, '')];
-}
-
-export function getMotionChoices(state: ConvertState): Choice<string>[] {
-  return Object.values(state.tasks)
-    .filter((t) => t.status !== 'done' && originalOf(state, t)?.kind === 'motion')
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .map((t) => ({ label: t.id, value: t.id, hint: t.route }));
 }
 
 export function getDashboardChoices(
@@ -141,35 +126,6 @@ export function getDashboardChoices(
 
   choices.push({ label: 'Refresh', value: 'refresh' }, { label: 'Exit', value: 'exit' });
   return choices;
-}
-
-export function getVerifyTargetChoices(state: ConvertState, pages: PageInfo[]): Choice<string | undefined>[] {
-  const choices: Choice<string | undefined>[] = [];
-  const next = pickNextTask(state);
-  if (next) choices.push({ label: `Next pending task (${next.id})`, value: next.id });
-  choices.push({ label: 'All outstanding tasks', value: undefined });
-  for (const t of Object.values(state.tasks)
-    .filter((x) => x.id !== 'build' && (x.status === 'pending' || x.status === 'in-progress'))
-    .sort((a, b) => a.id.localeCompare(b.id))) {
-    choices.push({ label: t.id, value: t.id, hint: t.kind });
-  }
-  for (const p of pages) choices.push({ label: p.route, value: p.route, hint: 'page route' });
-  return choices;
-}
-
-export function formatVerifyResult(r: { passed: string[]; failed: string[] }, root: string): string {
-  const lines = [
-    `${chalk.green('✔')} Passed: ${r.passed.length}`,
-    `${chalk.red('✖')} Failed: ${r.failed.length}`,
-    ...r.failed.map((id) => `    ${id}`),
-    `Report: ${path.join(root, '.convert', 'diffs', 'report.json')}`,
-  ];
-  return lines.join('\n');
-}
-
-export function formatVerifyError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.startsWith('Dependencies not installed') ? `${msg}\nChoose "Install dependencies" from the menu.` : msg;
 }
 
 /** Shortens a line to fit the terminal, so a spinner message never wraps. */
