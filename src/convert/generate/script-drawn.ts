@@ -314,8 +314,8 @@ export const VISIBLE_ITEMS_SRC = String.raw`(function () {
           var r = el.getBoundingClientRect();
           if (r) {
             box = {
-              x: Math.round((r.x !== undefined ? r.x : r.left || 0) * 100) / 100,
-              y: Math.round((r.y !== undefined ? r.y : r.top || 0) * 100) / 100,
+              x: Math.round(((r.x !== undefined ? r.x : r.left || 0) + ((typeof window !== 'undefined' && window.scrollX) || 0)) * 100) / 100,
+              y: Math.round(((r.y !== undefined ? r.y : r.top || 0) + ((typeof window !== 'undefined' && window.scrollY) || 0)) * 100) / 100,
               width: Math.round((r.width || 0) * 100) / 100,
               height: Math.round((r.height || 0) * 100) / 100,
             };

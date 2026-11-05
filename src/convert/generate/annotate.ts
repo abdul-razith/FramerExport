@@ -257,14 +257,22 @@ export const ANNOTATE_SRC = String.raw`(function () {
       if (!sd || !sd.id) continue;
       var el = null;
       if (typeof document.elementFromPoint === 'function' && typeof sd.x === 'number' && typeof sd.y === 'number') {
+        // sd.x / sd.y are document coordinates: scroll the point into view, then convert to viewport coordinates
         try {
-          el = document.elementFromPoint(sd.x, sd.y);
+          var vh = window.innerHeight || 0;
+          var vw = window.innerWidth || 0;
+          window.scrollTo(Math.max(0, sd.x - vw / 2), Math.max(0, sd.y - vh / 2));
+          el = document.elementFromPoint(sd.x - (window.scrollX || 0), sd.y - (window.scrollY || 0));
         } catch (err) {}
       }
       if (el) {
         var prevSd = el.getAttribute('data-script-drawn');
         el.setAttribute('data-script-drawn', prevSd ? prevSd + ' ' + sd.id : sd.id);
       }
+    }
+
+    if (sdList.length > 0) {
+      try { window.scrollTo(0, 0); } catch (err) {}
     }
 
     return { unmatchedMotion: unmatchedMotion };
