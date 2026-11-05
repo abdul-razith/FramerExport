@@ -1,9 +1,28 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { ConvertState, StageName, TaskStatus } from './types.js';
+import type { ConvertState, RunOptions, StageName, TaskStatus } from './types.js';
+import { fromPersisted, toPersisted } from './state-migrate.js';
 
-export const STAGES: StageName[] = ['analyze', 'extract-cms', 'scaffold', 'tasks', 'verify'];
+export const STAGES: StageName[] = [
+  'analyze',
+  'extract-cms',
+  'scaffold',
+  'install',
+  'generate',
+  'tasks',
+  'baseline',
+  'finalize',
+];
+
+export const DEFAULT_OPTIONS: Omit<RunOptions, 'agent'> = {
+  testing: true,
+  concurrency: 1,
+  sectionTimeoutMin: 15,
+  pageTimeoutMin: 15,
+  pixelTolerance: 0.01,
+  reportTolerance: 0.03,
+};
 
 const MAX_ATTEMPTS = 3;
 
@@ -13,20 +32,24 @@ function stateFile(nextDir: string): string {
 
 export function initState(exportDir: string, nextDir: string): ConvertState {
   const stages = Object.fromEntries(STAGES.map((s) => [s, 'pending'])) as ConvertState['stages'];
+  stages.verify = 'pending';
   return {
-    version: 1,
+    version: 2,
     exportDir,
     nextDir,
     stages,
     tasks: {},
     fileHashes: {},
     warnings: [],
+    options: null,
+    run: { status: 'idle' },
   };
 }
 
 export async function loadState(nextDir: string): Promise<ConvertState | null> {
   try {
-    return JSON.parse(await fs.readFile(stateFile(nextDir), 'utf8')) as ConvertState;
+    const raw = JSON.parse(await fs.readFile(stateFile(nextDir), 'utf8'));
+    return fromPersisted(raw, nextDir);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
@@ -46,7 +69,8 @@ export async function writeFileAtomic(file: string, data: string | Uint8Array): 
 }
 
 export async function saveState(state: ConvertState): Promise<void> {
-  await writeFileAtomic(stateFile(state.nextDir), JSON.stringify(state, null, 2) + '\n');
+  const persisted = toPersisted(state);
+  await writeFileAtomic(stateFile(state.nextDir), JSON.stringify(persisted, null, 2) + '\n');
 }
 
 export async function findProjectRoot(fromDir: string): Promise<string | null> {
@@ -63,7 +87,7 @@ export async function findProjectRoot(fromDir: string): Promise<string | null> {
 }
 
 export function nextStage(state: ConvertState): StageName | null {
-  return STAGES.find((s) => state.stages[s] !== 'done') ?? null;
+  return STAGES.find((s) => state.stages[s] !== 'done' && state.stages[s] !== 'skipped') ?? null;
 }
 
 export function recordAttempt(state: ConvertState, taskId: string, passed: boolean): TaskStatus {

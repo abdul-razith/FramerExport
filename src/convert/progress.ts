@@ -103,7 +103,14 @@ export function formatProgressLine(state: ConvertState): string {
   return parts.join(' · ');
 }
 
-const MARK: Record<TaskStatus, string> = { done: '✓', 'in-progress': '…', pending: '–', 'needs-human': '!' };
+const MARK: Record<TaskStatus, string> = {
+  done: '✓',
+  'in-progress': '…',
+  pending: '–',
+  'needs-human': '!',
+  'awaiting-fix': '!',
+  'needs-review': '?',
+};
 
 /** Multi-line time report: overall, setup, time per page and the slowest page. */
 export function formatTimeSummary(state: ConvertState): string {

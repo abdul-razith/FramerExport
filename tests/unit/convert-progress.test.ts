@@ -24,10 +24,22 @@ const stateWith = (...tasks: TaskRecord[]): ConvertState => ({
   version: 1,
   exportDir: 'e',
   nextDir: 'n',
-  stages: { analyze: 'done', 'extract-cms': 'done', scaffold: 'done', tasks: 'needs-ai', verify: 'pending' },
+  stages: {
+    analyze: 'done',
+    'extract-cms': 'done',
+    scaffold: 'done',
+    install: 'pending',
+    generate: 'pending',
+    tasks: 'needs-ai',
+    baseline: 'pending',
+    finalize: 'pending',
+    verify: 'pending',
+  },
   tasks: Object.fromEntries(tasks.map((t) => [t.id, t])),
   fileHashes: {},
   warnings: [],
+  options: null,
+  run: { status: 'idle' },
 });
 
 test('formatDuration: seconds, minutes, hours', () => {

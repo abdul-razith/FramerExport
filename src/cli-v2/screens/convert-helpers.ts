@@ -8,7 +8,11 @@ export const STAGE_LABELS: Record<StageName, string> = {
   analyze: 'Stage 1/5: Analyze export',
   'extract-cms': 'Stage 2/5: Extract CMS',
   scaffold: 'Stage 3/5: Scaffold Next.js project',
+  install: 'Install dependencies',
+  generate: 'Generate components',
   tasks: 'Stage 4/5: Write AI task files',
+  baseline: 'Capture baseline screenshots',
+  finalize: 'Finalize conversion',
   verify: 'Stage 5/5: Verify against export',
 };
 
@@ -22,7 +26,7 @@ export interface Choice<T> {
 
 /** Maps the pipeline's "Running <stage>..." log line to its stage. */
 export function stageFromLog(msg: string): StageName | null {
-  const m = /^Running (analyze|extract-cms|scaffold|tasks|verify)\.\.\.$/.exec(msg.trim());
+  const m = /^Running (analyze|extract-cms|scaffold|install|generate|tasks|baseline|finalize|verify)\.\.\.$/.exec(msg.trim());
   return m ? (m[1] as StageName) : null;
 }
 

@@ -1,11 +1,27 @@
-export type StageName = 'analyze' | 'extract-cms' | 'scaffold' | 'tasks' | 'verify';
-export type StageStatus = 'pending' | 'done' | 'needs-ai' | 'failed';
-export type TaskStatus = 'pending' | 'in-progress' | 'done' | 'needs-human';
+export type StageName =
+  | 'analyze'
+  | 'extract-cms'
+  | 'scaffold'
+  | 'install'
+  | 'generate'
+  | 'tasks'
+  | 'baseline'
+  | 'finalize'
+  | 'verify';
+
+export type StageStatus = 'pending' | 'done' | 'needs-ai' | 'failed' | 'skipped';
+
+export type TaskKind = 'shell' | 'section' | 'page' | 'fix' | 'component' | 'motion';
+
+export type TaskStatus = 'pending' | 'in-progress' | 'awaiting-fix' | 'done' | 'needs-review' | 'needs-human';
 
 export interface TaskRecord {
   id: string;
-  kind: 'shell' | 'component' | 'page' | 'motion' | 'fix';
+  kind: TaskKind;
   route?: string;
+  section?: string;
+  dependsOn?: string[];
+  fixOf?: string;
   file: string;
   status: TaskStatus;
   attempts: number;
@@ -16,6 +32,32 @@ export interface TaskRecord {
   passedSections?: string[];
 }
 
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type AgentId = 'agy' | 'claude';
+
+export interface RunOptions {
+  testing: boolean;
+  agent: AgentId;
+  concurrency: 1 | 2 | 3;
+  sectionTimeoutMin: number;
+  pageTimeoutMin: number;
+  pixelTolerance: number;
+  reportTolerance: number;
+}
+
+export interface RunState {
+  status: 'idle' | 'running' | 'paused' | 'done';
+  reason?: 'user' | 'quota' | 'crash';
+  quotaResetHint?: string;
+  pausedAt?: string;
+}
+
 /** Active working time (never idle time between sessions). Optional: older projects have none. */
 export interface ConvertTiming {
   startedAt: string;
@@ -24,7 +66,7 @@ export interface ConvertTiming {
 }
 
 export interface ConvertState {
-  version: 1;
+  version: 1 | 2;
   exportDir: string;
   nextDir: string;
   stages: Record<StageName, StageStatus>;
@@ -32,6 +74,12 @@ export interface ConvertState {
   fileHashes: Record<string, string>;
   warnings: string[];
   timing?: ConvertTiming;
+  options: RunOptions | null;
+  run: RunState;
+  /** In-memory only: set when loaded from a v1 state that had tasks. */
+  legacyTasks?: boolean;
+  /** In-memory only: set when exportDir cannot be resolved to an existing directory on disk. */
+  exportMissing?: boolean;
 }
 
 export interface PageInfo {

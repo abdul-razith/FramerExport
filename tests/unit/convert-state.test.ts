@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  DEFAULT_OPTIONS,
   STAGES,
   findProjectRoot,
   initState,
@@ -30,15 +31,48 @@ function withTask(id = 't1') {
   return state;
 }
 
+test('DEFAULT_OPTIONS', () => {
+  assert.deepEqual(DEFAULT_OPTIONS, {
+    testing: true,
+    concurrency: 1,
+    sectionTimeoutMin: 15,
+    pageTimeoutMin: 15,
+    pixelTolerance: 0.01,
+    reportTolerance: 0.03,
+  });
+});
+
 test('initState sets all stages pending', () => {
   const state = initState('/export', '/next');
-  assert.equal(state.version, 1);
+  assert.equal(state.version, 2);
   for (const stage of STAGES) assert.equal(state.stages[stage], 'pending');
+  assert.equal(state.stages.verify, 'pending');
+  assert.equal(state.options, null);
+  assert.deepEqual(state.run, { status: 'idle' });
+});
+
+test('saveState stores exportDir relative to the project and no nextDir', async () => {
+  const root = await tmp();
+  const next = path.join(root, 'site next');
+  const exp = path.join(root, 'site');
+  await fs.mkdir(exp, { recursive: true });
+  await saveState(initState(exp, next));
+  const raw = JSON.parse(await fs.readFile(path.join(next, '.convert', 'state.json'), 'utf8'));
+  assert.equal(raw.version, 2);
+  assert.equal(raw.exportDir, '../site');
+  assert.equal('nextDir' in raw, false);
+  const back = await loadState(next);
+  assert.equal(back!.exportDir, exp);
+  assert.equal(back!.nextDir, next);
+  assert.deepEqual(back!.run, { status: 'idle' });
+  assert.equal(back!.options, null);
 });
 
 test('saveState/loadState round-trip atomically in a dir with a space', async () => {
   const dir = await tmp();
-  const state = initState('/export', dir);
+  const exportDir = path.join(dir, 'export');
+  await fs.mkdir(exportDir, { recursive: true });
+  const state = initState(exportDir, dir);
   state.warnings.push('w');
   await saveState(state);
   assert.deepEqual(await loadState(dir), state);
@@ -66,6 +100,14 @@ test('nextStage', () => {
   assert.equal(nextStage(state), 'extract-cms');
   for (const s of STAGES) state.stages[s] = 'done';
   assert.equal(nextStage(state), null);
+});
+
+test('nextStage treats skipped as finished', () => {
+  const state = initState('/e', '/n');
+  for (const s of STAGES) state.stages[s] = 'done';
+  state.stages.baseline = 'skipped';
+  state.stages.finalize = 'pending';
+  assert.equal(nextStage(state), 'finalize');
 });
 
 test('recordAttempt escalates to needs-human after 3 failures', () => {

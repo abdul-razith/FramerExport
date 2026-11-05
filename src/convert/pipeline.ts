@@ -27,7 +27,7 @@ async function readPlatform(exportDir: string): Promise<string> {
   }
 }
 
-const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, shell: 1, component: 2, page: 3, motion: 4 };
+const KIND_ORDER: Record<TaskRecord['kind'], number> = { fix: 0, shell: 1, section: 2, component: 3, page: 4, motion: 5 };
 
 /**
  * First actionable task: fix tasks, then components, pages and motion, by id within a kind. The `build`
@@ -60,6 +60,8 @@ export async function runPipeline(exportDir: string, nextDir: string, io: Conver
     else if (stage === 'extract-cms') await runExtractCms(ctx);
     else if (stage === 'scaffold') {
       await runScaffold(ctx, { confirmOverwrite: (file) => io.confirm('Overwrite edited file ' + file + '?') });
+    } else if (stage === 'install' || stage === 'generate' || stage === 'baseline' || stage === 'finalize') {
+      state.stages[stage] = 'skipped';
     } else if (stage === 'tasks') await runTasks(ctx);
     addTime(state, 'setup', Date.now() - stageStart);
     await saveState(state);
