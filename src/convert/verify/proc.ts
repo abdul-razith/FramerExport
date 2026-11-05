@@ -9,6 +9,13 @@ export interface ManagedProcess {
 const isWindows = process.platform === 'win32';
 const managed = new Map<ChildProcess, () => Promise<void>>();
 let handlersInstalled = false;
+let interruptHandler: (() => void) | null = null;
+
+/** While set, SIGINT calls this handler instead of default process exit. */
+export function setInterruptHandler(handler: (() => void) | null): void {
+  interruptHandler = handler;
+  installHandlers();
+}
 
 /** A TCP port that was free on 127.0.0.1 a moment ago. */
 export function freePort(): Promise<number> {
@@ -65,6 +72,14 @@ function installHandlers(): void {
   let shuttingDown = false;
   // `on`, not `once`: a second Ctrl-C during cleanup must not fall back to Node's default and skip it.
   const onSignal = (code: number) => () => {
+    if (code === 130 && interruptHandler) {
+      try {
+        interruptHandler();
+      } catch {
+        // best effort
+      }
+      return;
+    }
     if (shuttingDown) return;
     shuttingDown = true;
     void stopAllManaged().finally(() => process.exit(code));
