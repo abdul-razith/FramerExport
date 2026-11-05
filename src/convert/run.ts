@@ -149,6 +149,13 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
       throw new Error(`No convert state found at ${resolvedRoot}`);
     }
 
+    if (state.legacyTasks) {
+      throw new Error(
+        'This project uses the old task model and cannot run the section refactor loop. ' +
+          'Re-convert it: open "fexport convert ui" and choose "Re-convert legacy project".'
+      );
+    }
+
     if (stale) {
       state.run.reason = 'crash';
       await saveState(state);

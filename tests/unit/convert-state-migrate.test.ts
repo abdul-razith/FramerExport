@@ -180,3 +180,31 @@ test('toPersisted stores relative exportDir and strips nextDir, legacyTasks, and
   assert.equal('legacyTasks' in persisted, false);
   assert.equal('exportMissing' in persisted, false);
 });
+
+test('I7: a v1 project stays legacy after a save (round trip through toPersisted)', () => {
+  const nextDir = path.join(os.tmpdir(), 'legacy-roundtrip-next');
+  const loaded = fromPersisted(
+    {
+      version: 1,
+      exportDir: '../x',
+      tasks: { '001-page': { id: '001-page', kind: 'page', file: 't.md', status: 'pending', attempts: 0, targets: [] } },
+    },
+    nextDir
+  );
+  assert.equal(loaded.legacyTasks, true);
+  const saved = JSON.parse(JSON.stringify(toPersisted(loaded)));
+  assert.equal(saved.version, 2);
+  assert.equal(fromPersisted(saved, nextDir).legacyTasks, true);
+});
+
+test('I7: old task kinds are legacy even in a v2 file', () => {
+  const state = fromPersisted(
+    {
+      version: 2,
+      exportDir: '../x',
+      tasks: { c: { id: 'c', kind: 'component', file: 't.md', status: 'needs-human', attempts: 0, targets: [] } },
+    },
+    path.join(os.tmpdir(), 'legacy-kinds-next')
+  );
+  assert.equal(state.legacyTasks, true);
+});

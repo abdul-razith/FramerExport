@@ -513,3 +513,12 @@ test('I1: with no caller handler, the default is finish-running-then-pause first
   assert.deepEqual(modes, ['after-running', 'now']);
   assert.equal(outcome.status, 'paused');
 });
+
+test('I7: runAgents refuses a legacy project', async () => {
+  const root = await setupProject('claude');
+  const state = await loadState(root);
+  state!.legacyTasks = true;
+  await saveState(state!);
+  const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
+  await assert.rejects(runAgents(root, io, i2Deps({})), /old task model/);
+});

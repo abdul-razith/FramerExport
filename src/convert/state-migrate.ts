@@ -35,7 +35,12 @@ export function fromPersisted(raw: unknown, nextDir: string): ConvertState {
   const isV1 = data.version === 1;
   const rawTasks = (data.tasks && typeof data.tasks === 'object' ? data.tasks : {}) as Record<string, TaskRecord>;
   const hasTasks = Object.keys(rawTasks).length > 0;
-  const legacyTasks = isV1 && hasTasks ? true : undefined;
+  // Old task kinds/statuses, a v1 file with tasks, or the marker written by toPersisted (a save upgrades the
+  // file to v2, so the marker keeps the project recognisable as legacy).
+  const hasOldTaskModel = Object.values(rawTasks).some(
+    (t) => (t?.kind as string) === 'component' || (t?.kind as string) === 'motion' || (t?.status as string) === 'needs-human'
+  );
+  const legacyTasks = (isV1 && hasTasks) || data.legacyProject === true || hasOldTaskModel ? true : undefined;
 
   const exportInfo = resolveExportDir(String(data.exportDir ?? ''), nextDir);
 
@@ -93,5 +98,6 @@ export function toPersisted(state: ConvertState): object {
     ...rest,
     version: 2,
     exportDir: relExportDir,
+    ...(legacyTasks ? { legacyProject: true } : {}),
   };
 }

@@ -358,3 +358,13 @@ test('I2: askRunOptions falls back to an installed agent when the default one is
   });
   assert.equal(initial, 'claude');
 });
+
+test('I7: getDashboardChoices hides run and resume for a legacy project', () => {
+  const state = stateWith(task('101-page-home', 'page'));
+  state.legacyTasks = true;
+  state.run = { status: 'paused', reason: 'user' };
+  const values = getDashboardChoices(state).map((c) => c.value);
+  assert.ok(!values.includes('agent'));
+  assert.ok(!values.includes('resume'));
+  assert.ok(values.includes('reconvert'));
+});

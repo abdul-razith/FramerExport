@@ -63,7 +63,8 @@ export function getDashboardChoices(
 ): Choice<DashboardAction>[] {
   const choices: Choice<DashboardAction>[] = [];
 
-  const isPaused = state.run?.status === 'paused';
+  const isLegacy = Boolean(state.legacyTasks);
+  const isPaused = state.run?.status === 'paused' && !isLegacy;
   if (isPaused) {
     choices.push({
       label: 'Resume conversion',
@@ -73,11 +74,13 @@ export function getDashboardChoices(
     });
   }
 
-  choices.push({
-    label: isPaused ? 'Run AI agents (reconfigure)' : 'Run AI agents',
-    value: 'agent',
-    hint: 'start agent workers',
-  });
+  if (!isLegacy) {
+    choices.push({
+      label: isPaused ? 'Run AI agents (reconfigure)' : 'Run AI agents',
+      value: 'agent',
+      hint: 'start agent workers',
+    });
+  }
 
   choices.push({
     label: 'Generate visual report',
