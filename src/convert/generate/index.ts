@@ -22,6 +22,7 @@ import {
   writeManifest,
   type GeneratedManifest,
   type GeneratedPage,
+  type GeneratedPart,
   type GeneratedSection,
   type GeneratedShell,
   type MotionAnchor,
@@ -213,6 +214,7 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
   const warnings: string[] = [];
   const stubs: string[] = [];
   const scriptDrawnAll: ScriptDrawn[] = [];
+  let scriptDrawnCounter = 0;
   const rawPages: RawPageData[] = [];
 
   const generateStart = Date.now();
@@ -257,7 +259,11 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
       )) as VisibleItem[];
 
       // Diff script drawn
-      const pageScriptDrawn = diffScriptDrawn(p.route, liveVisible, stillVisible, liveLaterVisible);
+      // ids are unique over the whole site (s1, s2, ... continuing across pages)
+      const pageScriptDrawn = diffScriptDrawn(p.route, liveVisible, stillVisible, liveLaterVisible).map((sd) => ({
+        ...sd,
+        id: `s${++scriptDrawnCounter}`,
+      }));
       scriptDrawnAll.push(...pageScriptDrawn);
 
       // Hidden class map
@@ -418,7 +424,7 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
       await mkdir(path.dirname(absFile), { recursive: true });
 
       // Handle parts for oversized sections
-      const partRecords: Array<{ name: string; component: string; file: string }> = [];
+      const partRecords: GeneratedPart[] = [];
       const partImports: string[] = [];
       let sectionJsx = s.jsx;
       const partTaken = new Set<string>();
@@ -433,7 +439,16 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
           `${FILE_HEADER}export default function ${partComp}({ item }: { item?: any } = {}) {\n  return (\n${rewrite(part.jsx)}\n  );\n}\n`,
           'utf8',
         );
-        partRecords.push({ name: part.name, component: partComp, file: partRelFile });
+        partRecords.push({
+          name: part.name,
+          component: partComp,
+          file: partRelFile,
+          motion: part.motion,
+          scriptDrawn: part.scriptDrawn,
+          hasVariants: part.hasVariants,
+          repeated: part.repeated,
+          cmsFields: part.cmsFields,
+        });
         partImports.push(`import ${partComp} from './${comp}/${partComp}';`);
 
         const partRe = new RegExp(
@@ -455,7 +470,11 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
         'utf8',
       );
 
-      const secScriptDrawn = rp.scriptDrawn.filter((sd) => sd.section === s.name).map((sd) => sd.id);
+      // With parts, the section keeps only the items that no part claims.
+      const inParts = new Set(partRecords.flatMap((pr) => pr.scriptDrawn ?? []));
+      const secScriptDrawn = rp.scriptDrawn
+        .filter((sd) => sd.section === s.name && !inParts.has(sd.id))
+        .map((sd) => sd.id);
       pageSectionsList.push({
         name: s.name,
         component: comp,

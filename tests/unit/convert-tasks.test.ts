@@ -376,3 +376,143 @@ test('re-run keeps status and attempts of existing tasks', async () => {
   assert.equal(loaded!.tasks['sec-home-hero']!.status, 'in-progress');
   assert.equal(loaded!.tasks['sec-home-hero']!.attempts, 2);
 });
+
+// ---- fix wave 3: ownership of animations and script-drawn items ----
+
+const mkEntry = (route: string, framerName: string, selector: string, to = '1') => ({
+  route,
+  selector,
+  framerName,
+  trigger: 'appear' as const,
+  durationMs: 500,
+  from: { opacity: '0' },
+  to: { opacity: to },
+  confidence: 'high' as const,
+});
+
+const mkSection = (name: string, extra: Partial<GeneratedManifest['pages'][0]['sections'][0]> = {}) => ({
+  name,
+  component: name.replace(/\W/g, ''),
+  file: `src/sections/x/${name}.tsx`,
+  parts: [],
+  motion: [] as string[],
+  scriptDrawn: [] as string[],
+  hasVariants: false,
+  repeated: [] as string[],
+  cmsFields: [] as string[],
+  ...extra,
+});
+
+function ownershipManifest(): GeneratedManifest {
+  const sd = (id: string, route: string, section: string, sample: string) => ({
+    id,
+    route,
+    section,
+    box: { x: 0, y: 0, width: 10, height: 10 },
+    sample,
+    count: 1,
+    ticking: false,
+  });
+  return {
+    version: 1,
+    shell: [{ name: 'Navigation', component: 'Navigation', file: 'src/components/shell/Navigation.tsx', pages: ['/', '/about'], differences: [] }],
+    pages: [
+      {
+        route: '/',
+        slug: 'home',
+        view: 'src/views/home.tsx',
+        sections: [mkSection('Hero', { motion: ['m3'], scriptDrawn: ['s1'] })],
+        inline: ['Spacer'],
+        shell: ['Navigation'],
+      },
+      {
+        route: '/about',
+        slug: 'about',
+        view: 'src/views/about.tsx',
+        sections: [mkSection('Hero', { motion: ['m4'], scriptDrawn: ['s2'] })],
+        inline: [],
+        shell: ['Navigation'],
+      },
+    ],
+    motion: [
+      { id: 'm1', route: '/', section: 'Navigation', matched: true, entry: mkEntry('/', 'NavFade', '.nav') },
+      { id: 'm2', route: '/about', section: 'Navigation', matched: true, entry: mkEntry('/about', 'NavFade', '.nav') },
+      { id: 'm3', route: '/', section: 'Hero', matched: true, entry: mkEntry('/', 'HomeHeroAnim', '.h') },
+      { id: 'm4', route: '/about', section: 'Hero', matched: true, entry: mkEntry('/about', 'AboutHeroAnim', '.h') },
+      { id: 'm5', route: '/', section: 'Spacer', matched: true, entry: mkEntry('/', 'InlineAnim', '.sp') },
+      { id: 'm6', route: '/about', section: null, matched: true, entry: mkEntry('/about', 'LooseAnim', '.loose') },
+      { id: 'm7', route: '/about', section: null, matched: false, entry: mkEntry('/about', 'MissingAnim', '.missing') },
+      { id: 'm8', route: '/about', section: 'Navigation', matched: true, entry: mkEntry('/about', 'NavExtra', '.nav-extra') },
+    ],
+    scriptDrawn: [
+      sd('s1', '/', 'Hero', 'home-clock'),
+      sd('s2', '/about', 'Hero', 'about-clock'),
+      sd('s3', '/', 'Navigation', 'nav-clock'),
+      sd('s4', '/about', 'Navigation', 'nav-clock'),
+    ],
+    stubs: [],
+    warnings: [],
+  };
+}
+
+test('every matched motion anchor appears in exactly one task; unmatched only in its page task (I2)', async () => {
+  const ctx = await makeContext();
+  const m = ownershipManifest();
+  await renderTaskFiles(ctx, m);
+  const files = ['shell-navigation', 'sec-home-hero', 'sec-about-hero', 'page-home', 'page-about'];
+  const text: Record<string, string> = {};
+  for (const f of files) text[f] = await read(ctx, `.convert/tasks/${f}.md`);
+  const count = (id: string) => files.filter((f) => text[f].includes(`\`${id}\``)).map((f) => f);
+
+  assert.deepEqual(count('m1'), ['shell-navigation'], 'first-page nav anchor');
+  assert.deepEqual(count('m2'), [], 'identical nav anchor on another page is deduplicated');
+  assert.deepEqual(count('m3'), ['sec-home-hero']);
+  assert.deepEqual(count('m4'), ['sec-about-hero'], 'same section name on another page stays in its own page task');
+  assert.deepEqual(count('m5'), ['page-home'], 'anchor in an inline section');
+  assert.deepEqual(count('m6'), ['page-about'], 'anchor with no section');
+  assert.deepEqual(count('m8'), ['shell-navigation'], 'differing nav anchor of another page is kept in the shell task');
+  // Unanchored: by Framer name, in the page task of the route only
+  for (const f of files) {
+    assert.equal(text[f].includes('MissingAnim'), f === 'page-about', `MissingAnim in ${f}`);
+  }
+});
+
+test('script-drawn items are filtered by route: section tasks only list their own page items (I1)', async () => {
+  const ctx = await makeContext();
+  await renderTaskFiles(ctx, ownershipManifest());
+  const home = await read(ctx, '.convert/tasks/sec-home-hero.md');
+  const about = await read(ctx, '.convert/tasks/sec-about-hero.md');
+  assert.match(home, /home-clock/);
+  assert.doesNotMatch(home, /about-clock/);
+  assert.match(about, /about-clock/);
+  assert.doesNotMatch(about, /home-clock/);
+  const nav = await read(ctx, '.convert/tasks/shell-navigation.md');
+  assert.equal((nav.match(/nav-clock/g) ?? []).length, 1, 'shell script-drawn item deduplicated across pages');
+});
+
+test('part tasks carry the motion, script-drawn, variants, repeated and cms info of their part; the page task keeps the section root (I4)', async () => {
+  const ctx = await makeContext();
+  const m = ownershipManifest();
+  m.pages[0].sections = [
+    mkSection('Hero', {
+      motion: ['m3'],
+      hasVariants: true,
+      parts: [
+        { name: 'Left', component: 'Left', file: 'src/sections/home/Hero/Left.tsx', motion: ['m5'], scriptDrawn: ['s1'], hasVariants: true, repeated: ['Card'], cmsFields: ['title'] },
+        { name: 'Right', component: 'Right', file: 'src/sections/home/Hero/Right.tsx', motion: [], scriptDrawn: [], hasVariants: false, repeated: [], cmsFields: [] },
+      ],
+    }),
+  ];
+  await renderTaskFiles(ctx, m);
+  const left = await read(ctx, '.convert/tasks/sec-home-hero-left.md');
+  const right = await read(ctx, '.convert/tasks/sec-home-hero-right.md');
+  const page = await read(ctx, '.convert/tasks/page-home.md');
+  assert.match(left, /`m5`/);
+  assert.match(left, /home-clock/);
+  assert.match(left, /data-variant/);
+  assert.match(left, /`Card`/);
+  assert.match(left, /cms:title/);
+  assert.doesNotMatch(right, /`m5`|`m3`|home-clock|data-variant/);
+  assert.match(page, /`m3`/, 'root-level anchor goes to the page task');
+  assert.doesNotMatch(page, /`m5`/);
+});

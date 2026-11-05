@@ -21,6 +21,7 @@ import {
 import { describeMotion } from '../tasks/motion-values.js';
 import { componentName, kebabName } from '../generate/names.js';
 import type { ScriptDrawn } from '../generate/script-drawn.js';
+import { assignTaskContent } from '../tasks/assign.js';
 
 export { checkCommand };
 
@@ -98,6 +99,39 @@ export function formatScriptDrawnLine(sd: ScriptDrawn): string {
   const sample = sd.sample ? ` "${sd.sample}"` : '';
   const ticking = sd.ticking ? ', ticking every second' : '';
   return `\`${sd.id}\`${sample}${ticking}`;
+}
+
+interface ContentInfo {
+  hasVariants?: boolean;
+  repeated?: string[];
+  motion?: string[];
+  scriptDrawn?: string[];
+  cmsFields?: string[];
+}
+
+/** Requirement lines for the elements recorded in `info` (a section without parts, or one part). */
+function contentLines(info: ContentInfo, manifest: GeneratedManifest, route: string): string[] {
+  const lines: string[] = [];
+  if (info.hasVariants) {
+    lines.push(
+      '- Breakpoints: elements under `data-variant` are the same content per breakpoint; merge them into one responsive component with `md:` (≥ 810 px) and `lg:` (≥ 1200 px).'
+    );
+  }
+  if (info.repeated && info.repeated.length > 0) {
+    lines.push(`- Repeated items: ${info.repeated.map(code).join(', ')}; render them from a data array with one component.`);
+  }
+  const motion = (info.motion || [])
+    .map((mId) => manifest.motion.find((m) => m.id === mId))
+    .filter((m): m is MotionAnchor => Boolean(m));
+  if (motion.length > 0) lines.push(`- Animations:
+${bullets(motion.map(formatMotionLine), '  ')}`);
+  const sds = manifest.scriptDrawn.filter((sd) => (info.scriptDrawn || []).includes(sd.id) && sd.route === route);
+  if (sds.length > 0) lines.push(`- Script-drawn content:
+${bullets(sds.map(formatScriptDrawnLine), '  ')}`);
+  if (info.cmsFields && info.cmsFields.length > 0) {
+    lines.push(`- CMS fields: render from the \`item\` prop: ${info.cmsFields.map((f) => `\`cms:${f}\``).join(', ')}.`);
+  }
+  return lines;
 }
 
 const dirTarget = (file: string): string => file.replace(/\.tsx$/, '') + '/';
@@ -183,6 +217,8 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
   const tasksDir = path.join(ctx.nextDir, '.convert', 'tasks');
   await mkdir(tasksDir, { recursive: true });
 
+  const assigned = assignTaskContent(manifest);
+
   // 1. Shell tasks
   for (const sh of manifest.shell) {
     const kebab = kebabName(sh.name);
@@ -195,6 +231,26 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
     ];
     if (sh.differences && sh.differences.length > 0) {
       reqLines.push(`- Differences across pages to support via props:\n${bullets(sh.differences, '  ')}`);
+    }
+    const shMotion = assigned.shellMotion.get(sh.name) ?? [];
+    if (shMotion.length > 0) {
+      reqLines.push(
+        `- Animations:
+${bullets(
+          shMotion.map((m) => formatMotionLine(m) + (m.route !== sh.pages[0] ? ` (recorded on ${code(m.route)} only; not marked in the generated JSX)` : '')),
+          '  ',
+        )}`,
+      );
+    }
+    const shSd = assigned.shellScriptDrawn.get(sh.name) ?? [];
+    if (shSd.length > 0) {
+      reqLines.push(
+        `- Script-drawn content:
+${bullets(
+          shSd.map((sd) => formatScriptDrawnLine(sd) + (sd.route !== sh.pages[0] ? ` (recorded on ${code(sd.route)} only)` : '')),
+          '  ',
+        )}`,
+      );
     }
     reqLines.push('- Rebuild using Tailwind utilities; match layout, spacing, typography and colors at 1440, 1000 and 390 px wide.');
 
@@ -223,6 +279,7 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
           const reqLines: string[] = [
             `- Export the React component \`${part.component}\` from ${code(part.file)}.`,
             `- Part of oversized section \`${sec.name}\` for route ${code(page.route)}.`,
+            ...contentLines(part, manifest, page.route),
             `- Rebuild using Tailwind utilities; match layout, spacing, typography and colors at 1440, 1000 and 390 px wide.`,
           ];
 
@@ -243,52 +300,7 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
         const id = `sec-${page.slug}-${kebabName(sec.name)}`;
         const targets = [sec.file, dirTarget(sec.file)];
 
-        const reqLines: string[] = [];
-
-        // Breakpoints / Variants
-        if (sec.hasVariants) {
-          reqLines.push(
-            '- Breakpoints: elements under `data-variant` are the same content per breakpoint; merge them into one responsive component with `md:` (≥ 810 px) and `lg:` (≥ 1200 px).'
-          );
-        }
-
-        // Repeated items
-        if (sec.repeated && sec.repeated.length > 0) {
-          reqLines.push(
-            `- Repeated items: ${sec.repeated.map(code).join(', ')}; render them from a data array with one component.`
-          );
-        }
-
-        // Motion animations
-        const secMotion = (sec.motion || [])
-          .map((mId) => manifest.motion.find((m) => m.id === mId))
-          .filter((m): m is MotionAnchor => Boolean(m));
-        if (secMotion.length > 0) {
-          reqLines.push(`- Animations:\n${bullets(secMotion.map(formatMotionLine), '  ')}`);
-        }
-
-        // Script-drawn content
-        const secSd = manifest.scriptDrawn.filter((sd) => sd.section === sec.name);
-        if (secSd.length > 0) {
-          reqLines.push(`- Script-drawn content:\n${bullets(secSd.map(formatScriptDrawnLine), '  ')}`);
-        }
-
-        // CMS fields
-        if (sec.cmsFields && sec.cmsFields.length > 0) {
-          reqLines.push(
-            `- CMS fields: render from the \`item\` prop: ${sec.cmsFields.map((f) => `\`cms:${f}\``).join(', ')}.`
-          );
-        }
-
-        // Unanchored animations for this section or route
-        const unanchored = manifest.motion.filter(
-          (m) => !m.matched && (m.section === sec.name || (!m.section && m.route === page.route))
-        );
-        if (unanchored.length > 0) {
-          reqLines.push(
-            `\n### Unanchored animations\n${bullets(unanchored.map((m) => m.entry.framerName ?? m.entry.selector))}`
-          );
-        }
+        const reqLines: string[] = contentLines(sec, manifest, page.route);
 
         const content = renderTemplate('section', {
           taskId: id,
@@ -319,7 +331,27 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
       );
     }
 
-    const pageUnanchored = manifest.motion.filter((m) => !m.matched && m.route === page.route);
+    // Oversized sections: their wrapper file belongs to the page task, so what sits on the section root is listed here.
+    for (const sec of page.sections) {
+      if (!(sec.parts && sec.parts.length > 0)) continue;
+      const rootLines = contentLines(sec, manifest, page.route);
+      if (rootLines.length > 0) {
+        const indented = rootLines.map((l) => '  ' + l.split('\n').join('\n  ')).join('\n');
+        pageReqLines.push(`- Section \`${sec.name}\` wrapper (${code(sec.file)}), outside its parts:\n${indented}`);
+      }
+    }
+    const pageMotion = assigned.pageMotion.get(page.route) ?? [];
+    if (pageMotion.length > 0) {
+      pageReqLines.push(`- Animations on page-level or inline elements (not in a section file):
+${bullets(pageMotion.map(formatMotionLine), '  ')}`);
+    }
+    const pageSd = assigned.pageScriptDrawn.get(page.route) ?? [];
+    if (pageSd.length > 0) {
+      pageReqLines.push(`- Script-drawn content on page-level or inline elements:
+${bullets(pageSd.map(formatScriptDrawnLine), '  ')}`);
+    }
+
+    const pageUnanchored = assigned.unanchored.get(page.route) ?? [];
     if (pageUnanchored.length > 0) {
       pageReqLines.push(
         `\n### Unanchored animations\n${bullets(pageUnanchored.map((m) => m.entry.framerName ?? m.entry.selector))}`

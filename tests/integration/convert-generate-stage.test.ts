@@ -189,6 +189,8 @@ test('generate stage writes sections, views, shell and manifest end-to-end', { t
 
   // Assertion 8 (Pre-Flight Ruling #2): script-drawn detection end-to-end
   assert.ok(manifest.scriptDrawn.length > 0, 'manifest.scriptDrawn should contain detected entries');
+  const sdIds = manifest.scriptDrawn.map((sd) => sd.id);
+  assert.equal(new Set(sdIds).size, sdIds.length, 'script-drawn ids are unique across the whole site');
   const s1Entry = manifest.scriptDrawn.find((sd) => sd.id === 's1');
   assert.ok(s1Entry, 'manifest.scriptDrawn should contain entry with id s1');
   assert.equal(s1Entry.route, '/', 's1 entry should match route /');
