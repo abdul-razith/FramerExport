@@ -65,13 +65,45 @@ export function patchPage(source: string, imports: string, body: string): string
   return out.replace(placeholder, () => bodyBlock);
 }
 
-async function loadFirstCmsItem(nextDir: string, collection: string): Promise<Record<string, any> | null> {
+export async function loadFirstCmsItem(nextDir: string, collection: string): Promise<Record<string, any> | null> {
   const file = path.join(nextDir, 'src', 'content', `${collection}.ts`);
   try {
     const text = await readFile(file, 'utf8');
-    const match = text.match(/\[\s*(\{[\s\S]*?\})\s*[,\]]/);
-    if (match) {
-      const fn = new Function(`return (${match[1]})`);
+    const arrayStart = text.indexOf('[');
+    if (arrayStart === -1) return null;
+    const startIdx = text.indexOf('{', arrayStart);
+    if (startIdx === -1) return null;
+    let depth = 0;
+    let endIdx = -1;
+    let inString: string | null = null;
+    let escape = false;
+    for (let i = startIdx; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escape) {
+          escape = false;
+        } else if (ch === '\\') {
+          escape = true;
+        } else if (ch === inString) {
+          inString = null;
+        }
+      } else {
+        if (ch === '"' || ch === "'" || ch === '`') {
+          inString = ch;
+        } else if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            endIdx = i;
+            break;
+          }
+        }
+      }
+    }
+    if (endIdx !== -1) {
+      const objText = text.slice(startIdx, endIdx + 1);
+      const fn = new Function(`return (${objText})`);
       return fn();
     }
   } catch {}

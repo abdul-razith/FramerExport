@@ -49,11 +49,16 @@ test('generate stage writes sections, views, shell and manifest end-to-end', { t
 
   // Add an empty <iframe> inside #main in index.html to verify stub detection (Assertion 7)
   // Also add an empty section in index.html to verify inline classification (Assertion 4)
+  // Also inject client-script-rendered content inside Hero + About section to verify script-drawn detection (Pre-Flight Ruling #2)
   const indexFile = path.join(exportDir, 'index.html');
   let indexHtml = await readFile(indexFile, 'utf8');
   indexHtml = indexHtml.replace(
     'id="main"',
     'id="main"><div data-framer-name="Empty Section"></div><iframe id="test-empty-frame"></iframe>',
+  );
+  indexHtml = indexHtml.replace(
+    'data-framer-name="Hero + About">',
+    'data-framer-name="Hero + About"><script>document.write(\'<span class="ruler-mark" style="display:inline-block;width:50px;height:20px">100</span>\')</script>',
   );
   await writeFile(indexFile, indexHtml, 'utf8');
 
@@ -181,4 +186,18 @@ test('generate stage writes sections, views, shell and manifest end-to-end', { t
   const iframeStub = manifest.stubs.find((s) => s.includes('iframe'));
   assert.ok(iframeStub, `manifest.stubs should list the added empty iframe, got: ${JSON.stringify(manifest.stubs)}`);
   assert.match(iframeStub, /^.+ · .+ · iframe$/, 'stub format should match "<route> · <section> · iframe"');
+
+  // Assertion 8 (Pre-Flight Ruling #2): script-drawn detection end-to-end
+  assert.ok(manifest.scriptDrawn.length > 0, 'manifest.scriptDrawn should contain detected entries');
+  const s1Entry = manifest.scriptDrawn.find((sd) => sd.id === 's1');
+  assert.ok(s1Entry, 'manifest.scriptDrawn should contain entry with id s1');
+  assert.equal(s1Entry.route, '/', 's1 entry should match route /');
+  assert.equal(s1Entry.section, 'Hero + About', 's1 entry should match section "Hero + About"');
+
+  const heroSection = homePage.sections.find((s) => s.name === 'Hero + About');
+  assert.ok(heroSection, 'home page should have "Hero + About" section');
+  assert.ok(
+    heroSection.scriptDrawn.includes('s1'),
+    `Hero + About section.scriptDrawn should contain 's1', got: ${JSON.stringify(heroSection.scriptDrawn)}`,
+  );
 });

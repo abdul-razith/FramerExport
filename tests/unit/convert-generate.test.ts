@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createDomToJsx, rewriteAssets, rewriteLinks } from '../../src/convert/generate/dom-to-jsx.js';
-import { patchPage } from '../../src/convert/generate/index.js';
+import { loadFirstCmsItem, patchPage } from '../../src/convert/generate/index.js';
 import { readManifest, writeManifest, type GeneratedManifest } from '../../src/convert/generate/manifest.js';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -202,6 +202,59 @@ test('readManifest and writeManifest write and read .convert/analysis/generated.
     await writeManifest(tmpDir, manifest);
     const loaded = await readManifest(tmpDir);
     assert.deepEqual(loaded, manifest);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('loadFirstCmsItem parses simple and nested CMS objects with balanced braces', async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'cms-test-'));
+  try {
+    const contentDir = path.join(tmpDir, 'src', 'content');
+    await mkdir(contentDir, { recursive: true });
+
+    // Collection with nested objects and strings with braces
+    const code = `
+export interface BlogPost {
+  title: string;
+  meta: {
+    published: boolean;
+    author: { name: string; avatar: { src: string } };
+  };
+}
+
+export const posts: BlogPost[] = [
+  {
+    title: 'Hello {World}',
+    meta: {
+      published: true,
+      author: {
+        name: 'Jane Doe',
+        avatar: { src: 'https://example.com/jane.png' }
+      }
+    }
+  },
+  {
+    title: 'Second Post',
+    meta: { published: false, author: { name: 'Bob', avatar: { src: '' } } }
+  }
+];
+`;
+    await writeFile(path.join(contentDir, 'posts.ts'), code, 'utf8');
+
+    const item = await loadFirstCmsItem(tmpDir, 'posts');
+    assert.ok(item, 'First item should be loaded');
+    assert.equal(item.title, 'Hello {World}');
+    assert.deepEqual(item.meta, {
+      published: true,
+      author: {
+        name: 'Jane Doe',
+        avatar: { src: 'https://example.com/jane.png' },
+      },
+    });
+
+    // Non-existent collection returns null
+    assert.equal(await loadFirstCmsItem(tmpDir, 'missing'), null);
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
