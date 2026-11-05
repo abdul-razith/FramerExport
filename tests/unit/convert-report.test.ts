@@ -104,6 +104,26 @@ test('maskedRatio counts unmasked diff pixels excluding masked from numerator an
   assert.ok(Math.abs(ratio - expectedRatio) < 1e-6, `ratio ${ratio} should match ${expectedRatio}`);
 });
 
+test('maskedRatio accurately handles mask stride when expected and actual sizes differ', () => {
+  const expected = createSolidPng(40, 40, 255, 255, 255);
+  const expected2 = createSolidPng(40, 40, 255, 255, 255);
+  // In expected2, 10x10 block at (10, 10) is dynamic
+  fillBlock(expected2, 10, 10, 10, 10, 0, 0, 0);
+
+  const mask = dynamicMask(expected, expected2);
+  assert.equal(mask.width, 40);
+  assert.equal(mask.height, 40);
+
+  // actual is 50x50 white, with the same dynamic 10x10 block at (10, 10)
+  const actual = createSolidPng(50, 50, 255, 255, 255);
+  fillBlock(actual, 10, 10, 10, 10, 0, 0, 0);
+
+  // When comparing expected (padded to 50x50 white) with actual (50x50 white with block at 10, 10):
+  // The block at (10, 10) must be masked out by the re-strided mask!
+  const ratio = maskedRatio(expected, actual, mask);
+  assert.equal(ratio, 0);
+});
+
 test('renderReportHtml escapes <b> in section name and lists needsReview ids', () => {
   const data: ReportData = {
     generatedAt: '2026-11-05T12:00:00.000Z',

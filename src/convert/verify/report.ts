@@ -15,7 +15,6 @@ import { crop, pad, pairByName } from './diff.js';
 import { captureFilmstrip } from './filmstrip.js';
 import { renderReportHtml, type ReportData } from './report-html.js';
 import { startExportServer, startNextServer } from './serve.js';
-import { withVerifyFlag } from './settle.js';
 
 export { type ReportData };
 
@@ -30,15 +29,22 @@ export interface ReportDeps {
   adapter?: PlatformAdapter;
 }
 
+export interface MaskWithDimensions extends Uint8Array {
+  width?: number;
+  height?: number;
+}
+
 /**
  * Compute a dynamic mask comparing two captures of the same page/section (taken at different times).
  * Returns a Uint8Array of length `w * h`, where element is 1 if pixel differs (or outside smaller bounds),
- * and 0 if identical.
+ * and 0 if identical. Dimensions `width` and `height` are recorded for accurate stride handling.
  */
-export function dynamicMask(a: PNG, b: PNG): Uint8Array {
+export function dynamicMask(a: PNG, b: PNG): MaskWithDimensions {
   const w = Math.max(a.width, b.width);
   const h = Math.max(a.height, b.height);
-  const mask = new Uint8Array(w * h);
+  const mask: MaskWithDimensions = new Uint8Array(w * h);
+  mask.width = w;
+  mask.height = h;
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -67,18 +73,25 @@ export function dynamicMask(a: PNG, b: PNG): Uint8Array {
  * Compare expected vs actual images ignoring pixels flagged in `mask`.
  * Masked pixels are excluded from both numerator (diffCount) and denominator (unmaskedTotal).
  * If `diffOut` is provided, the pixelmatch visual diff is rendered into it.
+ * Accurately adapts mask stride when expected and actual sizes require padding.
  */
-export function maskedRatio(expected: PNG, actual: PNG, mask: Uint8Array, diffOut?: PNG): number {
+export function maskedRatio(
+  expected: PNG,
+  actual: PNG,
+  mask: MaskWithDimensions,
+  diffOut?: PNG,
+  maskWidth?: number
+): number {
   const w = Math.max(expected.width, actual.width);
   const h = Math.max(expected.height, actual.height);
   const ep = pad(expected, w, h);
   const ap = pad(actual, w, h);
 
-  let finalMask = mask;
+  let finalMask: Uint8Array = mask;
   if (mask.length !== w * h) {
+    const maskW = maskWidth ?? mask.width ?? (mask.length % expected.width === 0 ? expected.width : w);
+    const maskH = mask.height ?? Math.floor(mask.length / maskW);
     finalMask = new Uint8Array(w * h);
-    const maskW = expected.width;
-    const maskH = expected.height;
     for (let y = 0; y < Math.min(maskH, h); y++) {
       for (let x = 0; x < Math.min(maskW, w); x++) {
         finalMask[y * w + x] = mask[y * maskW + x];
@@ -122,10 +135,10 @@ function nextUrl(base: string, nextPath: string): string {
 
 /**
  * Run end-to-end report generation:
- * - Starts Next.js and export servers
- * - Captures export twice 2 s apart to detect dynamic regions
+ * - Starts Next.js and export servers with guaranteed cleanup in finally
+ * - Captures export, waits on the same page for dynamic state to evolve without re-navigation
  * - Captures Next.js page and compares sections across 3 widths using maskedRatio
- * - Captures filmstrips for original vs Next.js
+ * - Captures live filmstrips for original and Next.js (without disabling animations)
  * - Writes images and .convert/report/index.html
  * - Returns { file, over } where over is the count of section widths exceeding tolerance.
  */
@@ -196,18 +209,22 @@ export async function runReport(
     routeJobs = routeJobs.filter((r) => r.route === opts.route);
   }
 
-  ctx.log('report: starting Next.js server');
-  const nextServer = await startNext(ctx.nextDir);
-
-  ctx.log('report: starting export server');
-  const exportServer = await startExport(ctx.exportDir);
-
-  const browser = await launchBrowser();
+  let nextServer: Awaited<ReturnType<typeof startNext>> | undefined;
+  let exportServer: Awaited<ReturnType<typeof startExport>> | undefined;
+  let browser: Browser | undefined;
+  let page: Page | undefined;
   let overCount = 0;
   const reportPages: ReportData['pages'] = [];
 
   try {
-    const page = await browser.newPage();
+    ctx.log('report: starting Next.js server');
+    nextServer = await startNext(ctx.nextDir);
+
+    ctx.log('report: starting export server');
+    exportServer = await startExport(ctx.exportDir);
+
+    browser = await launchBrowser();
+    page = await browser.newPage();
 
     for (const job of routeJobs) {
       const { route, slug, exportFile, nextPath: np } = job;
@@ -216,10 +233,10 @@ export async function runReport(
       const origUrl = exportUrl(exportServer.url, exportFile);
       const targetNextUrl = nextUrl(nextServer.url, np);
 
-      // Filmstrip capture
+      // Filmstrip capture (animations active on Next.js, no verify flag)
       ctx.log(`report: capturing filmstrip for ${route}`);
       const origFrames = await filmstripFn(page, origUrl, widths[0]);
-      const nextFrames = await filmstripFn(page, withVerifyFlag(targetNextUrl), widths[0]);
+      const nextFrames = await filmstripFn(page, targetNextUrl, widths[0]);
 
       const origFilmstripPaths: string[] = [];
       for (let f = 0; f < origFrames.length; f++) {
@@ -254,16 +271,18 @@ export async function runReport(
         ctx.log(`report: capturing ${route} @ ${width}px`);
         // First export capture
         const exp1 = await capturePage(page, origUrl, width, 'export', sections);
+
+        // Wait on the same loaded page for dynamic state to evolve (no re-navigation or re-freezing)
         if (maskDelayMs > 0) {
           await sleep(maskDelayMs);
         }
-        // Second export capture (for dynamic masking)
-        const exp2 = await capturePage(page, origUrl, width, 'export', sections);
+        const exp2Buffer = Buffer.from(await page.screenshot({ type: 'png', fullPage: true }));
+        const exp2Png = PNG.sync.read(exp2Buffer);
+
         // Next capture
         const nxt = await capturePage(page, targetNextUrl, width, 'next', undefined);
 
         const exp1Png = PNG.sync.read(exp1.png);
-        const exp2Png = PNG.sync.read(exp2.png);
         const nxtPng = PNG.sync.read(nxt.png);
 
         const pairs = pairByName(exp1.sections, nxt.sections);
@@ -272,8 +291,8 @@ export async function runReport(
           if (i !== null && j !== null) {
             const name = exp1.sections[i].name;
             const secE1 = crop(exp1Png, exp1.sections[i].box);
-            const box2 = exp2.sections.find((s) => s.name === name)?.box ?? exp1.sections[i].box;
-            const secE2 = crop(exp2Png, box2);
+            // Crop secE2 using the same section box on the un-reloaded second capture
+            const secE2 = crop(exp2Png, exp1.sections[i].box);
             const secNxt = crop(nxtPng, nxt.sections[j].box);
 
             const mask = dynamicMask(secE1, secE2);
@@ -390,10 +409,12 @@ export async function runReport(
     }
 
     await page.close().catch(() => {});
+    page = undefined;
   } finally {
-    await browser.close().catch(() => {});
-    await exportServer.stop().catch(() => {});
-    await nextServer.stop().catch(() => {});
+    await page?.close().catch(() => {});
+    await browser?.close().catch(() => {});
+    await exportServer?.stop().catch(() => {});
+    await nextServer?.stop().catch(() => {});
   }
 
   const needsReview = Object.values(ctx.state.tasks)
