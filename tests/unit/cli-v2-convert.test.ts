@@ -430,3 +430,37 @@ test('I8: prepareReconvert renames to the first free .old name', async () => {
   assert.deepEqual(res, { status: 'renamed', oldPath: path.join(dir, 'site-next.old-2') });
   assert.deepEqual(moves, [[projDir, path.join(dir, 'site-next.old-2')]]);
 });
+
+test('I10: invalid or missing flag values are errors and never become positional arguments', () => {
+  const bad = parseConvertArgs(['convert', './export', '--agent', 'gemini']);
+  assert.match(bad.error ?? '', /--agent.*gemini/);
+  assert.equal(bad.nextDir, undefined);
+
+  const conc = parseConvertArgs(['convert', './export', '--concurrency', '5']);
+  assert.match(conc.error ?? '', /--concurrency.*5/);
+  assert.equal(conc.nextDir, undefined);
+
+  assert.match(parseConvertArgs(['convert', './export', '--testing', 'banana']).error ?? '', /--testing.*banana/);
+  assert.match(parseConvertArgs(['convert', './export', '--testing=banana']).error ?? '', /--testing/);
+  assert.match(parseConvertArgs(['convert', './export', '--agent']).error ?? '', /--agent needs a value/);
+  assert.match(parseConvertArgs(['convert', './export', '--concurrency=9']).error ?? '', /--concurrency/);
+});
+
+test('I10: valid flag values still parse, and a bare --testing means on', () => {
+  const ok = parseConvertArgs(['convert', './export', './out', '--agent', 'claude', '--concurrency', '2', '--testing', 'off']);
+  assert.equal(ok.error, undefined);
+  assert.deepEqual([ok.exportDir, ok.nextDir, ok.agent, ok.concurrency, ok.testing], ['./export', './out', 'claude', 2, false]);
+  assert.equal(parseConvertArgs(['convert', './export', '--testing']).testing, true);
+  assert.equal(parseConvertArgs(['convert', './export', '--testing', '--yes']).testing, true);
+});
+
+test('I10: runConvertCommand refuses to run on an invalid flag value and prints usage', async () => {
+  const errors: string[] = [];
+  const code = await runConvertCommand(['convert', './export', '--agent', 'gemini'], {
+    log: () => {},
+    error: (m) => errors.push(m),
+  });
+  assert.equal(code, 1);
+  assert.ok(errors.some((e) => /--agent/.test(e)));
+  assert.ok(errors.some((e) => e.includes('Usage') || e.includes('fexport convert')));
+});

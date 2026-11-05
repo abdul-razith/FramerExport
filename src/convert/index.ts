@@ -29,6 +29,8 @@ export interface ConvertArgs {
   taskId?: string;
   smoke?: boolean;
   yes: boolean;
+  /** A flag had a missing or invalid value; the command must not run. */
+  error?: string;
   testing?: boolean;
   agent?: AgentId;
   concurrency?: 1 | 2 | 3;
@@ -47,7 +49,23 @@ export const CONVERT_USAGE = `Usage:
 nextDir defaults to <exportDir>-next. status/next/check/run/report/review run from inside the converted project.`;
 
 /** Accepts argv with or without the leading "convert". */
+function parseTesting(v: string): boolean | undefined {
+  if (v === 'on' || v === 'true') return true;
+  if (v === 'off' || v === 'false') return false;
+  return undefined;
+}
+
+function badValue(flag: string, value: string | undefined, allowed: string): string {
+  return value === undefined ? `${flag} needs a value (${allowed})` : `Invalid value for ${flag}: ${value} (use ${allowed})`;
+}
+
 export function parseConvertArgs(argv: string[]): ConvertArgs {
+  const sink: { error?: string } = {};
+  const parsed = parseConvertArgsInner(argv, sink);
+  return sink.error ? { ...parsed, error: sink.error } : parsed;
+}
+
+function parseConvertArgsInner(argv: string[], sink: { error?: string }): ConvertArgs {
   const raw = argv[0] === 'convert' ? argv.slice(1) : argv;
   let yes = false;
   let smoke = false;
@@ -64,36 +82,31 @@ export function parseConvertArgs(argv: string[]): ConvertArgs {
       smoke = true;
     } else if (a === '--testing') {
       const next = raw[i + 1];
-      if (next === 'on' || next === 'true') {
+      if (next === undefined || next.startsWith('--')) {
         testing = true;
-        i++;
-      } else if (next === 'off' || next === 'false') {
-        testing = false;
-        i++;
       } else {
-        testing = true;
+        const v = parseTesting(next);
+        if (v === undefined) sink.error ??= badValue('--testing', next, 'on|off');
+        else testing = v;
+        i++;
       }
     } else if (a.startsWith('--testing=')) {
       const val = a.slice('--testing='.length);
-      testing = val === 'on' || val === 'true';
-    } else if (a === '--agent') {
-      const next = raw[i + 1];
-      if (next === 'agy' || next === 'claude') {
-        agent = next;
-        i++;
-      }
-    } else if (a.startsWith('--agent=')) {
-      const val = a.slice('--agent='.length);
-      if (val === 'agy' || val === 'claude') agent = val as AgentId;
-    } else if (a === '--concurrency') {
-      const next = raw[i + 1];
-      if (next && ['1', '2', '3'].includes(next)) {
-        concurrency = parseInt(next, 10) as 1 | 2 | 3;
-        i++;
-      }
-    } else if (a.startsWith('--concurrency=')) {
-      const val = a.slice('--concurrency='.length);
-      if (['1', '2', '3'].includes(val)) concurrency = parseInt(val, 10) as 1 | 2 | 3;
+      const v = parseTesting(val);
+      if (v === undefined) sink.error ??= badValue('--testing', val, 'on|off');
+      else testing = v;
+    } else if (a === '--agent' || a.startsWith('--agent=')) {
+      const inline = a.startsWith('--agent=');
+      const val = inline ? a.slice('--agent='.length) : raw[i + 1];
+      if (!inline) i++;
+      if (val === 'agy' || val === 'claude') agent = val;
+      else sink.error ??= badValue('--agent', val, 'agy|claude');
+    } else if (a === '--concurrency' || a.startsWith('--concurrency=')) {
+      const inline = a.startsWith('--concurrency=');
+      const val = inline ? a.slice('--concurrency='.length) : raw[i + 1];
+      if (!inline) i++;
+      if (val !== undefined && ['1', '2', '3'].includes(val)) concurrency = parseInt(val, 10) as 1 | 2 | 3;
+      else sink.error ??= badValue('--concurrency', val, '1|2|3');
     } else {
       positional.push(a);
     }
@@ -182,6 +195,11 @@ export async function runConvertCommand(
     return 0;
   }
   const args = parseConvertArgs(rest);
+  if (args.error) {
+    console.error(args.error);
+    console.error(CONVERT_USAGE);
+    return 1;
+  }
   // --yes always forces the headless path.
   const wantsDashboard =
     !args.yes && (args.command === 'ui' || (args.command === 'convert' && !args.exportDir));
