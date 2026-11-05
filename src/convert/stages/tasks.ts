@@ -106,7 +106,7 @@ const dirTarget = (file: string): string => file.replace(/\.tsx$/, '') + '/';
  * Builds a fallback manifest from pages.json and animations.json if generated.json
  * does not exist on disk (e.g. during pipeline tests before generate is run).
  */
-async function manifestFallback(ctx: StageContext): Promise<GeneratedManifest | null> {
+export async function manifestFallback(ctx: StageContext): Promise<GeneratedManifest | null> {
   const analysis = path.join(ctx.nextDir, '.convert', 'analysis');
   let pages: PageInfo[] = [];
   try {

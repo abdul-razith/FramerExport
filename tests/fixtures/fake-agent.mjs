@@ -6,15 +6,31 @@ import process from 'node:process';
 
 const mode = process.env.FAKE_AGENT_MODE || 'edit';
 
-function getFirstTarget() {
+function getTargets() {
   const raw = process.env.FAKE_AGENT_TARGET || '';
-  const first = raw.split(/[\r\n,]+/)[0]?.trim();
-  return first || undefined;
+  const list = raw.split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean);
+  if (list.length) return list;
+
+  const pIdx = process.argv.indexOf('-p');
+  if (pIdx !== -1 && process.argv[pIdx + 1]) {
+    const prompt = process.argv[pIdx + 1];
+    const m = prompt.match(/(\.convert[\\/]tasks[\\/][A-Za-z0-9_-]+\.md)/);
+    if (m && fs.existsSync(m[1])) {
+      const content = fs.readFileSync(m[1], 'utf8');
+      const section = content.match(/## Edit only([\s\S]*?)(?=^## |\Z)/m);
+      if (section) {
+        const matches = [...section[1].matchAll(/- `([^`]+)`/g)].map((x) => x[1]);
+        const filesOnly = matches.filter((f) => !f.endsWith('/'));
+        if (filesOnly.length) return filesOnly;
+      }
+    }
+  }
+  return [];
 }
 
 function appendToTarget() {
-  const target = getFirstTarget();
-  if (target) {
+  const targets = getTargets();
+  for (const target of targets) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.appendFileSync(target, '// edited\n');
   }

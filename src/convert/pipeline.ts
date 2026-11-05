@@ -5,11 +5,15 @@ import type { StageContext } from './adapters/types.js';
 import { runAnalyze } from './stages/analyze.js';
 import { runExtractCms } from './stages/extract-cms.js';
 import { runScaffold } from './stages/scaffold/index.js';
+import { runInstall } from './stages/install.js';
+import { runGenerate } from './generate/index.js';
 import { runTasks } from './stages/tasks.js';
+import { runBaseline } from './verify/baseline.js';
+import { ensureDevServer, type DevServer } from './verify/dev-server.js';
 import { addTime, formatTimeSummary } from './progress.js';
-import { initState, loadState, nextStage, saveState } from './state.js';
+import { DEFAULT_OPTIONS, initState, loadState, nextStage, saveState } from './state.js';
 import { CLI_INVOCATION } from './tasks/templates/index.js';
-import type { AnimationEntry, ConvertState, TaskRecord } from './types.js';
+import type { AnimationEntry, ConvertState, RunOptions, TaskRecord } from './types.js';
 
 export interface ConvertIo {
   confirm(msg: string): Promise<boolean>;
@@ -39,7 +43,16 @@ export function pickNextTask(state: ConvertState): TaskRecord | undefined {
     .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.id.localeCompare(b.id))[0];
 }
 
-export async function runPipeline(exportDir: string, nextDir: string, io: ConvertIo): Promise<ConvertState> {
+export async function runPipeline(
+  exportDir: string,
+  nextDir: string,
+  io: ConvertIo,
+  options?: RunOptions,
+  deps?: {
+    install?: typeof runInstall;
+    devServer?: (root: string) => Promise<DevServer>;
+  }
+): Promise<ConvertState> {
   exportDir = path.resolve(exportDir);
   nextDir = path.resolve(nextDir);
   const platform = await readPlatform(exportDir);
@@ -48,21 +61,60 @@ export async function runPipeline(exportDir: string, nextDir: string, io: Conver
   }
   await mkdir(nextDir, { recursive: true });
   const state = (await loadState(nextDir)) ?? initState(exportDir, nextDir);
+
+  const isLegacyCall = options === undefined;
+  const defaultOpts: RunOptions = { ...DEFAULT_OPTIONS, agent: 'agy' };
+  const resolvedOptions: RunOptions = options
+    ? { ...defaultOpts, ...options }
+    : (state.options ?? defaultOpts);
+  state.options = resolvedOptions;
   await saveState(state);
+
   const ctx: StageContext = { state, exportDir: state.exportDir, nextDir, log: io.log };
 
-  // tasks ends in 'needs-ai' (never 'done'), so stop once it has run; verify is never automatic.
-  for (let stage = nextStage(state); stage && stage !== 'verify'; stage = nextStage(state)) {
+  for (let stage = nextStage(state); stage && stage !== 'finalize' && stage !== 'verify'; stage = nextStage(state)) {
     if (stage === 'tasks' && state.stages.tasks === 'needs-ai') break;
     io.log(`Running ${stage}...`);
     const stageStart = Date.now();
-    if (stage === 'analyze') await runAnalyze(ctx, framerAdapter);
-    else if (stage === 'extract-cms') await runExtractCms(ctx);
-    else if (stage === 'scaffold') {
+    if (stage === 'analyze') {
+      await runAnalyze(ctx, framerAdapter);
+    } else if (stage === 'extract-cms') {
+      await runExtractCms(ctx);
+    } else if (stage === 'scaffold') {
       await runScaffold(ctx, { confirmOverwrite: (file) => io.confirm('Overwrite edited file ' + file + '?') });
-    } else if (stage === 'install' || stage === 'generate' || stage === 'baseline' || stage === 'finalize') {
-      state.stages[stage] = 'skipped';
-    } else if (stage === 'tasks') await runTasks(ctx);
+    } else if (stage === 'install') {
+      if (isLegacyCall) {
+        state.stages.install = 'skipped';
+      } else {
+        const installFn = deps?.install ?? runInstall;
+        await installFn(ctx);
+        if (state.stages.install === 'failed') {
+          addTime(state, 'setup', Date.now() - stageStart);
+          await saveState(state);
+          break;
+        }
+      }
+    } else if (stage === 'generate') {
+      if (isLegacyCall) {
+        state.stages.generate = 'skipped';
+      } else {
+        await runGenerate(ctx);
+      }
+    } else if (stage === 'tasks') {
+      await runTasks(ctx);
+    } else if (stage === 'baseline') {
+      if (!isLegacyCall && resolvedOptions.testing) {
+        const devServerFn = deps?.devServer ?? ensureDevServer;
+        const devServer = await devServerFn(nextDir);
+        try {
+          await runBaseline(ctx, devServer.url);
+        } finally {
+          await devServer.stop().catch(() => {});
+        }
+      } else {
+        state.stages.baseline = 'skipped';
+      }
+    }
     addTime(state, 'setup', Date.now() - stageStart);
     await saveState(state);
   }
