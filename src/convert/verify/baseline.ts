@@ -135,7 +135,7 @@ export async function runBaseline(
   try {
     const page = await browser.newPage();
     try {
-      page.setDefaultNavigationTimeout(60_000);
+      page.setDefaultNavigationTimeout(120_000);
 
       for (const [route, routeTasks] of tasksByRoute) {
         const concretePath = routeToPath(route, manifest);

@@ -14,7 +14,7 @@ const FRAMER_CLASS_REGEX = /\bframer-(?!motion\b)/;
  * Checks if source code contains a Framer CSS class name within a className attribute or property.
  */
 export function hasFramerClassName(text: string): boolean {
-  const classRe = /\bclassName\s*[:=]\s*/g;
+  const classRe = /(?<![\w-])(?:className|class)\s*[:=]\s*/g;
   let match: RegExpExecArray | null;
   while ((match = classRe.exec(text)) !== null) {
     const startIndex = match.index + match[0].length;

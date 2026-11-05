@@ -4,7 +4,7 @@ import path from 'node:path';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { readManifest, type GeneratedManifest, type MotionAnchor } from '../generate/manifest.js';
+import { readManifest, type GeneratedManifest } from '../generate/manifest.js';
 import { kebabName } from '../generate/names.js';
 import { routeSlug } from '../stages/tasks.js';
 import { loadState, writeFileAtomic } from '../state.js';
@@ -12,12 +12,15 @@ import type { Box, TaskRecord } from '../types.js';
 import { baselineDir, BASELINE_WIDTHS } from './baseline.js';
 import { capturePageSections } from './capture-sections.js';
 import { diffClusters } from './clusters.js';
-import { ensureDevServer } from './dev-server.js';
+import { codeViolations, readTargetSources } from './check-code.js';
+import { requiredMotionIds, runMotionOnFreshPage, taskMotionAnchors } from './check-motion.js';
+import { ensureDevServer, resolveDevUrl } from './dev-server.js';
 import { compareDom, type DomMismatch, type SectionDom } from './dom-check.js';
-import { checkMotion, movedTowards } from './motion-check.js';
+import { movedTowards } from './motion-check.js';
 import { settleNext, withVerifyFlag } from './settle.js';
 
-export { checkMotion, movedTowards };
+export { checkMotion, movedTowards } from './motion-check.js';
+export { codeViolations };
 
 export interface WidthResult {
   width: number;
@@ -53,6 +56,9 @@ export interface CheckResult {
 
 export const CHECK_LIMIT_MESSAGE =
   'Limit reached: stop and finish; the pipeline will review this section.';
+
+/** A first `next dev` compile can take well over a minute on Windows. */
+const NAVIGATION_TIMEOUT_MS = 120_000;
 
 const checkLocks = new Map<string, Promise<unknown>>();
 
@@ -105,35 +111,6 @@ export async function resetCheckCalls(root: string, taskId: string): Promise<voi
     const filePath = checkFilePath(root, taskId);
     await writeFileAtomic(filePath, JSON.stringify({ calls: 0 }, null, 2) + '\n');
   });
-}
-
-const FRAMER_CLASS_REGEX = /\bframer-(?!motion\b)[a-zA-Z0-9_-]+/;
-
-/**
- * Checks source files for Framer export class names and missing required motion data attributes.
- */
-export function codeViolations(
-  sources: Array<{ file: string; text: string }>,
-  requiredMotion: string[]
-): string[] {
-  const violations: string[] = [];
-
-  for (const { file, text } of sources) {
-    if (FRAMER_CLASS_REGEX.test(text)) {
-      violations.push(`${file}: framer- class name`);
-    }
-  }
-
-  for (const id of requiredMotion) {
-    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\bdata-motion\\s*=\\s*["'{][^"'>}]*?\\b${escaped}\\b[^"'>}]*?["'}]`);
-    const found = sources.some((s) => re.test(s.text));
-    if (!found) {
-      violations.push(`missing data-motion="${id}"`);
-    }
-  }
-
-  return violations;
 }
 
 /**
@@ -305,7 +282,11 @@ export async function runCheck(
     };
   }
 
-  const task = state.tasks[taskId];
+  // A fix task is judged like the task it fixes (shell/page/section); only the call counter keys on its own id.
+  let task = state.tasks[taskId];
+  for (let hops = 0; task?.kind === 'fix' && task.fixOf && state.tasks[task.fixOf] && hops < 5; hops++) {
+    task = state.tasks[task.fixOf];
+  }
   if (!task) {
     return {
       taskId,
@@ -322,8 +303,12 @@ export async function runCheck(
 
   let devUrl = opts?.devUrl;
   if (!devUrl) {
-    const server = await ensureDevServer(root);
+    // The server is left running for the loop to reuse (spec 8.1).
+    const server = await ensureDevServer(root, { keepAlive: true });
     devUrl = server.url;
+  } else {
+    // The pool's devUrl goes stale when the server was restarted on another port.
+    devUrl = await resolveDevUrl(root, devUrl);
   }
 
   const manifest = await readManifest(root).catch(() => null);
@@ -331,35 +316,12 @@ export async function runCheck(
   const concretePath = routeToPath(route, manifest);
   const targetUrl = buildUrl(devUrl, concretePath);
 
-  // Read sources for code violations
-  const sources: Array<{ file: string; text: string }> = [];
+  // Read sources for code violations (directory targets expand recursively)
   const targetFiles =
     task.targets && task.targets.length > 0 ? task.targets : task.file ? [task.file] : [];
-  for (const rel of targetFiles) {
-    try {
-      const text = await readFile(path.resolve(root, rel), 'utf8');
-      sources.push({ file: rel, text });
-    } catch {
-      // file might not exist yet
-    }
-  }
+  const sources = await readTargetSources(root, targetFiles);
 
-  // Determine required motion
-  let requiredMotion: string[] = [];
-  if (manifest) {
-    const sectionName = task.section || task.id;
-    const page = manifest.pages.find((p) => p.route === task.route);
-    const sec = page?.sections.find(
-      (s) => s.name === sectionName || kebabName(s.name) === kebabName(sectionName)
-    );
-    if (sec?.motion) {
-      requiredMotion = sec.motion;
-    } else if (manifest.motion) {
-      requiredMotion = manifest.motion
-        .filter((m) => m.section === sectionName || (task.route && m.route === task.route && m.section === sectionName))
-        .map((m) => m.id);
-    }
-  }
+  const requiredMotion = requiredMotionIds(manifest, task);
 
   const code = codeViolations(sources, requiredMotion);
   const dom: DomMismatch[] = [];
@@ -371,9 +333,11 @@ export async function runCheck(
   const browser =
     opts?.browser ?? (await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }));
 
+  let openedPage: Page | undefined;
   try {
     const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(60_000);
+    openedPage = page;
+    page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
 
     if (mode === 'smoke') {
       let httpStatus = 200;
@@ -389,7 +353,7 @@ export async function runCheck(
       try {
         await page.setViewport({ width: 1440, height: 900 });
         const target = withVerifyFlag(targetUrl);
-        const res = await page.goto(target, { waitUntil: 'load', timeout: 30_000 });
+        const res = await page.goto(target, { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
         if (res) {
           httpStatus = res.status();
         }
@@ -404,10 +368,14 @@ export async function runCheck(
         errors.push(`HTTP ${httpStatus}`);
       }
 
-      const sectionName = task.section || task.id;
-      const box = await getSectionBox(page, sectionName);
-      if (!box || box.width <= 0 || box.height <= 0) {
-        errors.push(`Zero-size or missing section "${sectionName}"`);
+      // A page task has no section of its own: every section of the page must be present.
+      const smokeNames =
+        task.kind === 'page' ? task.sections ?? [] : [task.section || task.id];
+      for (const sectionName of smokeNames) {
+        const box = await getSectionBox(page, sectionName);
+        if (!box || box.width <= 0 || box.height <= 0) {
+          errors.push(`Zero-size or missing section "${sectionName}"`);
+        }
       }
 
       const pass = errors.length === 0;
@@ -587,6 +555,15 @@ export async function runCheck(
           const expJsonPath = path.join(bDir, `${width}.json`);
 
           if (!existsSync(expPngPath) || !existsSync(expJsonPath)) {
+            // A root split into parts has no baseline of its own unless one was captured: its parts are
+            // judged by their own tasks.
+            const hasParts = Object.values(state.tasks).some(
+              (t) =>
+                t.kind === 'section' &&
+                (t.route === task.route || !t.route) &&
+                (t.section ?? '').startsWith(`${secName}/`)
+            );
+            if (hasParts) continue;
             errors.push(`Missing baseline at ${width}px for section ${secName}: ${bDir}`);
             pagePass = false;
             continue;
@@ -662,38 +639,17 @@ export async function runCheck(
       }
     }
 
-    // Motion presence check in full mode
-    let taskAnchors: MotionAnchor[] = [];
-    if (manifest?.motion) {
-      const candidates =
-        task.kind === 'page'
-          ? manifest.motion.filter(
-              (m) => m.route === task.route || (m.section && sectionNames.includes(m.section))
-            )
-          : manifest.motion.filter(
-              (m) =>
-                m.section === (task.section || task.id) ||
-                (m.section && kebabName(m.section) === kebabName(task.section || task.id)) ||
-                requiredMotion.includes(m.id)
-            );
-      const seenIds = new Set<string>();
-      for (const a of candidates) {
-        if (!seenIds.has(a.id)) {
-          seenIds.add(a.id);
-          taskAnchors.push(a);
-        }
-      }
-    }
-
+    // Motion presence check in full mode, on a fresh tab (see runMotionOnFreshPage)
+    const taskAnchors = taskMotionAnchors(manifest, task, sectionNames, requiredMotion);
     if (taskAnchors.length > 0) {
       try {
-        const motionResults = await checkMotion(page, targetUrl, taskAnchors);
-        motion.push(...motionResults);
+        motion.push(...(await runMotionOnFreshPage(browser, targetUrl, taskAnchors)));
       } catch (err: any) {
         errors.push(`Motion check failed: ${err.message || String(err)}`);
       }
     }
   } finally {
+    await openedPage?.close().catch(() => {});
     if (ownsBrowser) {
       await browser.close().catch(() => {});
     }

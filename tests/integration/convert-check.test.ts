@@ -11,6 +11,12 @@ import { initState, saveState } from '../../src/convert/state.js';
 import type { TaskRecord } from '../../src/convert/types.js';
 import { runBaseline } from '../../src/convert/verify/baseline.js';
 import { formatCheck, runCheck } from '../../src/convert/verify/check.js';
+import { stopDevServer } from '../../src/convert/verify/dev-server.js';
+import { isPidAlive, stopAllManaged } from '../../src/convert/verify/proc.js';
+
+const PAGE_CSS = `* { margin: 0; padding: 0; box-sizing: border-box; }
+.hero { height: 300px; width: 100%; background: #ff0000; }
+.footer { height: 120px; width: 100%; background: #00aa00; }`;
 
 const tmps: string[] = [];
 let browser: Browser | undefined;
@@ -31,6 +37,14 @@ before(async () => {
     if (url.pathname === '/error500') {
       res.writeHead(500, { 'content-type': 'text/plain' });
       res.end('Internal Server Error');
+      return;
+    }
+
+    if (url.pathname === '/multi') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(`<!doctype html><html><head><style>${PAGE_CSS}</style></head><body>
+<div data-section="hero" class="hero"><h1>Hero</h1></div>
+<div data-section="footer" class="footer"><p>Footer</p></div></body></html>`);
       return;
     }
 
@@ -210,4 +224,189 @@ test('smoke on a 500 page -> FAIL', async () => {
 
   const lines = formatCheck(res).split('\n');
   assert(lines[0].startsWith('FAIL sec-error'));
+});
+
+function stateWith(root: string, tasks: TaskRecord[]) {
+  const state = initState(path.join(root, 'export'), root);
+  for (const t of tasks) state.tasks[t.id] = t;
+  return state;
+}
+
+function ctxFor(root: string, state: ReturnType<typeof initState>): StageContext {
+  return { exportDir: state.exportDir, nextDir: root, state, log: () => {}, warn: () => {} };
+}
+
+const sectionTask = (id: string, route: string, section: string): TaskRecord => ({
+  id,
+  kind: 'section',
+  route,
+  section,
+  file: '',
+  targets: [],
+  status: 'done',
+  attempts: 0
+});
+
+test('I3: the fix task of a shell task resolves the shell baseline', async () => {
+  heroBg = '#ff0000';
+  const root = await tmp('convert check shellfix ');
+  const state = stateWith(root, [
+    { id: 'shell-hero', kind: 'shell', section: 'hero', file: '', targets: [], status: 'done', attempts: 0 },
+    {
+      id: 'fix-shell-hero',
+      kind: 'fix',
+      fixOf: 'shell-hero',
+      route: '/',
+      section: 'hero',
+      file: '',
+      targets: [],
+      status: 'pending',
+      attempts: 0
+    }
+  ]);
+  await saveState(state);
+  await runBaseline(ctxFor(root, state), serverUrl);
+
+  const res = await runCheck(root, 'fix-shell-hero', { devUrl: serverUrl, countCall: false });
+  assert.deepEqual(res.errors, []);
+  assert.equal(res.pass, true);
+  assert.equal(res.taskId, 'fix-shell-hero');
+});
+
+test('I3: the fix task of a page task checks the page sections', async () => {
+  const root = await tmp('convert check pagefix ');
+  const state = stateWith(root, [
+    sectionTask('sec-multi-hero', '/multi', 'hero'),
+    sectionTask('sec-multi-footer', '/multi', 'footer'),
+    {
+      id: 'page-multi',
+      kind: 'page',
+      route: '/multi',
+      sections: ['hero', 'footer'],
+      file: '',
+      targets: [],
+      status: 'done',
+      attempts: 0
+    },
+    {
+      id: 'fix-page-multi',
+      kind: 'fix',
+      fixOf: 'page-multi',
+      route: '/multi',
+      file: '',
+      targets: [],
+      status: 'pending',
+      attempts: 0
+    }
+  ]);
+  await saveState(state);
+  await runBaseline(ctxFor(root, state), serverUrl);
+
+  const res = await runCheck(root, 'fix-page-multi', { devUrl: serverUrl, countCall: false });
+  assert.deepEqual(res.errors, []);
+  assert.equal(res.pass, true);
+});
+
+test('I2: smoke on a page task passes when every section has a box; a missing section fails', async () => {
+  const root = await tmp('convert check pagesmoke ');
+  const pageTask = (sections: string[]): TaskRecord => ({
+    id: 'page-multi',
+    kind: 'page',
+    route: '/multi',
+    sections,
+    file: '',
+    targets: [],
+    status: 'pending',
+    attempts: 0
+  });
+  await saveState(stateWith(root, [pageTask(['hero', 'footer'])]));
+  const ok = await runCheck(root, 'page-multi', { smoke: true, devUrl: serverUrl, countCall: false });
+  assert.deepEqual(ok.errors, []);
+  assert.equal(ok.pass, true);
+
+  await saveState(stateWith(root, [pageTask(['hero', 'ghost'])]));
+  const bad = await runCheck(root, 'page-multi', { smoke: true, devUrl: serverUrl, countCall: false });
+  assert.equal(bad.pass, false);
+  assert(bad.errors.some((e) => e.includes('ghost')));
+});
+
+test('I8: a page task skips a root section that has parts and no baseline of its own', async () => {
+  const root = await tmp('convert check parts ');
+  const state = stateWith(root, [
+    sectionTask('sec-multi-hero-part', '/multi', 'hero/part'),
+    sectionTask('sec-multi-footer', '/multi', 'footer'),
+    {
+      id: 'page-multi',
+      kind: 'page',
+      route: '/multi',
+      sections: ['hero', 'footer'],
+      file: '',
+      targets: [],
+      status: 'done',
+      attempts: 0
+    }
+  ]);
+  await saveState(state);
+  await runBaseline(ctxFor(root, state), serverUrl);
+
+  const res = await runCheck(root, 'page-multi', { devUrl: serverUrl, countCall: false });
+  assert.deepEqual(res.errors, []);
+  assert.equal(res.pass, true);
+});
+
+test('C1: a stale devUrl follows .convert/dev-server.json to the restarted server', async () => {
+  const root = await tmp('convert check stale ');
+  await saveState(stateWith(root, [sectionTask('sec-hero', '/', 'hero')]));
+  await mkdir(path.join(root, '.convert'), { recursive: true });
+  await writeFile(
+    path.join(root, '.convert', 'dev-server.json'),
+    JSON.stringify({ pid: process.pid, port: Number(new URL(serverUrl).port), startedAt: new Date().toISOString() })
+  );
+  const res = await runCheck(root, 'sec-hero', { smoke: true, devUrl: 'http://127.0.0.1:1', countCall: false });
+  assert.deepEqual(res.errors, []);
+  assert.equal(res.pass, true);
+});
+
+test('I7: framer- classes in files under a directory target are reported', async () => {
+  const root = await tmp('convert check dirtarget ');
+  const state = stateWith(root, [
+    { ...sectionTask('sec-hero', '/', 'hero'), targets: ['src/components/Hero.tsx', 'src/components/hero/'] }
+  ]);
+  await saveState(state);
+  await mkdir(path.join(root, 'src', 'components', 'hero', 'deep'), { recursive: true });
+  await writeFile(path.join(root, 'src', 'components', 'Hero.tsx'), 'export const Hero = () => <div className="ok" />;');
+  await writeFile(
+    path.join(root, 'src', 'components', 'hero', 'deep', 'Part.tsx'),
+    'export const Part = () => <div className="framer-1x y" />;'
+  );
+  const res = await runCheck(root, 'sec-hero', { smoke: true, devUrl: serverUrl, countCall: false });
+  assert(res.code.some((c) => c.includes('Part.tsx')), `code: ${JSON.stringify(res.code)}`);
+});
+
+test('I1: a check that starts the dev server leaves it running for reuse', async () => {
+  const root = await tmp('convert check keepalive ');
+  await writeFile(
+    path.join(root, 'package.json'),
+    JSON.stringify({ name: 'x', private: true, type: 'module', scripts: { dev: 'node dev.mjs' } })
+  );
+  await writeFile(
+    path.join(root, 'dev.mjs'),
+    `import http from 'node:http';
+const i = process.argv.indexOf('-p');
+http.createServer((q, r) => {
+  r.writeHead(200, { 'content-type': 'text/html' });
+  r.end('<!doctype html><body><div data-section="hero" style="height:100px">x</div></body>');
+}).listen(Number(process.argv[i + 1]), '127.0.0.1');
+`
+  );
+  await saveState(stateWith(root, [sectionTask('sec-hero', '/', 'hero')]));
+  try {
+    const res = await runCheck(root, 'sec-hero', { smoke: true, countCall: false });
+    assert.deepEqual(res.errors, []);
+    const info = JSON.parse(await readFile(path.join(root, '.convert', 'dev-server.json'), 'utf8'));
+    await stopAllManaged(); // would kill a managed (non keepAlive) child
+    assert.equal(isPidAlive(info.pid), true, 'dev server must outlive the check');
+  } finally {
+    await stopDevServer(root);
+  }
 });

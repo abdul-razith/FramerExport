@@ -542,3 +542,122 @@ test('checkMotion: multi-token data-motion="m1 m2" matches both m1 and m2', asyn
     await page.close().catch(() => {});
   }
 });
+
+async function motionFixture(opts: { motionAnchors: MotionAnchor[]; sectionMotion: string[] }) {
+  const logs: Array<{ w: number; reduced: boolean }> = [];
+  const srv = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/log') {
+      logs.push({ w: Number(url.searchParams.get('w')), reduced: url.searchParams.get('rm') === '1' });
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<!doctype html><html><head><style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+.hero { height: 200px; width: 100%; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.fade { opacity: 0; animation: fadeIn 0.4s ease forwards; }
+</style></head><body>
+<div data-section="hero" class="hero"><div data-motion="hero-fade" class="fade">Hero</div></div>
+<script>fetch('/log?w=' + innerWidth + '&rm=' + (matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0));</script>
+</body></html>`);
+  });
+  await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', () => resolve()));
+  const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+
+  const root = await tmp('convert motion wiring ');
+  const state = initState(path.join(root, 'export'), root);
+  state.tasks['sec-hero'] = {
+    id: 'sec-hero',
+    kind: 'section',
+    section: 'hero',
+    route: '/',
+    file: 'src/components/Hero.tsx',
+    targets: ['src/components/Hero.tsx'],
+    status: 'pending',
+    attempts: 0
+  };
+  await saveState(state);
+  const heroFile = path.join(root, 'src', 'components', 'Hero.tsx');
+  await mkdir(path.dirname(heroFile), { recursive: true });
+  await writeFile(
+    heroFile,
+    `export function Hero() { return <div data-section="hero"><div data-motion="hero-fade" /></div>; }`
+  );
+  await runBaseline({ exportDir: state.exportDir, nextDir: root, state, log: () => {}, warn: () => {} }, url);
+  await writeManifest(root, {
+    version: 1,
+    pages: [
+      {
+        route: '/',
+        slug: 'index',
+        view: 'page.tsx',
+        sections: [
+          {
+            name: 'hero',
+            component: 'Hero',
+            file: 'src/components/Hero.tsx',
+            parts: [],
+            motion: opts.sectionMotion,
+            scriptDrawn: [],
+            hasVariants: false,
+            repeated: [],
+            cmsFields: []
+          }
+        ],
+        inline: [],
+        shell: []
+      }
+    ],
+    shell: [],
+    motion: opts.motionAnchors,
+    scriptDrawn: [],
+    stubs: [],
+    warnings: []
+  });
+  return { srv, url, root, logs };
+}
+
+const fadeAnchor = (id: string, matched: boolean): MotionAnchor => ({
+  id,
+  route: '/',
+  section: 'hero',
+  entry: {
+    route: '/',
+    selector: '#x',
+    trigger: 'appear',
+    from: { opacity: '0' },
+    to: { opacity: '1' },
+    confidence: 'high'
+  },
+  matched
+});
+
+test('I5: the motion check runs on a fresh 1440 px page without reduced motion', async () => {
+  const fx = await motionFixture({ motionAnchors: [fadeAnchor('hero-fade', true)], sectionMotion: ['hero-fade'] });
+  try {
+    const res = await runCheck(fx.root, 'sec-hero', { devUrl: fx.url, countCall: false, browser });
+    assert.equal(res.motion.length, 1);
+    const last = fx.logs[fx.logs.length - 1];
+    assert.deepEqual(last, { w: 1440, reduced: false }, `last page load: ${JSON.stringify(fx.logs)}`);
+  } finally {
+    await new Promise<void>((resolve) => fx.srv.close(() => resolve()));
+  }
+});
+
+test('I6: unmatched motion anchors are neither required in code nor exercised', async () => {
+  const fx = await motionFixture({
+    motionAnchors: [fadeAnchor('hero-fade', true), fadeAnchor('ghost-motion', false)],
+    sectionMotion: ['hero-fade', 'ghost-motion']
+  });
+  try {
+    const res = await runCheck(fx.root, 'sec-hero', { devUrl: fx.url, countCall: false, browser });
+    assert.deepEqual(res.code, [], `code: ${JSON.stringify(res.code)}`);
+    assert.deepEqual(res.motion.map((m) => m.id), ['hero-fade']);
+    assert.equal(res.pass, true);
+  } finally {
+    await new Promise<void>((resolve) => fx.srv.close(() => resolve()));
+  }
+});

@@ -29,7 +29,7 @@ export async function capturePageSections(
   url: string,
   width: number,
   names: string[],
-  timeoutMs = 60_000
+  timeoutMs = 120_000
 ): Promise<Map<string, SectionCapture>> {
   await page.setViewport({ width, height: 900 });
   await prepareCapture(page);

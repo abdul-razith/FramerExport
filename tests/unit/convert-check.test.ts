@@ -264,3 +264,14 @@ test('two concurrent counted calls end with { calls: 2 } and leave state.json by
   const afterBytes = await readFile(statePath, 'utf8');
   assert.equal(afterBytes, beforeBytes, 'state.json must remain byte-identical');
 });
+
+test('I12: codeViolations inspects class attributes only', () => {
+  const ok = (text: string) => codeViolations([{ file: 'a.tsx', text }], []);
+  assert.deepEqual(ok(`<section data-framer-name="Hero" className="hero" />`), []);
+  assert.deepEqual(ok(`import { motion } from 'framer-motion';`), []);
+  assert.deepEqual(ok(`<div data-section="Hero" id="framer-ish" />`), []);
+  assert.equal(ok(`<div className="framer-1x y" />`).length, 1);
+  assert.equal(ok('<div className={`a framer-1x`} />').length, 1);
+  assert.equal(ok(`<div className={cn("a", "framer-xyz")} />`).length, 1);
+  assert.equal(ok(`<div class="framer-1x" />`).length, 1);
+});
