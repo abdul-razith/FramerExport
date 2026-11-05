@@ -74,8 +74,58 @@ function installHandlers(): void {
   process.on('exit', killAllManagedSync);
 }
 
-function quoteIfSpaced(arg: string): string {
+export function quoteIfSpaced(arg: string): string {
   return /\s/.test(arg) && !/^".*"$/.test(arg) ? `"${arg}"` : arg;
+}
+
+/** Test if a process is still alive. */
+export function isPidAlive(pid: number): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kill a process and all its children/descendants.
+ * Uses taskkill /pid <pid> /T /F on Windows, process-group signals elsewhere.
+ */
+export async function killPidTree(pid: number): Promise<void> {
+  if (!pid || pid <= 0) return;
+  if (isWindows) {
+    await new Promise<void>((resolve) => {
+      const tk = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      tk.once('exit', () => resolve());
+      tk.once('error', () => resolve());
+    });
+  } else {
+    try {
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch {
+        process.kill(pid, 'SIGTERM');
+      }
+    } catch {
+      return;
+    }
+    const start = Date.now();
+    while (Date.now() - start < 3000) {
+      if (!isPidAlive(pid)) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    try {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        process.kill(pid, 'SIGKILL');
+      }
+    } catch {
+      // already dead
+    }
+  }
 }
 
 /**
@@ -121,24 +171,7 @@ export function spawnManaged(
     }
     if (stopping) return stopping;
     stopping = (async () => {
-      if (isWindows) {
-        await new Promise<void>((resolve) => {
-          const tk = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-          tk.once('exit', () => resolve());
-          tk.once('error', () => resolve());
-        });
-      } else {
-        const signal = (sig: NodeJS.Signals) => {
-          try {
-            process.kill(-child.pid!, sig);
-          } catch {
-            child.kill(sig);
-          }
-        };
-        signal('SIGTERM');
-        const timer = setTimeout(() => signal('SIGKILL'), 3000);
-        void exitPromise.then(() => clearTimeout(timer));
-      }
+      await killPidTree(child.pid!);
       // Never hang forever on a child that refuses to report its exit.
       let guard: NodeJS.Timeout | undefined;
       await Promise.race([exitPromise, new Promise<void>((r) => (guard = setTimeout(r, 10_000)))]);
