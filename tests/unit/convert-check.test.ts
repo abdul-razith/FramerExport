@@ -275,3 +275,65 @@ test('I12: codeViolations inspects class attributes only', () => {
   assert.equal(ok(`<div className={cn("a", "framer-xyz")} />`).length, 1);
   assert.equal(ok(`<div class="framer-1x" />`).length, 1);
 });
+
+// ---- fix wave 3 round 2: required motion ids come from the same ownership as the task files ----
+import { requiredMotionIds, taskMotionAnchors } from '../../src/convert/verify/check-motion.js';
+import type { GeneratedManifest } from '../../src/convert/generate/manifest.js';
+
+const motionEntry = (route: string) => ({
+  route,
+  selector: '.nav',
+  framerName: 'NavFade',
+  trigger: 'appear' as const,
+  from: { opacity: '0' },
+  to: { opacity: '1' },
+  confidence: 'high' as const,
+});
+
+function shellMotionManifest(): GeneratedManifest {
+  const sec = (name: string, extra: Record<string, unknown> = {}) => ({
+    name, component: name, file: `src/sections/x/${name}.tsx`, parts: [], motion: [] as string[],
+    scriptDrawn: [], hasVariants: false, repeated: [], cmsFields: [], ...extra,
+  });
+  return {
+    version: 1,
+    shell: [{ name: 'Navigation', component: 'Navigation', file: 'src/components/shell/Navigation.tsx', pages: ['/', '/about'], differences: [] }],
+    pages: [
+      {
+        route: '/', slug: 'home', view: 'src/views/home.tsx', inline: [], shell: ['Navigation'],
+        sections: [
+          sec('Hero', {
+            motion: ['m3'],
+            parts: [
+              { name: 'Left', component: 'Left', file: 'src/sections/home/Hero/Left.tsx', motion: ['m3'] },
+              { name: 'Right', component: 'Right', file: 'src/sections/home/Hero/Right.tsx', motion: [] },
+            ],
+          }),
+        ],
+      },
+      { route: '/about', slug: 'about', view: 'src/views/about.tsx', inline: [], shell: ['Navigation'], sections: [] },
+    ],
+    motion: [
+      { id: 'm1', route: '/', section: 'Navigation', matched: true, entry: motionEntry('/') },
+      { id: 'm2', route: '/about', section: 'Navigation', matched: true, entry: motionEntry('/about') },
+      { id: 'm3', route: '/', section: 'Hero', matched: true, entry: { ...motionEntry('/'), framerName: 'Title' } },
+    ],
+    scriptDrawn: [], stubs: [], warnings: [],
+  };
+}
+
+test('shell task requires only the first page ids; check passes with only m1 present', () => {
+  const m = shellMotionManifest();
+  const task = { id: 'shell-navigation', kind: 'shell', section: 'Navigation', file: '', targets: [], dependsOn: [], status: 'pending', attempts: 0 } as TaskRecord;
+  const required = requiredMotionIds(m, task);
+  assert.deepEqual(required, ['m1']);
+  assert.deepEqual(codeViolations([{ file: 'Navigation.tsx', text: '<nav data-motion="m1">x</nav>' }], required), []);
+  assert.deepEqual(taskMotionAnchors(m, task, [], required).map((a) => a.id), ['m1']);
+});
+
+test('part task requires its own motion ids and not the sibling part or the section', () => {
+  const m = shellMotionManifest();
+  const mk = (section: string) => ({ id: 'x', kind: 'section', route: '/', section, file: '', targets: [], dependsOn: [], status: 'pending', attempts: 0 }) as TaskRecord;
+  assert.deepEqual(requiredMotionIds(m, mk('Hero/Left')), ['m3']);
+  assert.deepEqual(requiredMotionIds(m, mk('Hero/Right')), []);
+});

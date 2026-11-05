@@ -21,7 +21,7 @@ import {
 import { describeMotion } from '../tasks/motion-values.js';
 import { componentName, kebabName } from '../generate/names.js';
 import type { ScriptDrawn } from '../generate/script-drawn.js';
-import { assignTaskContent } from '../tasks/assign.js';
+import { assignTaskContent, motionIdsForTask } from '../tasks/assign.js';
 
 export { checkCommand };
 
@@ -232,12 +232,14 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
     if (sh.differences && sh.differences.length > 0) {
       reqLines.push(`- Differences across pages to support via props:\n${bullets(sh.differences, '  ')}`);
     }
-    const shMotion = assigned.shellMotion.get(sh.name) ?? [];
+    // Required ids come from the same helper the check uses; other pages' differing anchors are informational.
+    const shRequired = new Set(motionIdsForTask(manifest, { kind: 'shell', id: `shell-${kebab}`, section: sh.name }));
+    const shMotion = [...(assigned.shellMotion.get(sh.name) ?? [])].sort((x, y) => Number(shRequired.has(y.id)) - Number(shRequired.has(x.id)));
     if (shMotion.length > 0) {
       reqLines.push(
         `- Animations:
 ${bullets(
-          shMotion.map((m) => formatMotionLine(m) + (m.route !== sh.pages[0] ? ` (recorded on ${code(m.route)} only; not marked in the generated JSX)` : '')),
+          shMotion.map((m) => formatMotionLine(m) + (!shRequired.has(m.id) ? ` (recorded on ${code(m.route)} only; not marked in the generated JSX)` : '')),
           '  ',
         )}`,
       );

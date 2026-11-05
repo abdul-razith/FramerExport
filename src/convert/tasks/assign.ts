@@ -115,3 +115,45 @@ export function assignTaskContent(manifest: GeneratedManifest): TaskAssignment {
 
   return out;
 }
+
+/** The task fields `motionIdsForTask` needs; a `TaskRecord` satisfies it. */
+export interface TaskRef {
+  kind: string;
+  id: string;
+  route?: string;
+  section?: string;
+}
+
+/**
+ * Single source of truth for the motion ids a task must contain in its files (rendered into the task
+ * file and enforced by the check):
+ * - shell: matched anchors of that shell section on the shell's first page (the ids present in the shell JSX)
+ * - part: the ids inside that part
+ * - section: the section's own ids
+ * - page: none
+ * Unmatched anchors are never required.
+ */
+export function motionIdsForTask(manifest: GeneratedManifest | null, task: TaskRef): string[] {
+  if (!manifest || task.kind === 'page') return [];
+  const matched = new Set((manifest.motion ?? []).filter((m) => m.matched).map((m) => m.id));
+  const name = task.section || task.id;
+  if (task.kind === 'shell') {
+    const sh = manifest.shell.find((s) => s.name === name);
+    if (!sh) return [];
+    return (manifest.motion ?? [])
+      .filter((m) => m.matched && m.section === sh.name && m.route === sh.pages[0])
+      .map((m) => m.id);
+  }
+  const page = manifest.pages.find((p) => p.route === task.route);
+  for (const sec of page?.sections ?? []) {
+    for (const part of sec.parts ?? []) {
+      if (`${sec.name}/${part.name}` === name) return (part.motion ?? []).filter((id) => matched.has(id));
+    }
+  }
+  const sec = page?.sections.find((s) => s.name === name && !(s.parts && s.parts.length > 0));
+  if (sec) return (sec.motion ?? []).filter((id) => matched.has(id));
+  // No structure for this task: fall back to anchors named for it on its route.
+  return (manifest.motion ?? [])
+    .filter((m) => m.matched && m.section === name && (!task.route || m.route === task.route))
+    .map((m) => m.id);
+}

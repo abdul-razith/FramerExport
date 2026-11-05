@@ -1,6 +1,6 @@
 import type { Browser } from 'puppeteer';
 import type { GeneratedManifest, MotionAnchor } from '../generate/manifest.js';
-import { kebabName } from '../generate/names.js';
+import { motionIdsForTask } from '../tasks/assign.js';
 import type { TaskRecord } from '../types.js';
 import { checkMotion } from './motion-check.js';
 import type { MotionResult } from './check.js';
@@ -10,22 +10,7 @@ export function requiredMotionIds(
   manifest: GeneratedManifest | null,
   task: TaskRecord
 ): string[] {
-  if (!manifest) return [];
-  const sectionName = task.section || task.id;
-  const page = manifest.pages.find((p) => p.route === task.route);
-  const sec = page?.sections.find(
-    (s) => s.name === sectionName || kebabName(s.name) === kebabName(sectionName)
-  );
-  const unmatched = new Set((manifest.motion ?? []).filter((m) => !m.matched).map((m) => m.id));
-  let ids: string[] = [];
-  if (sec?.motion) {
-    ids = sec.motion;
-  } else if (manifest.motion) {
-    ids = manifest.motion
-      .filter((m) => m.matched && m.section === sectionName)
-      .map((m) => m.id);
-  }
-  return ids.filter((id) => !unmatched.has(id));
+  return motionIdsForTask(manifest, task);
 }
 
 /** Matched anchors the motion check should exercise for this task. */
@@ -40,12 +25,7 @@ export function taskMotionAnchors(
   const candidates =
     task.kind === 'page'
       ? matched.filter((m) => m.route === task.route || (m.section && sectionNames.includes(m.section)))
-      : matched.filter(
-          (m) =>
-            m.section === (task.section || task.id) ||
-            (m.section && kebabName(m.section) === kebabName(task.section || task.id)) ||
-            requiredMotion.includes(m.id)
-        );
+      : matched.filter((m) => requiredMotion.includes(m.id));
   const seen = new Set<string>();
   const anchors: MotionAnchor[] = [];
   for (const a of candidates) {
