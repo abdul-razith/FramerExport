@@ -88,11 +88,12 @@ function defaultCheck(
       errors: res.ok ? [] : [res.log],
     }));
   }
-  return runCheck(root, taskId, {
-    smoke,
-    countCall: true,
-    devUrl,
-  });
+  return runCheck(root, taskId, poolCheckOptions(smoke, devUrl));
+}
+
+/** The pool does not count check calls; the CLI check command does. */
+export function poolCheckOptions(smoke: boolean, devUrl: string): { smoke: boolean; countCall: false; devUrl: string } {
+  return { smoke, countCall: false, devUrl };
 }
 
 function defaultFinalizeDeps(root: string, devUrl: string, ctx: StageContext): FinalizeDeps {

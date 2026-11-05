@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { runAgents, type RunDeps, type RunIo, type RunOutcome } from '../../src/convert/run.js';
+import { poolCheckOptions, runAgents, type RunDeps, type RunIo, type RunOutcome } from '../../src/convert/run.js';
 import { createPauseController } from '../../src/convert/runner/pool.js';
 import { RunActiveError } from '../../src/convert/runner/lock.js';
 import { DEFAULT_OPTIONS, initState, loadState, saveState } from '../../src/convert/state.js';
@@ -300,4 +300,12 @@ test('lock released after an exception', async () => {
     /second failure/
   );
   assert.equal(secondReachedDevServer, true);
+});
+
+test('B-I4: the pool default check does not count check calls (counted from the CLI)', () => {
+  assert.deepEqual(poolCheckOptions(true, 'http://localhost:3000'), {
+    smoke: true,
+    countCall: false,
+    devUrl: 'http://localhost:3000',
+  });
 });
