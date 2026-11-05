@@ -361,3 +361,87 @@ test('I2: a missing agent binary refuses to start and names the agent', async ()
   const state = await loadState(root);
   assert.equal(state?.tasks['sec-home-hero']?.status, 'pending');
 });
+
+test('I3a: a task that throws inside the pool stops the run without finalizing or recording done', async () => {
+  const root = await setupProject('claude');
+  const events: string[] = [];
+  const io: RunIo = {
+    onEvent: (e) => events.push(e.type),
+    pause: createPauseController(),
+    onQuota: async () => 'stay',
+  };
+  let finalized = false;
+  const deps = i2Deps({
+    check: async () => {
+      throw new Error('check blew up');
+    },
+    finalize: async () => {
+      finalized = true;
+      return { buildOk: true };
+    },
+    spawn: () => ({
+      pid: undefined,
+      done: Promise.resolve({ exitCode: 0, timedOut: false, killed: false, quota: null }),
+      kill: async () => {},
+    }),
+  });
+  await assert.rejects(runAgents(root, io, deps), /sec-home-hero.*check blew up/);
+  assert.equal(finalized, false);
+  assert.ok(events.includes('task-error'));
+  const state = await loadState(root);
+  assert.notEqual(state?.run.status, 'done');
+  assert.equal(state?.tasks['sec-home-hero']?.status, 'pending');
+});
+
+test('I3b: a failed production build runs the pending fix-build task through the pool, then finalizes again', async () => {
+  const root = await setupProject('claude');
+  const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
+  const spawned: string[] = [];
+  const checked: string[] = [];
+  let finalizeCalls = 0;
+  const deps = i2Deps({
+    check: async (taskId) => {
+      checked.push(taskId);
+      return {
+        taskId,
+        mode: 'full',
+        pass: true,
+        limitReached: false,
+        widths: [],
+        dom: [],
+        code: [],
+        motion: [],
+        errors: [],
+      };
+    },
+    spawn: (task) => {
+      spawned.push(task.id);
+      return {
+        pid: undefined,
+        done: Promise.resolve({ exitCode: 0, timedOut: false, killed: false, quota: null }),
+        kill: async () => {},
+      };
+    },
+    finalize: async (ctx) => {
+      finalizeCalls++;
+      if (finalizeCalls === 1) {
+        ctx.state.tasks['fix-build'] = {
+          id: 'fix-build',
+          kind: 'fix',
+          targets: ['src/'],
+          file: '.convert/tasks/fix-build.md',
+          status: 'pending',
+          attempts: 1,
+        };
+        return { buildOk: false, fixTask: 'fix-build' };
+      }
+      return { buildOk: true };
+    },
+  });
+  const outcome = await runAgents(root, io, deps);
+  assert.equal(outcome.status, 'done');
+  assert.deepEqual(spawned, ['sec-home-hero', 'fix-build']);
+  assert.equal(finalizeCalls, 2);
+  const state = await loadState(root);
+  assert.equal(state?.tasks['fix-build']?.status, 'done');
+});

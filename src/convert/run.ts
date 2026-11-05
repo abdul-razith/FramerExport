@@ -179,6 +179,7 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
       io.pause.request('now');
     });
 
+    let finalizeRounds = 0;
     while (true) {
       const detect = deps?.detectAgents ?? detectAgents;
       const currentAgent: AgentId = state.options?.agent ?? (await defaultAgent(detect));
@@ -213,6 +214,12 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
           `Could not start agent "${currentAgent}": ${result.error ?? 'unknown error'}. ` +
             'Check that it is installed and on PATH, or pick another agent (--agent agy|claude).'
         );
+      }
+
+      if (result.stoppedFor === 'task-error') {
+        state.run = { status: 'paused', reason: 'crash', pausedAt: new Date().toISOString() };
+        await saveState(state);
+        throw new Error(`The run stopped on an internal error: ${result.error ?? 'unknown'}. Run it again to continue.`);
       }
 
       if (result.stoppedFor === 'quota') {
@@ -261,11 +268,28 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
         };
       }
 
-      // stoppedFor === 'done'
+      // stoppedFor === 'done': never finalize with unfinished work.
+      const unfinished = Object.values(state.tasks).filter(
+        (t) => t.status === 'pending' || t.status === 'in-progress' || t.status === 'awaiting-fix'
+      );
+      if (unfinished.length > 0) {
+        state.run = { status: 'paused', reason: 'crash', pausedAt: new Date().toISOString() };
+        await saveState(state);
+        throw new Error(
+          `The run ended with unfinished tasks: ${unfinished.map((t) => `${t.id} (${t.status})`).join(', ')}. ` +
+            'Run it again to continue.'
+        );
+      }
       const finalizeFn =
         deps?.finalize ??
         ((stageCtx) => runFinalize(stageCtx, defaultFinalizeDeps(resolvedRoot, devServer!.url, stageCtx)));
       const finResult = await finalizeFn(ctx);
+      // A failed production build leaves a pending fix-build task: run it through the pool and finalize
+      // again (finalize itself gives up after two failures).
+      if (!finResult.buildOk && state.tasks['fix-build']?.status === 'pending' && finalizeRounds < 2) {
+        finalizeRounds++;
+        continue;
+      }
       state.run = {
         status: 'done',
       };

@@ -58,7 +58,8 @@ export type PoolEvent =
     }
   | { type: 'reverted'; taskId: string; files: string[] }
   | { type: 'quota'; hit: QuotaHit }
-  | { type: 'agent-error'; taskId: string; message: string };
+  | { type: 'agent-error'; taskId: string; message: string }
+  | { type: 'task-error'; taskId: string; message: string };
 
 export interface PoolDeps {
   spawn(
@@ -82,7 +83,7 @@ export async function runQueue(
   deps: PoolDeps,
   pause: PauseController
 ): Promise<{
-  stoppedFor: 'done' | 'paused' | 'quota' | 'agent-error';
+  stoppedFor: 'done' | 'paused' | 'quota' | 'agent-error' | 'task-error';
   quota?: QuotaHit;
   error?: string;
   ran: string[];
@@ -101,13 +102,18 @@ export async function runQueue(
 
   let quotaHit: QuotaHit | undefined;
   let spawnFailure: string | undefined;
+  let internalError: string | undefined;
+  // Tasks whose execution threw: not re-dispatched in this run (they would fail the same way).
+  const failedIds = new Set<string>();
   let wakeUp: (() => void) | null = null;
 
   let stateSaveQueue = Promise.resolve();
   function safeSaveState(): Promise<void> {
     stateSaveQueue = stateSaveQueue
       .then(() => saveState(ctx.state))
-      .catch(() => {});
+      .catch((err) => {
+        internalError ??= `could not save state: ${err instanceof Error ? err.message : String(err)}`;
+      });
     return stateSaveQueue;
   }
 
@@ -300,7 +306,7 @@ export async function runQueue(
       }
 
       // 2. If quota hit or the agent cannot start: stop dispatching
-      if (quotaHit || spawnFailure) {
+      if (quotaHit || spawnFailure || internalError) {
         break;
       }
 
@@ -312,7 +318,7 @@ export async function runQueue(
       // 4. Try dispatching tasks to available workers
       if (availableWorkers.length > 0) {
         const ready = readyTasks(ctx.state, running);
-        const nextTask = ready.find((t) => !running.has(t.id));
+        const nextTask = ready.find((t) => !running.has(t.id) && !failedIds.has(t.id));
         if (nextTask) {
           const worker = availableWorkers.shift()!;
           const runningAtStart = new Set(running);
@@ -323,9 +329,17 @@ export async function runQueue(
           ran.push(nextTask.id);
 
           const taskPromise = executeTask(worker, nextTask, mySeq, runningAtStart)
-            .catch((err) => {
-              // Log unexpected errors
-              ctx.log(`Task ${nextTask.id} error: ${err}`);
+            .catch(async (err) => {
+              // An unexpected failure must not look like a finished task: put it back to pending
+              // (progress is recovered on the next start), surface it, and stop the run.
+              const message = err instanceof Error ? err.message : String(err);
+              ctx.log(`Task ${nextTask.id} error: ${message}`);
+              failedIds.add(nextTask.id);
+              internalError ??= `task ${nextTask.id} failed: ${message}`;
+              nextTask.status = 'pending';
+              deps.onEvent?.({ type: 'task-error', taskId: nextTask.id, message });
+              await deps.lock.setAgent(nextTask.id, null).catch(() => {});
+              await safeSaveState();
             })
             .finally(() => {
               running.delete(nextTask.id);
@@ -365,6 +379,9 @@ export async function runQueue(
     unsubscribe?.();
   }
 
+  if (internalError && !spawnFailure) {
+    return { stoppedFor: 'task-error', error: internalError, ran };
+  }
   if (spawnFailure) {
     return { stoppedFor: 'agent-error', error: spawnFailure, ran };
   }
