@@ -88,6 +88,10 @@ export async function runQueue(
   const availableWorkers: number[] = Array.from({ length: concurrency }, (_, i) => i);
   const activePromises = new Set<Promise<void>>();
   const ran: string[] = [];
+  // Every task that has started in this run, in start order. A finishing task keeps the
+  // targets of all tasks that overlapped its lifetime (running at its start or started later).
+  const startLog: Array<{ id: string; seq: number; targets: string[] }> = [];
+  let nextSeq = 0;
 
   let quotaHit: QuotaHit | undefined;
   let wakeUp: (() => void) | null = null;
@@ -119,7 +123,12 @@ export async function runQueue(
 
   const getTime = deps.now ?? (() => Date.now());
 
-  async function executeTask(worker: number, task: TaskRecord): Promise<void> {
+  async function executeTask(
+    worker: number,
+    task: TaskRecord,
+    mySeq: number,
+    runningAtStart: Set<string>
+  ): Promise<void> {
     const startMs = getTime();
     deps.onEvent?.({ type: 'start', worker, task });
 
@@ -214,13 +223,14 @@ export async function runQueue(
 
     // Case C: Normal / Timeout exit
     const allowedSet = new Set<string>(task.targets || []);
-    for (const [otherId, otherTask] of runningTasks) {
-      if (otherId !== task.id && otherTask.targets) {
-        for (const t of otherTask.targets) {
-          allowedSet.add(t);
-        }
+    for (const entry of startLog) {
+      if (entry.id === task.id) continue;
+      if (entry.seq > mySeq || runningAtStart.has(entry.id)) {
+        for (const t of entry.targets) allowedSet.add(t);
       }
     }
+    // Task and fix-task files are pool bookkeeping and are never reverted or deleted.
+    allowedSet.add('.convert/tasks/');
     const allowed = Array.from(allowedSet);
     const reverted = await revertOutOfScope(ctx.nextDir, before, allowed);
     if (reverted.length > 0) {
@@ -288,11 +298,14 @@ export async function runQueue(
         const nextTask = ready.find((t) => !running.has(t.id));
         if (nextTask) {
           const worker = availableWorkers.shift()!;
+          const runningAtStart = new Set(running);
+          const mySeq = nextSeq++;
+          startLog.push({ id: nextTask.id, seq: mySeq, targets: nextTask.targets || [] });
           running.add(nextTask.id);
           runningTasks.set(nextTask.id, nextTask);
           ran.push(nextTask.id);
 
-          const taskPromise = executeTask(worker, nextTask)
+          const taskPromise = executeTask(worker, nextTask, mySeq, runningAtStart)
             .catch((err) => {
               // Log unexpected errors
               ctx.log(`Task ${nextTask.id} error: ${err}`);

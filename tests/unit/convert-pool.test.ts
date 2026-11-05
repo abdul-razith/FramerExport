@@ -717,3 +717,47 @@ test('runQueue: out-of-scope edits produce a reverted event and files are revert
   assert.ok(revertEvent, 'reverted event was emitted');
   assert.deepEqual(revertEvent.files, ['src/rogue.tsx']);
 });
+
+test('runQueue: C1 a slow task finishing after a fast one keeps the fast task targets and its fix task file', async () => {
+  const root = await makeTmp();
+  const state = initState('/export', root);
+  state.options = {
+    testing: true,
+    concurrency: 2,
+    sectionTimeoutMin: 15,
+    pageTimeoutMin: 15,
+    pixelTolerance: 0.01,
+    reportTolerance: 0.03,
+    agent: 'agy',
+  };
+  await saveState(state);
+  const ctx: StageContext = { state, exportDir: '/export', nextDir: root, log: () => {} };
+
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  state.tasks['sec-a'] = makeTask({ id: 'sec-a', kind: 'section' });
+  state.tasks['sec-b'] = makeTask({ id: 'sec-b', kind: 'section' });
+
+  const bFile = path.join(root, 'src', 'sec-b.tsx');
+  let bChecks = 0;
+  const deps: PoolDeps = {
+    lock: fakeLock(),
+    spawn: (task) => {
+      if (task.id === 'sec-b') {
+        setTimeout(() => void writeFile(bFile, '// b finished\n'), 5);
+        return createFakeHandle({ delayMs: 25 });
+      }
+      if (task.id === 'sec-a') return createFakeHandle({ delayMs: 300 });
+      return createFakeHandle({ delayMs: 10 });
+    },
+    check: async (taskId) => {
+      if (taskId === 'sec-b' && bChecks++ === 0) return makeFailResult(taskId);
+      return makePassResult(taskId);
+    },
+  };
+
+  const res = await runQueue(ctx, deps, createPauseController());
+  assert.equal(res.stoppedFor, 'done');
+  assert.equal(await readFile(bFile, 'utf8'), '// b finished\n');
+  const fixMd = await readFile(path.join(root, '.convert', 'tasks', 'fix-sec-b.md'), 'utf8');
+  assert.ok(fixMd.length > 0);
+});
