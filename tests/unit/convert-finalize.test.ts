@@ -6,6 +6,7 @@ import test, { after } from 'node:test';
 import type { StageContext } from '../../src/convert/adapters/types.js';
 import { DEFAULT_OPTIONS, initState, loadState } from '../../src/convert/state.js';
 import type { CheckResult } from '../../src/convert/verify/check.js';
+import { baselineDir } from '../../src/convert/verify/baseline.js';
 import {
   dropFramerCss,
   framerClassFiles,
@@ -449,6 +450,10 @@ test('runFinalize testing on re-checks done shell/section tasks and marks failur
     log: () => {},
   };
 
+  for (const id of ['shell-nav', 'sec-hero']) {
+    await fs.mkdir(baselineDir(tmp, state.tasks[id]), { recursive: true });
+  }
+
   const checkedIds: string[] = [];
   const res = await runFinalize(ctx, {
     check: async (id) => {
@@ -502,4 +507,34 @@ test('runFinalize marks fix-build task as done when build succeeds', async () =>
   assert.equal(res.buildOk, true);
   assert.equal(ctx.state.tasks['fix-build']?.status, 'done');
   assert.equal(ctx.state.stages.finalize, 'done');
+});
+
+test('I11: runFinalize does not re-check tasks without a baseline (testing off during the run)', async () => {
+  const tmp = await makeTmp();
+  const state = initState('/fake/export', tmp);
+  state.options = { ...DEFAULT_OPTIONS, testing: true };
+  state.tasks['sec-hero'] = {
+    id: 'sec-hero',
+    kind: 'section',
+    route: '/',
+    section: 'Hero',
+    file: '.convert/tasks/sec-hero.md',
+    status: 'done',
+    attempts: 1,
+    targets: ['src/sections/home/Hero.tsx'],
+  };
+  const ctx: StageContext = { state, exportDir: '/fake/export', nextDir: tmp, log: () => {} };
+
+  const checked: string[] = [];
+  await runFinalize(ctx, {
+    check: async (id) => {
+      checked.push(id);
+      return makeFailResult(id);
+    },
+    build: async () => ({ ok: true, log: 'ok' }),
+    report: async () => ({ file: '.convert/report/index.html' }),
+  });
+
+  assert.deepEqual(checked, []);
+  assert.equal(ctx.state.tasks['sec-hero']?.status, 'done');
 });

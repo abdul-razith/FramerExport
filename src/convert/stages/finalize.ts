@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { StageContext } from '../adapters/types.js';
 import { saveState, writeFileAtomic } from '../state.js';
 import { renderTemplate } from './tasks.js';
 import { checkCommand, SHARED_RULES } from '../tasks/templates/index.js';
+import { baselineDir } from '../verify/baseline.js';
 import type { CheckResult } from '../verify/check.js';
 import type { TaskRecord } from '../types.js';
 
@@ -208,6 +210,8 @@ export async function runFinalize(
       .sort((a, b) => a.id.localeCompare(b.id));
 
     for (const task of doneTasks) {
+      // Sections finished with testing off have no baseline; the report judges them (spec section 4).
+      if (!existsSync(baselineDir(ctx.nextDir, task))) continue;
       const res = await deps.check(task.id);
       if (!res.pass) {
         task.status = 'needs-review';
