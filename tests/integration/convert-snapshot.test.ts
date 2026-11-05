@@ -313,3 +313,84 @@ test('multiple motion entries and CMS fields matching the same element split int
 });
 
 
+
+test('two children sharing a data-framer-name become uniquely named parts with exact placeholders (I5)', async () => {
+  const html = `<!doctype html><html><head></head><body>
+<div id="main">
+  <div id="hero">
+    <div data-framer-name="Card"><p>First card with enough text to be a part of the section.</p></div>
+    <div data-framer-name="Card"><p>Second card with enough text to be a part of the section.</p></div>
+  </div>
+</div>
+</body></html>`;
+  await page.setContent(html);
+  const plan = createPlan({ sections: [{ name: 'Hero', selector: '#hero' }], oversizedBytes: 100 });
+  const out = (await page.evaluate(snapshotScript(plan))) as SnapshotOut;
+  const hero = out.sections.find((s) => s.name === 'Hero')!;
+  assert.deepEqual(hero.parts.map((p) => p.name), ['Card', 'Card 2']);
+  assert.match(hero.parts[0].jsx, /First card/);
+  assert.match(hero.parts[1].jsx, /Second card/);
+  assert.match(hero.jsx, /<fexport-part data-name="Card"/);
+  assert.match(hero.jsx, /<fexport-part data-name="Card 2"/);
+});
+
+test('parts carry their own motion, cms, variant and repeated info; the section keeps only root-level info (I4)', async () => {
+  const html = `<!doctype html><html><head></head><body>
+<div id="main">
+  <div id="hero" class="root-el">
+    <div data-framer-name="Left" class="a"><h2 class="title">Left title text content</h2><i class="item"></i><i class="item"></i></div>
+    <div data-framer-name="Right" class="b"><p class="body">Right body text content</p></div>
+  </div>
+</div>
+</body></html>`;
+  await page.setContent(html);
+  const plan = createPlan({
+    sections: [{ name: 'Hero', selector: '#hero' }],
+    oversizedBytes: 100,
+    motion: [
+      { id: 'm1', selector: '.title' },
+      { id: 'm2', selector: '.body' },
+      { id: 'm3', selector: '.root-el' },
+    ],
+    cms: [{ field: 'heading', value: 'Left title text content' }],
+    components: [{ name: 'Item', selector: '.item' }],
+    hiddenMap: { b: ['phone'] },
+  });
+  const out = (await page.evaluate(snapshotScript(plan))) as SnapshotOut;
+  const hero = out.sections.find((s) => s.name === 'Hero')!;
+  const left = hero.parts.find((p) => p.name === 'Left')!;
+  const right = hero.parts.find((p) => p.name === 'Right')!;
+  assert.deepEqual(left.motion, ['m1']);
+  assert.deepEqual(left.cmsFields, ['heading']);
+  assert.deepEqual(left.repeated, ['Item']);
+  assert.equal(left.hasVariants, false);
+  assert.deepEqual(right.motion, ['m2']);
+  assert.equal(right.hasVariants, true);
+  assert.deepEqual(hero.motion, ['m3'], 'only the section root motion stays on the section');
+  assert.deepEqual(hero.cmsFields, []);
+  assert.deepEqual(hero.repeated, []);
+  assert.equal(hero.hasVariants, false);
+});
+
+test('script-drawn item below the fold gets data-script-drawn on the element at its document position (I6)', async () => {
+  const html = `<!doctype html><html><head><style>body{margin:0}</style></head><body>
+<div id="main">
+  <div id="hero" style="height:3000px"><div id="top" style="height:100px">Top</div></div>
+  <div id="below" style="height:200px"><p id="clock" style="margin:0;height:40px">12:00</p></div>
+</div>
+</body></html>`;
+  await page.setContent(html);
+  const box = (await page.evaluate(`(() => { const r = document.getElementById('clock').getBoundingClientRect(); return { x: r.x + 5, y: r.y + window.scrollY + 5 }; })()`)) as { x: number; y: number };
+  assert.ok(box.y > 3000, 'precondition: item is far below the first screen');
+  const plan = createPlan({
+    sections: [
+      { name: 'Hero', selector: '#hero' },
+      { name: 'Below', selector: '#below' },
+    ],
+    scriptDrawn: [{ id: 's1', section: 'Below', x: box.x, y: box.y }],
+  });
+  const out = (await page.evaluate(snapshotScript(plan))) as SnapshotOut;
+  const below = out.sections.find((s) => s.name === 'Below')!;
+  assert.deepEqual(below.scriptDrawn, ['s1']);
+  assert.match(below.jsx, /<p[^>]*data-script-drawn="s1"/, 'annotation lands on the clock element');
+});

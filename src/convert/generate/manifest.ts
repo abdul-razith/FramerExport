@@ -7,6 +7,12 @@ export interface GeneratedPart {
   name: string;
   component: string;
   file: string; /* posix, project-relative */
+  /** Information about the elements inside this part only. */
+  motion?: string[];
+  scriptDrawn?: string[];
+  hasVariants?: boolean;
+  repeated?: string[];
+  cmsFields?: string[];
 }
 
 export interface GeneratedSection {

@@ -14,12 +14,25 @@ export interface SnapshotPlan {
   oversizedBytes: number;
 }
 
+export interface SnapshotPart {
+  /** Unique within its section. */
+  name: string;
+  jsx: string;
+  motion: string[];
+  scriptDrawn: string[];
+  repeated: string[];
+  cmsFields: string[];
+  hasVariants: boolean;
+}
+
 export interface SnapshotSection {
   name: string;
   jsx: string;
   empty: boolean;
-  parts: Array<{ name: string; jsx: string }>;
+  parts: SnapshotPart[];
+  /** For a section with parts: only what sits on the section root outside every part. */
   motion: string[];
+  scriptDrawn: string[];
   repeated: string[];
   cmsFields: string[];
   hasVariants: boolean;
@@ -102,6 +115,43 @@ export function snapshotScript(plan: SnapshotPlan): string {
       }
     });
 
+    // Collects annotation info of an element subtree (the element itself included).
+    function collect(rootEl) {
+      var hasVariants = Boolean(
+        rootEl.hasAttribute('data-variant') ||
+        rootEl.querySelector('[data-variant]')
+      );
+      function ids(attr) {
+        var out = [];
+        var els = Array.prototype.slice.call(rootEl.querySelectorAll('[' + attr + ']'));
+        if (rootEl.hasAttribute(attr)) els.unshift(rootEl);
+        els.forEach(function (el) {
+          var val = el.getAttribute(attr);
+          if (val) {
+            val.trim().split(/\s+/).forEach(function (id) {
+              if (id && out.indexOf(id) === -1) out.push(id);
+            });
+          }
+        });
+        return out;
+      }
+      var repeated = [];
+      (plan.components || []).forEach(function (c) {
+        var count = 0;
+        try { count = rootEl.querySelectorAll(c.selector).length; } catch (e) {}
+        if (count >= 2 && repeated.indexOf(c.name) === -1) {
+          repeated.push(c.name);
+        }
+      });
+      return {
+        hasVariants: hasVariants,
+        motion: ids('data-motion'),
+        cmsFields: ids('data-cms'),
+        scriptDrawn: ids('data-script-drawn'),
+        repeated: repeated
+      };
+    }
+
     // 5. convert sections
     var emptyLimit = typeof plan.emptyBytes === 'number' ? plan.emptyBytes : 1000;
     var oversizedLimit = typeof plan.oversizedBytes === 'number' ? plan.oversizedBytes : 120000;
@@ -117,6 +167,7 @@ export function snapshotScript(plan: SnapshotPlan): string {
           empty: true,
           parts: [],
           motion: [],
+          scriptDrawn: [],
           repeated: [],
           cmsFields: [],
           hasVariants: false
@@ -124,45 +175,8 @@ export function snapshotScript(plan: SnapshotPlan): string {
         return;
       }
 
-      var hasVariants = Boolean(
-        sectionEl.hasAttribute('data-variant') ||
-        sectionEl.querySelector('[data-variant]')
-      );
-
-      var motionIds = [];
-      var motionEls = Array.prototype.slice.call(sectionEl.querySelectorAll('[data-motion]'));
-      if (sectionEl.hasAttribute('data-motion')) motionEls.unshift(sectionEl);
-      motionEls.forEach(function (mEl) {
-        var val = mEl.getAttribute('data-motion');
-        if (val) {
-          val.trim().split(/\s+/).forEach(function (id) {
-            if (id && motionIds.indexOf(id) === -1) motionIds.push(id);
-          });
-        }
-      });
-
-      var cmsFields = [];
-      var cmsEls = Array.prototype.slice.call(sectionEl.querySelectorAll('[data-cms]'));
-      if (sectionEl.hasAttribute('data-cms')) cmsEls.unshift(sectionEl);
-      cmsEls.forEach(function (cEl) {
-        var val = cEl.getAttribute('data-cms');
-        if (val) {
-          val.trim().split(/\s+/).forEach(function (f) {
-            if (f && cmsFields.indexOf(f) === -1) cmsFields.push(f);
-          });
-        }
-      });
-
-      var repeated = [];
-      (plan.components || []).forEach(function (c) {
-        var count = 0;
-        try { count = sectionEl.querySelectorAll(c.selector).length; } catch (e) {}
-        if (count >= 2 && repeated.indexOf(c.name) === -1) {
-          repeated.push(c.name);
-        }
-      });
-
       var sectionJsx = conv.element(sectionEl);
+      var info = collect(sectionEl);
 
       var hasVisibleText = Boolean((sectionEl.textContent || '').trim());
       var hasMedia = Boolean(sectionEl.querySelector('img, svg, a, video'));
@@ -174,10 +188,11 @@ export function snapshotScript(plan: SnapshotPlan): string {
           jsx: sectionJsx,
           empty: true,
           parts: [],
-          motion: motionIds,
-          repeated: repeated,
-          cmsFields: cmsFields,
-          hasVariants: hasVariants
+          motion: info.motion,
+          scriptDrawn: info.scriptDrawn,
+          repeated: info.repeated,
+          cmsFields: info.cmsFields,
+          hasVariants: info.hasVariants
         });
         return;
       }
@@ -185,17 +200,32 @@ export function snapshotScript(plan: SnapshotPlan): string {
       var parts = [];
       if (sectionJsx.length > oversizedLimit) {
         var directKids = Array.prototype.slice.call(sectionEl.children || []);
+        var takenNames = {};
         directKids.forEach(function (kid) {
-          var partName = kid.getAttribute('data-framer-name');
-          if (partName) {
-            var partJsx = conv.element(kid);
-            parts.push({ name: partName, jsx: partJsx });
+          var baseName = kid.getAttribute('data-framer-name');
+          if (baseName) {
+            // unique part names: a second "Card" becomes "Card 2"
+            var partName = baseName;
+            var n = 2;
+            while (takenNames[partName]) partName = baseName + ' ' + n++;
+            takenNames[partName] = true;
+            var partInfo = collect(kid);
+            parts.push({
+              name: partName,
+              jsx: conv.element(kid),
+              motion: partInfo.motion,
+              scriptDrawn: partInfo.scriptDrawn,
+              repeated: partInfo.repeated,
+              cmsFields: partInfo.cmsFields,
+              hasVariants: partInfo.hasVariants
+            });
             var partPlaceholder = document.createElement('fexport-part');
             partPlaceholder.setAttribute('data-name', partName);
             sectionEl.replaceChild(partPlaceholder, kid);
           }
         });
         sectionJsx = conv.element(sectionEl);
+        if (parts.length) info = collect(sectionEl); // root only, outside every part
       }
 
       sectionsOut.push({
@@ -203,10 +233,11 @@ export function snapshotScript(plan: SnapshotPlan): string {
         jsx: sectionJsx,
         empty: false,
         parts: parts,
-        motion: motionIds,
-        repeated: repeated,
-        cmsFields: cmsFields,
-        hasVariants: hasVariants
+        motion: info.motion,
+        scriptDrawn: info.scriptDrawn,
+        repeated: info.repeated,
+        cmsFields: info.cmsFields,
+        hasVariants: info.hasVariants
       });
 
       var sectionPlaceholder = document.createElement('fexport-section');
