@@ -59,7 +59,7 @@ export function crop(src: PNG, box: { x: number; y: number; width: number; heigh
 }
 
 /** Copy `src` onto an opaque white canvas of w x h. */
-function pad(src: PNG, w: number, h: number): PNG {
+export function pad(src: PNG, w: number, h: number): PNG {
   if (src.width === w && src.height === h) return src;
   const out = new PNG({ width: w, height: h });
   out.data.fill(255);
