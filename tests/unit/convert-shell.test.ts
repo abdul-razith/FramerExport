@@ -263,3 +263,23 @@ test('findShellSections: multi-line formatted JSX matches single-line JSX', () =
     differences: ['/about: /about'],
   });
 });
+
+test('findShellSections: nav differing only in data-motion / data-script-drawn / data-cms ids is still shell', () => {
+  const pages = [
+    {
+      route: '/',
+      sections: [{ name: 'Navigation', jsx: '<nav data-motion="m1"><a href="/" data-cms="title" data-script-drawn="s1">Home</a></nav>' }],
+    },
+    {
+      route: '/about',
+      sections: [{ name: 'Navigation', jsx: '<nav data-motion="m7 m8"><a href="/" data-cms="name" data-script-drawn="s9">Home</a></nav>' }],
+    },
+    {
+      route: '/contact',
+      sections: [{ name: 'Navigation', jsx: '<nav><a href="/">Home</a></nav>' }],
+    },
+  ];
+  const candidates = findShellSections(pages);
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0], { name: 'Navigation', pages: ['/', '/about', '/contact'], differences: [] });
+});

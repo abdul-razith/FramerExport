@@ -16,6 +16,9 @@ export interface MaskResult {
 
 const TARGET_ATTRS = new Set(['href', 'src', 'alt']);
 
+/** Per-page annotations (unique ids per page); ignored when comparing instances of a shared section. */
+const ANNOTATION_ATTRS = new Set(['data-motion', 'data-script-drawn', 'data-cms']);
+
 /**
  * Normalizes and extracts placeholders from JSX. Replaces text nodes and
  * `href`, `src`, `alt` attribute values with consistent placeholders while
@@ -174,6 +177,7 @@ function parseAndMaskAttrs(attrsStr: string): { templateAttrs: string; tagSlots:
     while (k < attrsStr.length && /\s/.test(attrsStr[k]!)) k++;
 
     if (k >= attrsStr.length || attrsStr[k] !== '=') {
+      if (ANNOTATION_ATTRS.has(attrName.toLowerCase())) continue;
       items.push({
         name: attrName.toLowerCase(),
         templateStr: `${attrName}={true}`,
@@ -247,6 +251,9 @@ function parseAndMaskAttrs(attrsStr: string): { templateAttrs: string; tagSlots:
     }
 
     const lower = attrName.toLowerCase();
+    if (ANNOTATION_ATTRS.has(lower)) {
+      continue;
+    }
     if (TARGET_ATTRS.has(lower)) {
       items.push({
         name: lower,
