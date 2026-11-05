@@ -48,6 +48,16 @@ export async function uiSelect<T extends string | number | boolean>(
   return result as T;
 }
 
+/** Like `uiSelect`, but resolves null on cancel instead of exiting the process. */
+export async function uiSelectOrCancel<T extends string | number | boolean>(
+  message: string,
+  options: { label: string; value: T; hint?: string }[],
+  initialValue?: T
+): Promise<T | null> {
+  const result = await clack.select({ message, options: options as any, initialValue });
+  return isCancelOperation(result) ? null : (result as T);
+}
+
 export async function uiText(
   message: string,
   options?: {

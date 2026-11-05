@@ -1,11 +1,12 @@
 import type { PoolEvent } from '../../convert/runner/pool.js';
 import type { AgentId } from '../../convert/runner/agent-process.js';
 import { createPauseController } from '../../convert/runner/pool.js';
+import { createPauseInput } from '../../convert/runner/pause-input.js';
 import { runAgents, type RunDeps, type RunIo, type RunOutcome } from '../../convert/run.js';
 import { loadState } from '../../convert/state.js';
 import { formatWorkerLine } from '../../convert/progress.js';
 import { setInterruptHandler } from '../../convert/verify/proc.js';
-import { uiIntro, uiNote, uiSelect } from '../ui/prompts.js';
+import { uiIntro, uiNote, uiSelect, uiSelectOrCancel } from '../ui/prompts.js';
 
 interface WorkerState {
   worker: number;
@@ -41,7 +42,6 @@ export async function runScreenConvertAgents(
 
   const pause = createPauseController();
   const workers = new Map<number, WorkerState>();
-  let prompting = false;
   let running = true;
 
   const isTTY = Boolean(process.stdin.isTTY);
@@ -55,25 +55,22 @@ export async function runScreenConvertAgents(
     }
   };
 
-  const promptPause = async () => {
-    if (prompting) return;
-    prompting = true;
-    try {
-      const choice = await uiSelect<'after-running' | 'now'>('Pause conversion:', [
+  const pauseInput = createPauseInput(pause, {
+    ask: () =>
+      uiSelectOrCancel<'after-running' | 'now'>('Pause conversion:', [
         { label: 'Finish running tasks, then pause', value: 'after-running' },
         { label: 'Pause now', value: 'now' },
-      ]);
-      pause.request(choice);
-    } finally {
-      prompting = false;
-      restoreRawMode();
-    }
-  };
+      ]),
+    afterAsk: restoreRawMode,
+    log: (m) => console.log(m),
+  });
 
   const onKey = (data: Buffer) => {
     const key = data.toString('utf8');
-    if (key === 'p' || key === 'P' || key === '\u0003') {
-      void promptPause();
+    if (key === 'p' || key === 'P') {
+      pauseInput.pressP();
+    } else if (key === String.fromCharCode(3)) {
+      pauseInput.interrupt();
     }
   };
 
@@ -85,9 +82,7 @@ export async function runScreenConvertAgents(
     } catch {}
   }
 
-  setInterruptHandler(() => {
-    void promptPause();
-  });
+  setInterruptHandler(() => pauseInput.interrupt());
 
   const io: RunIo = {
     pause,

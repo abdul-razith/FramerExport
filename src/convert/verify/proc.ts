@@ -17,6 +17,11 @@ export function setInterruptHandler(handler: (() => void) | null): void {
   installHandlers();
 }
 
+/** True while a caller has installed an interrupt handler. */
+export function hasInterruptHandler(): boolean {
+  return interruptHandler !== null;
+}
+
 /** A TCP port that was free on 127.0.0.1 a moment ago. */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {

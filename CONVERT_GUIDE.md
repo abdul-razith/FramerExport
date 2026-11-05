@@ -65,7 +65,7 @@ Refactor the generated sections into clean, responsive Tailwind code using eithe
   cd ../your-site-next
   fexport convert run
   ```
-  Runs tasks concurrently in a multi-worker pool. Press `P` or Ctrl+C to pause.
+  Runs tasks concurrently in a multi-worker pool. Press Ctrl+C to pause (see the pause behaviour in section 6).
 
 - **Interactive Conversion Dashboard (recommended):**
   ```bash
@@ -101,7 +101,7 @@ Time is **active working time**: setup, agent runs, checks, and builds. Time you
 | `fexport convert status` | inside converted project | Shows pipeline stage status, task backlog, warnings, time summary, and overall progress. |
 | `fexport convert next` | inside converted project | Shows the next pending task for an AI coding agent (fix tasks first, then shell, section, page). |
 | `fexport convert check <taskId> [--smoke]` | inside converted project | Runs validation checks on a completed task against baseline (exit 0: pass, 1: fail, 2: call limit reached). |
-| `fexport convert run` | inside converted project | Headless AI agent runner pool. Runs tasks concurrently. Press `P` or Ctrl+C to pause. |
+| `fexport convert run` | inside converted project | Headless AI agent runner pool. Runs tasks concurrently. Ctrl+C pauses (section 6). |
 | `fexport convert report [route]` | inside converted project | Generates visual comparison report against the original export (`verify` is an alias). Optional route filters by page. |
 | `fexport convert review <taskId>` | inside converted project | Marks a `needs-review` task as done after human inspection. |
 | `fexport convert ui` | anywhere or inside project | Opens the interactive terminal Conversion Dashboard. |
@@ -164,7 +164,7 @@ Options can be set at conversion start, changed via the Conversion Dashboard ("R
 | Option | CLI flag | Values | Default | Purpose |
 |---|---|---|---|---|
 | `testing` | `--testing on\|off` | `on` / `off` | `on` | Strict verification mode: baseline capture, visual/DOM/motion checks, fix attempts, and report. |
-| `agent` | `--agent agy\|claude` | `agy` / `claude` | first found on PATH | Which agent CLI executable to spawn. |
+| `agent` | `--agent agy\|claude` | `agy` / `claude` | first of agy, claude found on PATH | Which agent CLI executable to spawn. If it cannot be started, the run stops with a message naming the agent. |
 | `concurrency` | `--concurrency 1\|2\|3` | 1, 2, 3 | 1 | Maximum concurrent agent worker processes. |
 | `sectionTimeoutMin` | (options menu) | number | 15 | Hard wall-clock limit in minutes per section task attempt. |
 | `pageTimeoutMin` | (options menu) | number | 15 | Hard wall-clock limit in minutes per page or shell task attempt. |
@@ -197,10 +197,11 @@ The headless runner coordinates an autonomous worker pool:
 - **Scope enforcement with automatic revert:** Before starting a task, the runner snapshots project files. After the task completes, any edits outside the task's allowed targets are reverted and reported, preventing agent stray modifications.
 - **Wall-clock timeouts:** Tasks that exceed `sectionTimeoutMin` or `pageTimeoutMin` are halted and their process trees cleanly terminated (`taskkill /T /F` on Windows, process groups on POSIX).
 - **Graceful and immediate pause:**
-  - Press `P` or Ctrl+C once: finishes currently running tasks, then pauses safely.
-  - Press Ctrl+C twice: pauses immediately.
+  - In a terminal, the first Ctrl+C asks: **Finish running tasks, then pause** or **Pause now**. A second Ctrl+C while the question is open (or cancelling it) pauses immediately.
+  - Without a terminal (output piped, CI): the first Ctrl+C finishes running tasks, then pauses; a second Ctrl+C pauses immediately.
+  - The headless runner has no `P` key; the `P` key works in the dashboard's run screen and asks the same question.
   - Target files of interrupted tasks are backed up to `.convert/partial/<taskId>/<timestamp>/`, restored to clean snapshot state, and reset to `pending`. Completed work is never lost!
-- **Quota resilience & agent switching:** When an agent encounters API rate limits or quota errors (`429`, `RESOURCE_EXHAUSTED`), task dispatch pauses safely and prompts to switch agents (`agy` ↔ `claude`) and resume.
+- **Quota resilience & agent switching:** When an agent encounters API rate limits or quota errors (`429`, `RESOURCE_EXHAUSTED`), task dispatch stops and running tasks finish. The dashboard asks whether to switch to the other agent (`agy` ↔ `claude`) or stay paused. The headless runner switches automatically when the other agent is installed, otherwise it stays paused.
 - **Safe resume:** `.convert/run.lock` stores runner and worker PIDs. Restarting cleanly terminates any stale orphan processes and restarts pending tasks.
 
 ### Interactive Conversion Dashboard (`fexport convert ui`)
@@ -271,7 +272,7 @@ When a section contains complex custom scripts or edge-case layouts that fail ve
 | `Dependencies not installed` | Run `npm install` in the converted project folder. |
 | `Another run is active` / Stale `.convert/run.lock` | A previous runner process crashed or was terminated. Re-running `fexport convert run` automatically detects stale locks, cleans up orphan processes, and resumes. |
 | Dev server port conflict mid-run | The check system automatically detects port conflicts, finds an available free port, and updates `.convert/dev-server.json`. |
-| Quota limit (`429` / `RESOURCE_EXHAUSTED`) | The runner pauses safely. Change agent from `agy` to `claude` (or vice versa) in `fexport convert ui` (or pass `--agent`) and resume. |
+| Quota limit (`429` / `RESOURCE_EXHAUSTED`) | The runner stops dispatching and pauses. Headless `run` switches to the other installed agent on its own; in the dashboard you choose to switch or stay paused. Otherwise change agent in `fexport convert ui` and resume. |
 | Task marked `needs-review` | Section had complex custom scripts or diffs. Inspect the report at `.convert/report/index.html` and accept with `fexport convert review <taskId>`. |
 | A `fix-build-*.md` task appears | `next build` failed during finalize; inspect `.convert/tasks/fix-build-*.md` for the build error tail. |
 | Interrupted mid-task | On next run, interrupted tasks are automatically recovered from clean snapshots without losing already completed tasks. |

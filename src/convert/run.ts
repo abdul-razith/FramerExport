@@ -11,6 +11,7 @@ import {
   type AgentId,
   type QuotaHit,
 } from './runner/agent-process.js';
+import { createPauseInput } from './runner/pause-input.js';
 import { recoverInterrupted } from './runner/interrupt.js';
 import { acquireRunLock, RunActiveError, type RunLock } from './runner/lock.js';
 import {
@@ -25,7 +26,7 @@ import { DEFAULT_OPTIONS, loadState, saveState } from './state.js';
 import type { TaskRecord } from './types.js';
 import { ensureDevServer, type DevServer } from './verify/dev-server.js';
 import { runCheck, type CheckResult } from './verify/check.js';
-import { npmCommand, setInterruptHandler, spawnManaged } from './verify/proc.js';
+import { hasInterruptHandler, npmCommand, setInterruptHandler, spawnManaged } from './verify/proc.js';
 import { runReport } from './verify/report.js';
 
 export type { AgentId, QuotaHit };
@@ -138,6 +139,7 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
   let acquiredLock: RunLock | undefined;
 
   let devServer: DevServer | undefined;
+  let installedInterruptHandler = false;
 
   try {
     const { lock, stale } = await acquireRunLock(resolvedRoot);
@@ -175,9 +177,13 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
     devServer = await devServerFn(resolvedRoot);
     await lock.setDevServer(devServer.pid);
 
-    setInterruptHandler(() => {
-      io.pause.request('now');
-    });
+    // The caller owns Ctrl+C when it installed a handler; otherwise use the no-prompt default
+    // (first Ctrl+C finishes running tasks then pauses, second pauses now).
+    if (!hasInterruptHandler()) {
+      const input = createPauseInput(io.pause, { log: (m) => console.log(m) });
+      setInterruptHandler(() => input.interrupt());
+      installedInterruptHandler = true;
+    }
 
     let finalizeRounds = 0;
     while (true) {
@@ -300,7 +306,7 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
       };
     }
   } finally {
-    setInterruptHandler(null);
+    if (installedInterruptHandler) setInterruptHandler(null);
     if (devServer) {
       await acquiredLock?.setDevServer(null).catch(() => {});
       await devServer.stop().catch(() => {});

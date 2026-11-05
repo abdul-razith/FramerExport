@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { poolCheckOptions, runAgents, type RunDeps, type RunIo, type RunOutcome } from '../../src/convert/run.js';
 import { createPauseController } from '../../src/convert/runner/pool.js';
+import { setInterruptHandler } from '../../src/convert/verify/proc.js';
 import { RunActiveError } from '../../src/convert/runner/lock.js';
 import { DEFAULT_OPTIONS, initState, loadState, saveState } from '../../src/convert/state.js';
 import type { AgentHandle } from '../../src/convert/runner/agent-process.js';
@@ -444,4 +445,71 @@ test('I3b: a failed production build runs the pending fix-build task through the
   assert.equal(finalizeCalls, 2);
   const state = await loadState(root);
   assert.equal(state?.tasks['fix-build']?.status, 'done');
+});
+
+test('I1: runAgents does not overwrite an interrupt handler the caller installed', async () => {
+  const root = await setupProject('claude');
+  const pause = createPauseController();
+  const io: RunIo = { onEvent() {}, pause, onQuota: async () => 'stay' };
+  let callerCalls = 0;
+  setInterruptHandler(() => {
+    callerCalls++;
+  });
+  try {
+    const deps = i2Deps({
+      spawn: () => ({
+        pid: undefined,
+        done: new Promise((resolve) =>
+          setTimeout(() => {
+            process.emit('SIGINT');
+            resolve({ exitCode: 0, timedOut: false, killed: false, quota: null });
+          }, 10)
+        ),
+        kill: async () => {},
+      }),
+      check: async (taskId) => ({
+        taskId,
+        mode: 'full',
+        pass: true,
+        limitReached: false,
+        widths: [],
+        dom: [],
+        code: [],
+        motion: [],
+        errors: [],
+      }),
+    });
+    await runAgents(root, io, deps);
+    assert.equal(callerCalls, 1);
+    assert.equal(pause.mode, 'none');
+    process.emit('SIGINT');
+    assert.equal(callerCalls, 2, 'the caller handler is still installed after the run');
+  } finally {
+    setInterruptHandler(null);
+  }
+});
+
+test('I1: with no caller handler, the default is finish-running-then-pause first, pause-now second', async () => {
+  const root = await setupProject('claude');
+  const pause = createPauseController();
+  const io: RunIo = { onEvent() {}, pause, onQuota: async () => 'stay' };
+  const modes: string[] = [];
+  const deps = i2Deps({
+    spawn: () => ({
+      pid: undefined,
+      done: new Promise((resolve) =>
+        setTimeout(() => {
+          process.emit('SIGINT');
+          modes.push(pause.mode);
+          process.emit('SIGINT');
+          modes.push(pause.mode);
+          resolve({ exitCode: 0, timedOut: false, killed: false, quota: null });
+        }, 10)
+      ),
+      kill: async () => {},
+    }),
+  });
+  const outcome = await runAgents(root, io, deps);
+  assert.deepEqual(modes, ['after-running', 'now']);
+  assert.equal(outcome.status, 'paused');
 });

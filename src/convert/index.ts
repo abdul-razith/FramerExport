@@ -275,21 +275,27 @@ export async function runConvertCommand(
   if (args.command === 'run') {
     const { runAgents } = await import('./run.js');
     const { createPauseController } = await import('./runner/pool.js');
+    const { createPauseInput } = await import('./runner/pause-input.js');
     const { formatWorkerLine } = await import('./progress.js');
     const { setInterruptHandler } = await import('./verify/proc.js');
     const defaultAgentName = await defaultAgent();
     const pause = createPauseController();
-    let ctrlCCount = 0;
-    setInterruptHandler(() => {
-      ctrlCCount++;
-      if (ctrlCCount === 1) {
-        console.log('\nPausing after running tasks... (press Ctrl+C again to pause now)');
-        pause.request('after-running');
-      } else {
-        console.log('\nPausing now...');
-        pause.request('now');
-      }
+    // First Ctrl+C offers "finish running tasks, then pause" / "pause now" on a terminal; without a TTY the
+    // first Ctrl+C finishes running tasks then pauses. A second Ctrl+C always pauses now.
+    let askPause: (() => Promise<'after-running' | 'now' | null>) | undefined;
+    if (isInteractiveTerminal()) {
+      const { uiSelectOrCancel } = await import('../cli-v2/ui/prompts.js');
+      askPause = () =>
+        uiSelectOrCancel<'after-running' | 'now'>('Pause conversion:', [
+          { label: 'Finish running tasks, then pause', value: 'after-running' },
+          { label: 'Pause now', value: 'now' },
+        ]);
+    }
+    const pauseInput = createPauseInput(pause, {
+      log: (m) => console.log(m),
+      ...(askPause ? { ask: askPause } : {}),
     });
+    setInterruptHandler(() => pauseInput.interrupt());
 
     const workers = new Map<number, { worker: number; route: string; section: string; agent: AgentId; startTime: number; lastLine: string }>();
     try {
