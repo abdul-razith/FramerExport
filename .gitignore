@@ -4,6 +4,8 @@ coverage/
 tmp/
 .visor/
 .claude/
+.worktrees/
+.superpowers/
 .DS_Store
 *.log
 *.tgz
