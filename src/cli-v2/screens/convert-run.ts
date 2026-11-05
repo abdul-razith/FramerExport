@@ -11,6 +11,8 @@ export interface ConvertRunOptions {
   /** Print the v2 intro banner (default true). The v2 export flow already printed one. */
   intro?: boolean;
   options?: RunOptions;
+  /** Skip the "Start conversion?" question (the caller already confirmed). */
+  skipConfirm?: boolean;
 }
 
 /** Stages 1-4 of the conversion with the v2 look: summary, confirm, one spinner walking through the stages. */
@@ -31,7 +33,7 @@ export async function runScreenConvertRun(
     ),
     'Convert to Next.js'
   );
-  if (!(await uiConfirm('Start conversion?'))) uiCancelAndExit('Conversion cancelled by user.');
+  if (!opts.skipConfirm && !(await uiConfirm('Start conversion?'))) uiCancelAndExit('Conversion cancelled by user.');
 
   const agents = await detectAgents();
   const defaults: RunOptions = opts.options ?? existing?.options ?? { ...DEFAULT_OPTIONS, agent: agents[0] ?? 'agy' };

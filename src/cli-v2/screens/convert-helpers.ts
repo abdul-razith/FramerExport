@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { rename } from 'node:fs/promises';
 import path from 'node:path';
 import { pickNextTask } from '../../convert/pipeline.js';
 import { formatDuration, startTicker } from '../../convert/progress.js';
@@ -157,4 +158,59 @@ export function tickingMessage(
     },
     stop,
   };
+}
+
+export type ReconvertPrep =
+  | { status: 'renamed'; oldPath: string }
+  | { status: 'cancelled' }
+  | { status: 'error'; message: string };
+
+export interface ReconvertDeps {
+  confirm: (message: string) => Promise<boolean>;
+  rename?: (from: string, to: string) => Promise<void>;
+  exists?: (p: string) => boolean;
+}
+
+/**
+ * Prepares a re-convert: checks the export folder, asks for confirmation, then renames the project to
+ * `<name>.old` (`.old-2`, ...). Nothing is renamed unless every check passed and the user agreed; a failed
+ * rename (EBUSY/EPERM when the shell sits inside the project) becomes a message, not an exception.
+ */
+export async function prepareReconvert(
+  root: string,
+  state: Pick<ConvertState, 'exportDir' | 'exportMissing'>,
+  deps: ReconvertDeps
+): Promise<ReconvertPrep> {
+  const exists = deps.exists ?? existsSync;
+  const doRename = deps.rename ?? rename;
+  if (state.exportMissing || !state.exportDir || !exists(state.exportDir)) {
+    return {
+      status: 'error',
+      message: `The original export folder was not found${state.exportDir ? ` (${state.exportDir})` : ''}. Restore it, then try again.`,
+    };
+  }
+  const baseName = path.basename(root);
+  const parentDir = path.dirname(root);
+  let targetName = `${baseName}.old`;
+  let suffix = 2;
+  while (exists(path.join(parentDir, targetName))) {
+    targetName = `${baseName}.old-${suffix}`;
+    suffix++;
+  }
+  const oldPath = path.join(parentDir, targetName);
+  const ok = await deps.confirm(
+    `Re-convert ${state.exportDir}? The current project will be renamed to ${targetName} and a new one created at ${root}.`
+  );
+  if (!ok) return { status: 'cancelled' };
+  try {
+    await doRename(root, oldPath);
+  } catch (error) {
+    return {
+      status: 'error',
+      message:
+        `Could not rename the project (${(error as Error).message}). ` +
+        'If a terminal or editor is open inside the project folder, change directory out of it and try again.',
+    };
+  }
+  return { status: 'renamed', oldPath };
 }

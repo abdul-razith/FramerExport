@@ -368,3 +368,65 @@ test('I7: getDashboardChoices hides run and resume for a legacy project', () => 
   assert.ok(!values.includes('resume'));
   assert.ok(values.includes('reconvert'));
 });
+
+import { prepareReconvert } from '../../src/cli-v2/screens/convert-helpers.js';
+
+async function reconvertFixture() {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'reconvert-prep-'));
+  const projDir = path.join(dir, 'site-next');
+  const exportDir = path.join(dir, 'site');
+  await mkdirp(projDir);
+  await mkdirp(exportDir);
+  await mkdirp(path.join(dir, 'site-next.old'));
+  return { dir, projDir, exportDir };
+}
+
+test('I8: prepareReconvert asks first and renames nothing when the user declines', async () => {
+  const { projDir, exportDir } = await reconvertFixture();
+  const renames: string[] = [];
+  const res = await prepareReconvert(projDir, { exportDir }, {
+    confirm: async () => false,
+    rename: async (from) => void renames.push(from),
+  });
+  assert.equal(res.status, 'cancelled');
+  assert.deepEqual(renames, []);
+});
+
+test('I8: prepareReconvert refuses without prompting when the export folder is missing', async () => {
+  const { dir, projDir } = await reconvertFixture();
+  let asked = false;
+  const renames: string[] = [];
+  const res = await prepareReconvert(projDir, { exportDir: path.join(dir, 'gone'), exportMissing: true }, {
+    confirm: async () => {
+      asked = true;
+      return true;
+    },
+    rename: async (from) => void renames.push(from),
+  });
+  assert.equal(res.status, 'error');
+  assert.equal(asked, false);
+  assert.deepEqual(renames, []);
+});
+
+test('I8: a failing rename (EBUSY) becomes a message that suggests changing directory, not an exception', async () => {
+  const { projDir, exportDir } = await reconvertFixture();
+  const res = await prepareReconvert(projDir, { exportDir }, {
+    confirm: async () => true,
+    rename: async () => {
+      throw new Error('EBUSY: resource busy or locked');
+    },
+  });
+  assert.equal(res.status, 'error');
+  if (res.status === 'error') assert.match(res.message, /EBUSY[\s\S]*change directory/);
+});
+
+test('I8: prepareReconvert renames to the first free .old name', async () => {
+  const { dir, projDir, exportDir } = await reconvertFixture();
+  const moves: Array<[string, string]> = [];
+  const res = await prepareReconvert(projDir, { exportDir }, {
+    confirm: async () => true,
+    rename: async (from, to) => void moves.push([from, to]),
+  });
+  assert.deepEqual(res, { status: 'renamed', oldPath: path.join(dir, 'site-next.old-2') });
+  assert.deepEqual(moves, [[projDir, path.join(dir, 'site-next.old-2')]]);
+});

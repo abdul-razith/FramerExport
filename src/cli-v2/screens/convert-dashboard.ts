@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs';
-import { rename } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { readAnimations, readTaskGoal } from '../../convert/index.js';
@@ -9,10 +8,11 @@ import { DEFAULT_OPTIONS, findProjectRoot, loadState, saveState } from '../../co
 import { detectAgents } from '../../convert/runner/agent-process.js';
 import { runReport } from '../../convert/verify/report.js';
 import { type RunOptions } from '../../convert/types.js';
-import { uiIntro, uiNote, uiOutro, uiSelect, uiSpinner, uiText } from '../ui/prompts.js';
+import { uiConfirm, uiIntro, uiNote, uiOutro, uiSelect, uiSpinner, uiText } from '../ui/prompts.js';
 import {
   STAGE_LABELS,
   getDashboardChoices,
+  prepareReconvert,
   type DashboardAction,
 } from './convert-helpers.js';
 import { runScreenConvertAgents } from './convert-agents.js';
@@ -167,18 +167,13 @@ export async function runScreenConvertDashboard(
       await saveState(state);
       uiNote('Run options saved.', 'Run Options');
     } else if (action === 'reconvert') {
-      const baseName = path.basename(root);
-      const parentDir = path.dirname(root);
-      let targetName = `${baseName}.old`;
-      let suffix = 2;
-      while (existsSync(path.join(parentDir, targetName))) {
-        targetName = `${baseName}.old-${suffix}`;
-        suffix++;
+      const prep = await prepareReconvert(root, state, { confirm: (m) => uiConfirm(m, false) });
+      if (prep.status === 'error') {
+        uiNote(prep.message, 'Reconvert');
+      } else if (prep.status === 'renamed') {
+        uiNote(`Renamed existing project to ${path.basename(prep.oldPath)}`, 'Reconvert');
+        await runScreenConvertRun(state.exportDir, root, { intro: false, skipConfirm: true });
       }
-      const oldPath = path.join(parentDir, targetName);
-      await rename(root, oldPath);
-      uiNote(`Renamed existing project to ${targetName}`, 'Reconvert');
-      await runScreenConvertRun(state.exportDir, root, { intro: false });
     }
     // 'refresh' falls through: next pass reloads state.
   }
