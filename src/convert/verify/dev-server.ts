@@ -1,6 +1,8 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { commandLineOf } from '../runner/lock.js';
+import { writeFileAtomic } from '../state.js';
 import {
   freePort,
   isPidAlive,
@@ -47,8 +49,14 @@ function trackSpawnError(child: ChildProcess): () => Error | null {
   return () => error;
 }
 
-/** Probe GET url; resolves true on any HTTP response, false on connection refusal/timeout. */
-async function probeServer(url: string, timeoutMs = 500): Promise<boolean> {
+/** Default probe timeout: a busy `next dev` can take seconds to answer while it compiles. */
+export const PROBE_TIMEOUT_MS = 10_000;
+const PROBE_ATTEMPTS = 3;
+
+export type ProbeResult = 'ok' | 'refused' | 'timeout';
+
+/** Probe GET url once; any HTTP response is 'ok', a timeout is 'timeout', anything else is 'refused'. */
+async function probeOnce(url: string, timeoutMs: number): Promise<ProbeResult> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     try {
@@ -56,10 +64,56 @@ async function probeServer(url: string, timeoutMs = 500): Promise<boolean> {
     } catch {
       // ignore
     }
-    return true;
-  } catch {
-    return false;
+    return 'ok';
+  } catch (err: any) {
+    const name = err?.name ?? err?.cause?.name;
+    return name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'refused';
   }
+}
+
+/** Probe with retries on timeout (server busy compiling); a refused connection is final. */
+export async function probeServer(
+  url: string,
+  timeoutMs = PROBE_TIMEOUT_MS,
+  attempts = PROBE_ATTEMPTS
+): Promise<ProbeResult> {
+  let last: ProbeResult = 'refused';
+  for (let i = 0; i < attempts; i++) {
+    last = await probeOnce(url, timeoutMs);
+    if (last !== 'timeout') return last;
+  }
+  return last;
+}
+
+const WORD = '(^|[^a-z0-9_-])';
+const END = '([^a-z0-9_-]|$)';
+
+/** Only a process whose command line is a Next dev server (or the npm wrapper running it) may be killed. */
+function looksLikeDevServer(cmd: string | null): boolean {
+  if (!cmd) return false;
+  const lower = cmd.toLowerCase();
+  if (new RegExp(WORD + 'next' + END).test(lower) && new RegExp(WORD + 'dev' + END).test(lower)) return true;
+  // The recorded pid is the npm wrapper, whose command line is `npm run dev -- -p <port>`.
+  return new RegExp(WORD + 'npm(\\.cmd)?' + END + '.*' + WORD + 'run\\s+dev' + END).test(lower);
+}
+
+/**
+ * Resolve the URL checks should use. When `devUrl` refuses connections (the dev server was restarted on a
+ * new port) the recorded `.convert/dev-server.json` is re-read; otherwise `devUrl` is returned unchanged.
+ */
+export async function resolveDevUrl(
+  nextDir: string,
+  devUrl: string,
+  opts?: { probeTimeoutMs?: number }
+): Promise<string> {
+  const timeoutMs = opts?.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
+  const first = await probeServer(devUrl, timeoutMs);
+  if (first !== 'refused') return devUrl;
+  const info = await readDevServerInfo(devServerJsonPath(nextDir));
+  if (!info || !isPidAlive(info.pid)) return devUrl;
+  const recorded = `http://127.0.0.1:${info.port}`;
+  if (recorded === devUrl.replace(/\/$/, '')) return devUrl;
+  return (await probeServer(recorded, timeoutMs)) === 'refused' ? devUrl : recorded;
 }
 
 async function readDevServerInfo(filePath: string): Promise<DevServerInfo | null> {
@@ -83,27 +137,48 @@ async function readDevServerInfo(filePath: string): Promise<DevServerInfo | null
  *   (managed by `spawnManaged`, or detached and unref'd when `keepAlive`).
  * - Waits for any HTTP answer (poll `http://127.0.0.1:<port>/`), writes `.convert/dev-server.json`.
  */
-export async function ensureDevServer(
-  nextDir: string,
-  opts?: { keepAlive?: boolean; readyTimeoutMs?: number /* default 120_000 */ }
-): Promise<DevServer> {
+export interface EnsureDevServerOptions {
+  keepAlive?: boolean;
+  readyTimeoutMs?: number /* default 120_000 */;
+  probeTimeoutMs?: number /* default 10_000 */;
+}
+
+const ensureLocks = new Map<string, Promise<unknown>>();
+
+/** Serialize concurrent callers per project so two first calls never start two servers. */
+export async function ensureDevServer(nextDir: string, opts?: EnsureDevServerOptions): Promise<DevServer> {
+  const key = path.resolve(nextDir);
+  const prev = ensureLocks.get(key) ?? Promise.resolve();
+  const run = prev.catch(() => {}).then(() => ensureDevServerLocked(nextDir, opts));
+  ensureLocks.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (ensureLocks.get(key) === run) ensureLocks.delete(key);
+  }
+}
+
+async function ensureDevServerLocked(nextDir: string, opts?: EnsureDevServerOptions): Promise<DevServer> {
   const infoPath = devServerJsonPath(nextDir);
   const existing = await readDevServerInfo(infoPath);
 
   if (existing) {
     const alive = isPidAlive(existing.pid);
     if (alive) {
-      const answers = await probeServer(`http://127.0.0.1:${existing.port}/`, 500);
-      if (answers) {
+      const answers = await probeServer(`http://127.0.0.1:${existing.port}/`, opts?.probeTimeoutMs);
+      if (answers === 'ok') {
         return {
           url: `http://127.0.0.1:${existing.port}`,
           pid: existing.pid,
           stop: () => stopDevServer(nextDir)
         };
       }
+      // Pids are reused quickly on Windows: only kill a process that is verifiably a dev server.
+      if (looksLikeDevServer(await commandLineOf(existing.pid))) {
+        await killPidTree(existing.pid).catch(() => {});
+      }
     }
-    // Dev server died, is unresponsive, or its port was taken
-    await killPidTree(existing.pid).catch(() => {});
+    // Dev server died, did not answer, or its port was taken
     await rm(infoPath, { force: true }).catch(() => {});
   }
 
@@ -168,7 +243,7 @@ export async function ensureDevServer(
       const details = log ? `.\n${log.slice(-4000)}` : '.';
       throw new Error(`dev server exited before becoming ready (code ${child.exitCode})${details}`);
     }
-    ready = await probeServer(url + '/', 500);
+    ready = (await probeOnce(url + '/', 500)) === 'ok';
     if (ready) break;
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -187,7 +262,7 @@ export async function ensureDevServer(
     port,
     startedAt: new Date().toISOString()
   };
-  await writeFile(infoPath, JSON.stringify(devServerInfo, null, 2), 'utf8');
+  await writeFileAtomic(infoPath, JSON.stringify(devServerInfo, null, 2));
 
   return {
     url,

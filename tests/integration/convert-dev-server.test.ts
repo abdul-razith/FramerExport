@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { ensureDevServer, stopDevServer, type DevServer } from '../../src/convert/verify/dev-server.js';
+import { spawn } from 'node:child_process';
+import { ensureDevServer, resolveDevUrl, stopDevServer, type DevServer } from '../../src/convert/verify/dev-server.js';
 import { isPidAlive, killPidTree, stopAllManaged } from '../../src/convert/verify/proc.js';
 
 const tmps: string[] = [];
@@ -16,7 +17,9 @@ after(async () => {
   }
 });
 
-async function createStandInProject(opts: { exitCode?: number; answers500?: boolean } = {}): Promise<string> {
+async function createStandInProject(
+  opts: { exitCode?: number; answers500?: boolean; slow?: boolean } = {}
+): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'convert dev '));
   tmps.push(dir);
   await writeFile(
@@ -32,6 +35,20 @@ async function createStandInProject(opts: { exitCode?: number; answers500?: bool
   let script: string;
   if (typeof opts.exitCode === 'number') {
     script = `process.exit(${opts.exitCode});\n`;
+  } else if (opts.slow) {
+    // Delays "/" while `slow-all` exists; delays only the next request while `slow-once` exists (consumed).
+    script = `import http from 'node:http';
+import fs from 'node:fs';
+const pIdx = process.argv.indexOf('-p');
+const port = pIdx !== -1 ? Number(process.argv[pIdx + 1]) : 3000;
+const srv = http.createServer((req, res) => {
+  let delay = 0;
+  if (fs.existsSync('slow-all')) delay = 700;
+  else if (fs.existsSync('slow-once')) { fs.unlinkSync('slow-once'); delay = 700; }
+  setTimeout(() => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok'); }, delay);
+});
+srv.listen(port, '127.0.0.1');
+`;
   } else if (opts.answers500) {
     script = `import http from 'node:http';
 const pIdx = process.argv.indexOf('-p');
@@ -222,4 +239,60 @@ test('ensureDevServer fails fast when dev script exits before becoming ready', a
     () => ensureDevServer(dir, { readyTimeoutMs: 5000 }),
     /dev server exited before becoming ready \(code 42\)/
   );
+});
+
+test('C1: a healthy but busy dev server (slow answer) is reused, not killed', async () => {
+  const dir = await createStandInProject({ slow: true });
+  const s1 = await ensureDevServer(dir);
+  await writeFile(path.join(dir, 'slow-all'), '');
+  const s2 = await ensureDevServer(dir, { probeTimeoutMs: 3000 });
+  assert.equal(s2.pid, s1.pid, 'busy server must be reused');
+  assert.equal(isPidAlive(s1.pid), true);
+  await rm(path.join(dir, 'slow-all'), { force: true });
+  await s1.stop();
+});
+
+test('C1: a probe timeout is retried and a later fast answer keeps the server', async () => {
+  const dir = await createStandInProject({ slow: true });
+  const s1 = await ensureDevServer(dir);
+  await writeFile(path.join(dir, 'slow-once'), '');
+  const s2 = await ensureDevServer(dir, { probeTimeoutMs: 300 });
+  assert.equal(s2.pid, s1.pid);
+  await s1.stop();
+});
+
+test('C1: resolveDevUrl follows dev-server.json after a restart on a new port', async () => {
+  const dir = await createStandInProject();
+  const s1 = await ensureDevServer(dir);
+  const stale = 'http://127.0.0.1:1';
+  assert.equal(await resolveDevUrl(dir, stale), s1.url, 'refused devUrl falls back to the recorded server');
+  assert.equal(await resolveDevUrl(dir, s1.url), s1.url, 'a reachable devUrl is kept');
+  await s1.stop();
+  assert.equal(await resolveDevUrl(dir, stale), stale, 'no recorded server: keep devUrl');
+});
+
+test('I10: an unrelated live pid recorded in dev-server.json is not killed', async () => {
+  const dir = await createStandInProject();
+  const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    await mkdir(path.join(dir, '.convert'), { recursive: true });
+    await writeFile(
+      path.join(dir, '.convert', 'dev-server.json'),
+      JSON.stringify({ pid: other.pid, port: 1, startedAt: new Date().toISOString() })
+    );
+    const s = await ensureDevServer(dir);
+    assert.notEqual(s.pid, other.pid);
+    assert.equal(isPidAlive(other.pid!), true, 'unrelated process must survive');
+    await s.stop();
+  } finally {
+    await killPidTree(other.pid!);
+  }
+});
+
+test('I1: concurrent first calls start one server', async () => {
+  const dir = await createStandInProject();
+  const [a, b] = await Promise.all([ensureDevServer(dir), ensureDevServer(dir)]);
+  assert.equal(a.pid, b.pid);
+  assert.equal(a.url, b.url);
+  await a.stop();
 });
