@@ -137,6 +137,7 @@ test('page without detected sections: task and verify share one `page` section o
     if (prev === undefined) delete process.env.FEXPORT_CONVERT_NO_ANIMATIONS;
     else process.env.FEXPORT_CONVERT_NO_ANIMATIONS = prev;
   }
-  const task = await readFile(path.join(nextDir, '.convert', 'tasks', '101-page-home.md'), 'utf8');
-  assert.match(task, /`page`: `data-section="page"` on the root element/);
+  const task = await readFile(path.join(nextDir, '.convert', 'tasks', 'sec-home-page.md'), 'utf8');
+  assert.match(task, /section page/);
+  assert.match(task, /data-section/);
 });

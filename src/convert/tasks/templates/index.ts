@@ -50,19 +50,25 @@ export function resolveCliInvocation(opts: { argv1?: string; env?: NodeJS.Proces
 
 export const CLI_INVOCATION = resolveCliInvocation({ argv1: process.argv[1], env: process.env });
 
+export function checkCommand(taskId: string, testing: boolean): string {
+  return `${CLI_INVOCATION} check ${taskId}${testing ? '' : ' --smoke'}`;
+}
+
 export const SHARED_RULES = [
-  '- Edit only the files listed under "Edit only".',
-  '- Tailwind classes only; arbitrary values (e.g. `w-[342px]`) are allowed.',
-  '- No inline `style` attributes, except for motion values.',
-  '- Server components by default; add `"use client"` only for motion or interaction.',
-  "- Never import from or copy the original export's scripts.",
+  '- Edit only the listed targets (a target ending in `/` allows new files inside that directory).',
+  '- Tailwind utilities (arbitrary values allowed); no `framer-` class names; no inline `style` except motion values and CSS custom properties.',
+  '- Keep the root `data-section` attribute and every `data-motion` attribute.',
+  "- Keep `img` elements' `src`, `srcSet`, `sizes` and `alt` (plain `img`, not `next/image`).",
+  '- Use `src/lib/motion.ts` / `src/lib/gsap.ts`; framer-motion for appear and hover, GSAP ScrollTrigger for scroll-linked motion. Under `?__verify=1` everything renders in its finished state.',
+  '- **Never run `npm run build`, `next dev`, `next start` or `npm install`.**',
+  '- Testing on: check with `fexport convert check <taskId>`; testing off: `fexport convert check <taskId> --smoke`. Stop when it passes or when it says the limit is reached.',
 ].join('\n');
 
 export const TEMPLATES = {
-  component: `# Task {{taskId}}: rebuild component {{name}}
+  shell: `# Task {{taskId}}: shell component {{name}}
 
 ## Goal
-Rebuild the Framer component \`{{name}}\` as a React component that is visually identical to the original at 1440, 1000 and 390 px wide.
+Rebuild the shared shell component \`{{name}}\` as a clean, responsive Tailwind React component, visually identical to the original at 1440, 1000 and 390 px wide.
 
 ## Edit only
 {{targets}}
@@ -71,24 +77,19 @@ Rebuild the Framer component \`{{name}}\` as a React component that is visually 
 {{inputs}}
 
 ## Requirements
-- Export a named React component \`{{name}}\` from the target file.
-- Match layout, spacing, typography, colors and borders of the slice and the reference crops at every width.
-- Props (one value per Framer variant):
-{{props}}
-- Used on pages: {{pages}}.
-- Replace Framer's generated class names with Tailwind utilities; use the design tokens from \`src/app/globals.css\`.
+{{requirements}}
 
 ## Rules
 {{rules}}
 
 ## Done when
-Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes: the target file exists and the app builds. Pixel parity is checked through the page tasks that use this component (the reference crops above are your visual target).
+{{doneWhen}}
 `,
 
-  shell: `# Task {{taskId}}: site shell
+  section: `# Task {{taskId}}: section {{name}}
 
 ## Goal
-Build once the parts that every page shares (navigation, footer, loader, cursor, smooth scroll) so the page tasks can reuse them instead of rebuilding them.
+Refactor this section to clean Tailwind utilities with the same look at 1440, 1000 and 390 px wide, plus its animations and script-drawn parts.
 
 ## Edit only
 {{targets}}
@@ -97,22 +98,19 @@ Build once the parts that every page shares (navigation, footer, loader, cursor,
 {{inputs}}
 
 ## Requirements
-- Export each shared part below as a named React component from the target file, visually identical to the original at 1440, 1000 and 390 px wide.
-- Shared sections (they appear on two or more pages):
-{{shared}}
-- Keep the root element of each part stable so the page tasks can wrap it in its \`data-section\`.
+{{requirements}}
 
 ## Rules
 {{rules}}
 
 ## Done when
-Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes: the target file exists and the app builds.
+{{doneWhen}}
 `,
 
-  page: `# Task {{taskId}}: rebuild page {{route}}
+  page: `# Task {{taskId}}: page {{route}}
 
 ## Goal
-Rebuild the page for route \`{{route}}\` so it is visually identical to the original at 1440, 1000 and 390 px wide.
+Rebuild the view and page-level layout for route \`{{route}}\` so it renders its sections in order using clean Tailwind wrappers, matching the original at 1440, 1000 and 390 px wide.
 
 ## Edit only
 {{targets}}
@@ -121,40 +119,13 @@ Rebuild the page for route \`{{route}}\` so it is visually identical to the orig
 {{inputs}}
 
 ## Requirements
-- Fill in the default export of the target file; keep the existing \`metadata\` export.
-- Render these top-level sections in order, each root element carrying its \`data-section\` attribute:
-{{sections}}
-{{components}}
-{{dynamic}}
-- Match layout, spacing, typography and colors of the reference screenshots at every width.
+{{requirements}}
 
 ## Rules
 {{rules}}
 
 ## Done when
-Run \`${CLI_INVOCATION} verify {{taskId}}\` and confirm it passes.
-`,
-
-  motion: `# Task {{taskId}}: motion for {{route}}
-
-## Goal
-Recreate the observed animations of route \`{{route}}\` so they play the same way as in the original.
-
-## Edit only
-{{targets}}
-
-## Inputs
-{{inputs}}
-
-## Requirements
-Implement each animation below (framer-motion is available); entries marked low confidence need a visual check against the original.
-{{checklist}}
-
-## Rules
-{{rules}}
-
-## Done when
-Tick every item in the checklist above, then run \`${CLI_INVOCATION} done {{taskId}}\`.
+{{doneWhen}}
 `,
 
   fix: `# Fix {{taskId}} (attempt {{attempt}})
@@ -166,7 +137,7 @@ Fix the failed verification below so the original task passes.
 {{targets}}
 
 ## Inputs
-Failures from the last verify run:
+Failures from the last check run:
 
 {{failures}}
 
@@ -183,25 +154,26 @@ Failures from the last verify run:
 
   agents: `# Agent guide
 
-This project is a Next.js rebuild of a Framer export, generated by \`fexport convert\`. The converter scaffolded the app; you rebuild components, pages and animations by working through numbered task files.
+This project is a Next.js rebuild of a Framer export, generated by \`fexport convert\`.
 
 Original export: \`{{exportDir}}\`
 
 ## Stack
 - Next.js (App Router) with React server components, TypeScript
 - Tailwind CSS v4 (tokens in \`src/app/globals.css\`)
-- framer-motion / gsap / lenis for motion
+- framer-motion / GSAP ScrollTrigger for motion
 
 ## Workflow
-Task files live in \`.convert/tasks/\`. Components come first (001+), then pages (101+), then motion (201+).
-
-Install dependencies once before the first verify: \`npm install\`.
+Task files live in \`.convert/tasks/\`.
+- Shell tasks run first (\`shell-*\`).
+- Section tasks run in parallel (\`sec-*\`).
+- Page tasks run once their sections are complete (\`page-*\`).
 
 - \`${CLI_INVOCATION} status\` shows every task and its state.
 - \`${CLI_INVOCATION} next\` prints the next task to do.
-- \`${CLI_INVOCATION} verify <taskId>\` checks your work against the original; failed attempts produce \`fix-*.md\` task files.
+- \`${CLI_INVOCATION} check <taskId>\` checks your work.
 
-Do one task at a time: open the task file, edit only the files it lists, then run its verify command.
+Do one task at a time: open the task file, edit only the files listed under "Edit only", then run its check command.
 
 ## Rules
 {{rules}}

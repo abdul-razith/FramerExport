@@ -1,276 +1,378 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile, mkdir, access } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
-import { countMatches } from '../../src/convert/adapters/framer/components.js';
-import { framerAdapter } from '../../src/convert/adapters/framer/index.js';
-import { initState, loadState } from '../../src/convert/state.js';
-import { runAnalyze } from '../../src/convert/stages/analyze.js';
-import { runExtractCms } from '../../src/convert/stages/extract-cms.js';
-import { runScaffold } from '../../src/convert/stages/scaffold/index.js';
-import { renderTemplate, runTasks } from '../../src/convert/stages/tasks.js';
-import { TEMPLATES } from '../../src/convert/tasks/templates/index.js';
-import type { AnimationEntry, ComponentInfo } from '../../src/convert/types.js';
+import { initState, loadState, DEFAULT_OPTIONS } from '../../src/convert/state.js';
+import { renderTemplate, renderTaskFiles, runTasks, checkCommand } from '../../src/convert/stages/tasks.js';
+import { SHARED_RULES, TEMPLATES, CLI_INVOCATION } from '../../src/convert/tasks/templates/index.js';
+import type { GeneratedManifest } from '../../src/convert/generate/manifest.js';
+import type { StageContext } from '../../src/convert/adapters/types.js';
 
-const fixture = path.resolve('tests/fixtures/framer-nudge-mini');
 const tmps: string[] = [];
 after(async () => {
   for (const d of tmps) await rm(d, { recursive: true, force: true });
 });
 
-async function prepare(base = os.tmpdir()) {
-  const nextDir = await mkdtemp(path.join(base, 'fexport tasks '));
-  tmps.push(nextDir);
-  const ctx = { state: initState(fixture, nextDir), exportDir: fixture, nextDir, log: () => {} };
-  await runAnalyze(ctx, framerAdapter, { animations: false });
-  await runExtractCms(ctx);
-  await runScaffold(ctx);
-  return ctx;
+async function makeContext(): Promise<StageContext> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'fexport tasks '));
+  tmps.push(root);
+  const nextDir = path.join(root, 'next');
+  const exportDir = path.join(root, 'export');
+  return {
+    state: initState(exportDir, nextDir),
+    exportDir,
+    nextDir,
+    log: () => {},
+  };
 }
 
-const motion: AnimationEntry = {
-  route: '/about',
-  selector: '.framer-abc',
-  framerName: 'Hero Title',
-  trigger: 'appear',
-  from: { opacity: '0', y: '40px' },
-  to: { opacity: '1', y: '0px' },
-  durationMs: 600,
-  confidence: 'high',
+const sampleManifest: GeneratedManifest = {
+  version: 1,
+  shell: [
+    {
+      name: 'Navigation',
+      component: 'Navigation',
+      file: 'src/components/shell/Navigation.tsx',
+      pages: ['/'],
+      differences: [],
+    },
+  ],
+  pages: [
+    {
+      route: '/',
+      slug: 'home',
+      view: 'src/views/home.tsx',
+      sections: [
+        {
+          name: 'Hero',
+          component: 'Hero',
+          file: 'src/sections/home/Hero.tsx',
+          parts: [],
+          motion: ['m2'],
+          scriptDrawn: ['sd-1'],
+          hasVariants: true,
+          repeated: ['ProjectCard'],
+          cmsFields: [],
+        },
+        {
+          name: 'About',
+          component: 'About',
+          file: 'src/sections/home/About.tsx',
+          parts: [],
+          motion: [],
+          scriptDrawn: [],
+          hasVariants: false,
+          repeated: [],
+          cmsFields: [],
+        },
+      ],
+      inline: ['empty-sec'],
+      shell: ['Navigation'],
+    },
+    {
+      route: '/blog/[slug]',
+      slug: 'blog-slug',
+      view: 'src/views/blog-slug.tsx',
+      dynamic: {
+        collection: 'blog',
+        firstSlug: 'first-post',
+      },
+      sections: [
+        {
+          name: 'Detail',
+          component: 'Detail',
+          file: 'src/sections/blog-slug/Detail.tsx',
+          parts: [],
+          motion: [],
+          scriptDrawn: [],
+          hasVariants: false,
+          repeated: [],
+          cmsFields: ['title', 'body'],
+        },
+      ],
+      inline: [],
+      shell: [],
+    },
+  ],
+  motion: [
+    {
+      id: 'm2',
+      route: '/',
+      section: 'Hero',
+      matched: true,
+      entry: {
+        route: '/',
+        selector: '.comment-box',
+        framerName: 'Comment',
+        trigger: 'scroll',
+        durationMs: 1300,
+        from: { opacity: '0' },
+        to: { opacity: '1' },
+        confidence: 'high',
+      },
+    },
+    {
+      id: 'm3',
+      route: '/',
+      section: null,
+      matched: false,
+      entry: {
+        route: '/',
+        selector: '.missing-anchor',
+        framerName: 'UnanchoredFloatingCard',
+        trigger: 'appear',
+        from: { opacity: '0' },
+        to: { opacity: '1' },
+        confidence: 'low',
+      },
+    },
+  ],
+  scriptDrawn: [
+    {
+      id: 'sd-1',
+      route: '/',
+      section: 'Hero',
+      box: { x: 0, y: 0, width: 100, height: 20 },
+      sample: '12:00:00',
+      count: 1,
+      ticking: true,
+    },
+  ],
+  stubs: [],
+  warnings: [],
 };
 
-let shared: Awaited<ReturnType<typeof prepare>> & { records?: Awaited<ReturnType<typeof runTasks>> };
-async function ran() {
-  if (!shared) {
-    shared = await prepare();
-    await writeFile(path.join(shared.nextDir, '.convert/analysis/animations.json'), JSON.stringify([motion]));
-    shared.records = await runTasks(shared, { mode: 'component-first' });
-  }
-  return shared as typeof shared & { records: Awaited<ReturnType<typeof runTasks>> };
-}
 const read = (ctx: { nextDir: string }, rel: string) => readFile(path.join(ctx.nextDir, rel), 'utf8');
-const HEADINGS = ['## Goal', '## Edit only', '## Inputs', '## Requirements', '## Rules', '## Done when'];
+
+test('TEMPLATES keys are exactly shell, section, page, fix, agents (component and motion removed)', () => {
+  const keys = Object.keys(TEMPLATES).sort();
+  assert.deepEqual(keys, ['agents', 'fix', 'page', 'section', 'shell']);
+});
+
+test('checkCommand produces CLI check command with --smoke when testing is false', () => {
+  assert.equal(checkCommand('sec-home-hero', true), `${CLI_INVOCATION} check sec-home-hero`);
+  assert.equal(checkCommand('sec-home-hero', false), `${CLI_INVOCATION} check sec-home-hero --smoke`);
+});
 
 test('renderTemplate substitutes and throws on unreplaced', () => {
   assert.throws(() => renderTemplate('fix', {}), /unreplaced/);
   const out = renderTemplate('fix', {
-    taskId: 'fix-001', attempt: '2', targets: '- `a.tsx`', failures: 'boom', doneWhen: 'run it', rules: 'R',
+    taskId: 'fix-001',
+    attempt: '2',
+    targets: '- `a.tsx`',
+    failures: 'boom',
+    doneWhen: 'run it',
+    rules: 'R',
   });
   assert.match(out, /fix-001/);
   assert.doesNotMatch(out, /\{\{/);
 });
 
-test('task ids unique and sorted, kinds numbered', async () => {
-  const { records } = await ran();
+test('SHARED_RULES contains spec 6.3 verbatim bullets', () => {
+  assert.match(SHARED_RULES, /Edit only the listed targets \(a target ending in `\/` allows new files inside that directory\)\./);
+  assert.match(SHARED_RULES, /Tailwind utilities \(arbitrary values allowed\); no `framer-` class names; no inline `style` except motion values and CSS custom properties\./);
+  assert.match(SHARED_RULES, /Keep the root `data-section` attribute and every `data-motion` attribute\./);
+  assert.match(SHARED_RULES, /Keep `img` elements' `src`, `srcSet`, `sizes` and `alt` \(plain `img`, not `next\/image`\)\./);
+  assert.match(SHARED_RULES, /Use `src\/lib\/motion\.ts` \/ `src\/lib\/gsap\.ts`; framer-motion for appear and hover, GSAP ScrollTrigger for scroll-linked motion\. Under `\?__verify=1` everything renders in its finished state\./);
+  assert.match(SHARED_RULES, /\*\*Never run `npm run build`, `next dev`, `next start` or `npm install`\.\*\*/);
+  assert.match(SHARED_RULES, /Testing on: check with `fexport convert check <taskId>`; testing off: `fexport convert check <taskId> --smoke`\. Stop when it passes or when it says the limit is reached\./);
+});
+
+test('runTasks creates records with correct ids, kinds, targets, dependsOn, no task for inline section', async () => {
+  const ctx = await makeContext();
+  const records = await runTasks(ctx, sampleManifest);
+
   const ids = records.map((r) => r.id);
-  assert.equal(new Set(ids).size, ids.length);
-  assert.deepEqual(ids, [...ids].sort());
-  assert.match(ids[0]!, /^001-component-/);
-  assert.ok(ids.some((i) => i === '101-page-home'));
-  assert.ok(ids.includes('102-page-about'));
-  assert.ok(ids.includes('201-motion-about'));
-  const pages = records.filter((r) => r.kind === 'page');
-  assert.equal(pages[0]!.route, '/');
-  assert.deepEqual(pages[0]!.targets, ['src/app/page.tsx']);
-  assert.ok(pages.some((p) => p.targets[0] === 'src/app/blog/[slug]/page.tsx'));
+  assert.deepEqual(ids, [
+    'shell-navigation',
+    'sec-home-hero',
+    'sec-home-about',
+    'sec-blog-slug-detail',
+    'page-home',
+    'page-blog-slug',
+  ]);
+
+  // No task for empty inline section
+  assert.equal(ids.includes('empty-sec'), false);
+  assert.equal(ids.some((id) => id.includes('empty')), false);
+
+  // Shell task
+  const nav = records.find((r) => r.id === 'shell-navigation')!;
+  assert.equal(nav.kind, 'shell');
+  assert.deepEqual(nav.targets, ['src/components/shell/Navigation.tsx', 'src/components/shell/Navigation/']);
+  assert.deepEqual(nav.dependsOn, []);
+
+  // Section tasks depend on all shell task ids
+  const hero = records.find((r) => r.id === 'sec-home-hero')!;
+  assert.equal(hero.kind, 'section');
+  assert.deepEqual(hero.targets, ['src/sections/home/Hero.tsx', 'src/sections/home/Hero/']);
+  assert.deepEqual(hero.dependsOn, ['shell-navigation']);
+
+  const about = records.find((r) => r.id === 'sec-home-about')!;
+  assert.equal(about.kind, 'section');
+  assert.deepEqual(about.targets, ['src/sections/home/About.tsx', 'src/sections/home/About/']);
+  assert.deepEqual(about.dependsOn, ['shell-navigation']);
+
+  // Page task depends on its section ids and used shell ids
+  const pageHome = records.find((r) => r.id === 'page-home')!;
+  assert.equal(pageHome.kind, 'page');
+  assert.deepEqual(pageHome.targets, ['src/views/home.tsx', 'src/components/page/home/']);
+  assert.deepEqual(pageHome.dependsOn, ['sec-home-hero', 'sec-home-about', 'shell-navigation']);
+
+  const pageBlog = records.find((r) => r.id === 'page-blog-slug')!;
+  assert.equal(pageBlog.kind, 'page');
+  assert.deepEqual(pageBlog.targets, ['src/views/blog-slug.tsx', 'src/components/page/blog-slug/']);
+  assert.deepEqual(pageBlog.dependsOn, ['sec-blog-slug-detail']);
+
+  // State stage updated to 'done'
+  assert.equal(ctx.state.stages.tasks, 'done');
 });
 
-test('atoms first: components with fewer descendant components come first', async () => {
-  const ctx = await ran();
-  const comps = JSON.parse(await read(ctx, '.convert/analysis/components.json')) as ComponentInfo[];
-  const order = ctx.records.filter((r) => r.kind === 'component').map((r) => r.id.replace(/^\d+-component-/, ''));
-  assert.equal(order.length, comps.length);
-  assert.deepEqual(new Set(order), new Set(comps.map((c) => c.name)));
-  const weight = new Map<string, number>();
-  for (const c of comps) {
-    const html = await read(ctx, c.slice);
-    weight.set(c.name, comps.filter((o) => o.name !== c.name && countMatches(html, o.selector) > 0).length);
-  }
-  const ws = order.map((n) => weight.get(n)!);
-  assert.deepEqual(ws, [...ws].sort((a, b) => a - b));
-  for (let i = 1; i < order.length; i++) if (ws[i] === ws[i - 1]) assert.ok(order[i - 1]! < order[i]!);
+test('section file contains ## Edit only, decomposed motion, script-drawn, variants, repeated components, cms fields', async () => {
+  const ctx = await makeContext();
+  await runTasks(ctx, sampleManifest);
+
+  const heroText = await read(ctx, '.convert/tasks/sec-home-hero.md');
+  assert.match(heroText, /## Edit only/);
+  // Decomposed motion line
+  assert.match(heroText, /`m2` "Comment" \(scroll, 1\.3 s\): opacity 0→1/);
+  // Script-drawn line with ticking every second
+  assert.match(heroText, /`sd-1`.*ticking every second/);
+  // Variants instruction with md: and lg:
+  assert.match(heroText, /md:.*lg:/);
+  // Repeated components
+  assert.match(heroText, /ProjectCard/);
+
+  // Dynamic route section has cms: fields
+  const detailText = await read(ctx, '.convert/tasks/sec-blog-slug-detail.md');
+  assert.match(detailText, /cms:/);
+  assert.match(detailText, /title/);
+  assert.match(detailText, /body/);
 });
 
-test('every task file has six headings in order and exact Done when', async () => {
-  const ctx = await ran();
-  for (const r of ctx.records) {
-    assert.equal(r.file, `.convert/tasks/${r.id}.md`);
-    const text = await read(ctx, r.file);
-    let at = -1;
-    for (const h of HEADINGS) {
-      const i = text.indexOf(`\n${h}\n`);
-      assert.ok(i > at, `${r.id}: ${h}`);
-      at = i;
-    }
-    assert.doesNotMatch(text, /\{\{/);
-    const done = text.slice(text.indexOf('## Done when'));
-    if (r.kind === 'motion') {
-      assert.match(done, new RegExp(`Tick every item in the checklist above, then run \`npx -p framer-export fexport convert done ${r.id}\`\.`));
-    } else {
-      assert.match(done, new RegExp(`Run \`npx -p framer-export fexport convert verify ${r.id}\` and confirm it passes\.`));
-      assert.match(text, /\.convert\/analysis\/slices\/_base\.css/);
-    }
-  }
-});
+test('every task file and AGENTS.md contain "Never run `npm run build`"', async () => {
+  const ctx = await makeContext();
+  const records = await runTasks(ctx, sampleManifest);
 
-test('component and page task content', async () => {
-  const ctx = await ran();
-  const dark = await read(ctx, '.convert/tasks/' + ctx.records.find((r) => r.id.endsWith('-DarkButton'))!.id + '.md');
-  assert.match(dark, /src\/components\/DarkButton\.tsx/);
-  assert.match(dark, /\.convert\/analysis\/slices\/DarkButton\.html/);
-  for (const w of [1440, 1000, 390]) assert.match(dark, new RegExp(`\.convert/reference/components/DarkButton/${w}\.png`));
-  assert.match(dark, /Tablet/);
-  const home = await read(ctx, '.convert/tasks/101-page-home.md');
-  assert.ok(home.includes('`Hero + About`: `data-section="Hero + About"`'));
-  assert.match(home, /\.convert\/reference\/home\/1440\.png/);
-  const blog = ctx.records.find((r) => r.route === '/blog/[slug]' && r.kind === 'page')!;
-  const blogText = await read(ctx, blog.file);
-  assert.match(blogText, /\.convert\/reference\/blog-slug\/390\.png/);
-  assert.match(blogText, /src\/content\/blog\.ts/);
-  const mo = await read(ctx, '.convert/tasks/201-motion-about.md');
-  assert.match(mo, /- \[ \] .*Hero Title/);
-});
-
-test('AGENTS.md equals CLAUDE.md, shares rules, stage needs-ai, state registered', async () => {
-  const ctx = await ran();
-  const a = await read(ctx, 'AGENTS.md');
-  assert.equal(a, await read(ctx, 'CLAUDE.md'));
-  assert.match(a, /convert status/);
-  assert.match(a, /convert next/);
-  assert.match(a, /convert verify/);
-  const rules = (await read(ctx, '.convert/tasks/101-page-home.md')).split('## Rules\n')[1]!.split('\n## ')[0]!;
-  assert.ok(a.includes(rules.trim()));
-  const state = await loadState(ctx.nextDir);
-  assert.equal(state!.stages.tasks, 'needs-ai');
-  assert.ok(state!.tasks['101-page-home']);
-});
-
-test('generated text never calls a bare `npx fexport`; AGENTS.md says to npm install', async () => {
-  const ctx = await ran();
-  const files = [
-    ...(await readdir(path.join(ctx.nextDir, '.convert/tasks'))).map((n) => '.convert/tasks/' + n),
-    'AGENTS.md',
-    'CLAUDE.md',
-  ];
-  for (const f of files) {
-    const text = await read(ctx, f);
-    assert.doesNotMatch(text, /npx fexport/, f);
-    if (/convert (verify|status|next)/.test(text)) assert.match(text, /npx -p framer-export fexport convert/, f);
-  }
-  assert.match(await read(ctx, 'AGENTS.md'), /npm install/);
-  for (const t of Object.values(TEMPLATES)) assert.doesNotMatch(t, /npx fexport/);
-});
-
-test('re-run keeps status/attempts and fix files', async () => {
-  const ctx = await ran();
-  ctx.state.tasks['101-page-home']!.status = 'in-progress';
-  ctx.state.tasks['101-page-home']!.attempts = 2;
-  await mkdir(path.join(ctx.nextDir, '.convert/tasks'), { recursive: true });
-  await writeFile(path.join(ctx.nextDir, '.convert/tasks/fix-001.md'), 'keep me');
-  await runTasks(ctx, { mode: 'component-first' });
-  assert.equal(ctx.state.tasks['101-page-home']!.status, 'in-progress');
-  assert.equal(ctx.state.tasks['101-page-home']!.attempts, 2);
-  assert.equal(await read(ctx, '.convert/tasks/fix-001.md'), 'keep me');
-  assert.ok((await readdir(path.join(ctx.nextDir, '.convert/tasks'))).includes('fix-001.md'));
-});
-
-// Same drive as the fixture (os.tmpdir() may be on another Windows drive, where no relative path exists).
-test('task files are portable: no absolute export path, relative source resolves', async () => {
-  const ctx = await prepare(path.resolve('tests'));
-  await runTasks(ctx);
-  const abs = ctx.exportDir;
-  for (const f of [...(await readdir(path.join(ctx.nextDir, '.convert/tasks'))).map((n) => '.convert/tasks/' + n), 'AGENTS.md']) {
-    const text = await read(ctx, f);
-    assert.ok(!text.includes(abs) && !text.includes(abs.split(path.sep).join('/')), f);
-  }
-  const text = await read(ctx, '.convert/tasks/101-page-home.md');
-  const rel = /Original page HTML \(read-only reference\): `([^`]+)`/.exec(text)![1]!;
-  await access(path.resolve(ctx.nextDir, rel));
-  assert.match(await read(ctx, 'AGENTS.md'), /Original export: `[^`]+`/);
-});
-
-test('missing slice and source are reported as warnings, not swallowed', async () => {
-  const ctx = await prepare();
-  await rm(path.join(ctx.nextDir, '.convert/analysis/slices/Arrow.html'));
-  const pages = JSON.parse(await read(ctx, '.convert/analysis/pages.json')) as Array<{ sourceFile: string }>;
-  pages[1]!.sourceFile = 'subpages/gone.html';
-  await writeFile(path.join(ctx.nextDir, '.convert/analysis/pages.json'), JSON.stringify(pages));
-  const logs: string[] = [];
-  ctx.log = (m: string) => logs.push(m);
-  await runTasks(ctx, { mode: 'component-first' });
-  assert.ok(ctx.state.warnings.includes('tasks: missing .convert/analysis/slices/Arrow.html'));
-  assert.ok(ctx.state.warnings.includes('tasks: missing subpages/gone.html'));
-  assert.equal(logs.length, 2);
-  await runTasks(ctx, { mode: 'component-first' });
-  assert.equal(ctx.state.warnings.filter((w) => w.startsWith('tasks:')).length, 2);
-});
-
-// ---- page-first mode (default) -------------------------------------------------------------------------
-
-async function pageFirst() {
-  const ctx = await prepare();
-  const records = await runTasks(ctx);
-  return { ctx, records };
-}
-
-test('page-first: a shell task, then one task per page, no component tasks', async () => {
-  const { records } = await pageFirst();
-  assert.equal(records[0]!.id, '001-shell');
-  assert.equal(records[0]!.kind, 'shell');
-  assert.deepEqual(records[0]!.targets, ['src/components/shell/index.tsx']);
-  assert.ok(!records.some((r) => r.kind === 'component'));
-  assert.ok(records.some((r) => r.id === '101-page-home'));
-});
-
-test('page-first: page tasks carry their section checklist', async () => {
-  const { ctx, records } = await pageFirst();
-  const home = records.find((r) => r.id === '101-page-home')!;
-  assert.ok(home.sections && home.sections.includes('Hero + About'));
-  const state = await loadState(ctx.nextDir);
-  assert.deepEqual(state!.tasks['101-page-home']!.sections, home.sections);
-});
-
-test('page-first: every task file has the six headings and no unreplaced placeholders', async () => {
-  const { ctx, records } = await pageFirst();
   for (const r of records) {
     const text = await read(ctx, r.file);
-    let at = -1;
-    for (const h of HEADINGS) {
-      const i = text.indexOf(`\n${h}\n`);
-      assert.ok(i > at, `${r.id}: ${h}`);
-      at = i;
-    }
-    assert.doesNotMatch(text, /\{\{/);
+    assert.match(text, /Never run `npm run build`/, `File ${r.file} missing Never run npm run build`);
+  }
+
+  const agents = await read(ctx, 'AGENTS.md');
+  assert.match(agents, /Never run `npm run build`/);
+
+  const claude = await read(ctx, 'CLAUDE.md');
+  assert.match(claude, /Never run `npm run build`/);
+});
+
+test('Done when contains check <id> and after testing=false re-rendering check <id> --smoke', async () => {
+  const ctx = await makeContext();
+  await runTasks(ctx, sampleManifest);
+
+  const heroBefore = await read(ctx, '.convert/tasks/sec-home-hero.md');
+  assert.match(heroBefore, /check sec-home-hero/);
+  assert.doesNotMatch(heroBefore, /check sec-home-hero --smoke/);
+
+  // Toggle testing off and re-render
+  ctx.state.options = { ...DEFAULT_OPTIONS, agent: 'agy', testing: false };
+  await renderTaskFiles(ctx, sampleManifest);
+
+  const heroAfter = await read(ctx, '.convert/tasks/sec-home-hero.md');
+  assert.match(heroAfter, /check sec-home-hero --smoke/);
+});
+
+test('unmatched motion anchors are listed by Framer name under Unanchored animations', async () => {
+  const ctx = await makeContext();
+  await runTasks(ctx, sampleManifest);
+
+  // Check in page-home or sec-home-hero
+  const pageHome = await read(ctx, '.convert/tasks/page-home.md');
+  const heroText = await read(ctx, '.convert/tasks/sec-home-hero.md');
+  const hasUnanchored = pageHome.includes('UnanchoredFloatingCard') || heroText.includes('UnanchoredFloatingCard');
+  assert.ok(hasUnanchored, 'UnanchoredFloatingCard should be present in task files');
+
+  if (pageHome.includes('UnanchoredFloatingCard')) {
+    assert.match(pageHome, /Unanchored animations[\s\S]*UnanchoredFloatingCard/);
+  }
+  if (heroText.includes('UnanchoredFloatingCard')) {
+    assert.match(heroText, /Unanchored animations[\s\S]*UnanchoredFloatingCard/);
   }
 });
 
-test('page-first: shell task lists the sections shared by two or more pages', async () => {
-  const { ctx } = await pageFirst();
-  const text = await read(ctx, '.convert/tasks/001-shell.md');
-  assert.match(text, /Shared sections/);
-  assert.match(text, /src\/components\/shell\/index\.tsx/);
+test('part tasks for oversized sections: part files, part dirs, and wrapper in page targets', async () => {
+  const ctx = await makeContext();
+  const manifestWithParts: GeneratedManifest = {
+    ...sampleManifest,
+    pages: [
+      {
+        route: '/',
+        slug: 'home',
+        view: 'src/views/home.tsx',
+        sections: [
+          {
+            name: 'Oversized',
+            component: 'Oversized',
+            file: 'src/sections/home/Oversized.tsx',
+            parts: [
+              {
+                name: 'TopHeader',
+                component: 'TopHeader',
+                file: 'src/sections/home/Oversized/TopHeader.tsx',
+              },
+              {
+                name: 'BottomGrid',
+                component: 'BottomGrid',
+                file: 'src/sections/home/Oversized/BottomGrid.tsx',
+              },
+            ],
+            motion: [],
+            scriptDrawn: [],
+            hasVariants: false,
+            repeated: [],
+            cmsFields: [],
+          },
+        ],
+        inline: [],
+        shell: [],
+      },
+    ],
+  };
+
+  const records = await runTasks(ctx, manifestWithParts);
+  const partTaskA = records.find((r) => r.id === 'sec-home-oversized-top-header');
+  assert.ok(partTaskA);
+  assert.equal(partTaskA.kind, 'section');
+  assert.deepEqual(partTaskA.targets, [
+    'src/sections/home/Oversized/TopHeader.tsx',
+    'src/sections/home/Oversized/TopHeader/',
+  ]);
+
+  const partTaskB = records.find((r) => r.id === 'sec-home-oversized-bottom-grid');
+  assert.ok(partTaskB);
+  assert.equal(partTaskB.kind, 'section');
+
+  const page = records.find((r) => r.id === 'page-home')!;
+  assert.ok(page.targets.includes('src/sections/home/Oversized.tsx'));
+  assert.deepEqual(page.dependsOn, [
+    'sec-home-oversized-top-header',
+    'sec-home-oversized-bottom-grid',
+  ]);
 });
 
-test('page-first: component-first mode is still available and unchanged', async () => {
-  const ctx = await ran();
-  assert.match(ctx.records[0]!.id, /^001-component-/);
-  assert.ok(!ctx.records.some((r) => r.kind === 'shell'));
-});
+test('re-run keeps status and attempts of existing tasks', async () => {
+  const ctx = await makeContext();
+  await runTasks(ctx, sampleManifest);
 
-test('sharedSectionNames: only named sections on two or more pages', async () => {
-  const { sharedSectionNames } = await import('../../src/convert/stages/tasks.js');
-  assert.deepEqual(
-    sharedSectionNames([['Nav', 'Hero', 'section-2', 'page'], ['Nav', 'Work', 'section-2', 'page'], ['Nav', 'Footer']]),
-    ['Nav'],
-  );
-});
+  ctx.state.tasks['sec-home-hero']!.status = 'in-progress';
+  ctx.state.tasks['sec-home-hero']!.attempts = 2;
 
-test('page-first: re-run keeps status and passed sections', async () => {
-  const { ctx } = await pageFirst();
-  ctx.state.tasks['101-page-home']!.status = 'in-progress';
-  ctx.state.tasks['101-page-home']!.passedSections = ['Hero + About'];
-  await runTasks(ctx);
-  assert.equal(ctx.state.tasks['101-page-home']!.status, 'in-progress');
-  assert.deepEqual(ctx.state.tasks['101-page-home']!.passedSections, ['Hero + About']);
+  await runTasks(ctx, sampleManifest);
+  assert.equal(ctx.state.tasks['sec-home-hero']!.status, 'in-progress');
+  assert.equal(ctx.state.tasks['sec-home-hero']!.attempts, 2);
+
+  const loaded = await loadState(ctx.nextDir);
+  assert.equal(loaded!.tasks['sec-home-hero']!.status, 'in-progress');
+  assert.equal(loaded!.tasks['sec-home-hero']!.attempts, 2);
 });

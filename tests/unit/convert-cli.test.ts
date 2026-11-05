@@ -53,11 +53,11 @@ test('runPipeline converts the fixture, then is a no-op', async () => {
   assert.equal(state.stages.analyze, 'done');
   assert.equal(state.stages['extract-cms'], 'done');
   assert.equal(state.stages.scaffold, 'done');
-  assert.equal(state.stages.tasks, 'needs-ai');
+  assert.equal(state.stages.tasks, 'done');
   const again = await runPipeline(fixture, nextDir, io());
   assert.deepEqual(again, state);
   const text = formatStatus(state);
-  assert.match(text, /needs-ai/);
+  assert.match(text, /tasks\s+done/);
   for (const id of Object.keys(state.tasks)) assert.ok(text.includes(id), id);
 });
 
