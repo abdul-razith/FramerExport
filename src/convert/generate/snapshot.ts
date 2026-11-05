@@ -44,7 +44,7 @@ export interface SnapshotOut {
  */
 export function snapshotScript(plan: SnapshotPlan): string {
   const planJson = JSON.stringify(plan);
-  return `(function (plan) {
+  return String.raw`(function (plan) {
     var conv = ${DOM_TO_JSX_SRC};
     var slim = ${SLIM_SRC};
     var annotate = ${ANNOTATE_SRC};
@@ -114,7 +114,7 @@ export function snapshotScript(plan: SnapshotPlan): string {
       motionEls.forEach(function (mEl) {
         var val = mEl.getAttribute('data-motion');
         if (val) {
-          val.split(/\\s+/).forEach(function (id) {
+          val.trim().split(/\s+/).forEach(function (id) {
             if (id && motionIds.indexOf(id) === -1) motionIds.push(id);
           });
         }
@@ -126,7 +126,7 @@ export function snapshotScript(plan: SnapshotPlan): string {
       cmsEls.forEach(function (cEl) {
         var val = cEl.getAttribute('data-cms');
         if (val) {
-          val.split(/\\s+/).forEach(function (f) {
+          val.trim().split(/\s+/).forEach(function (f) {
             if (f && cmsFields.indexOf(f) === -1) cmsFields.push(f);
           });
         }

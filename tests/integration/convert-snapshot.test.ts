@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import {
   snapshotScript,
@@ -279,4 +279,37 @@ test('Review Focus 1: hydrated motion selectors that do not match static DOM are
   assert.ok(heroSection);
   assert.deepEqual(heroSection.motion, ['m1']);
 });
+
+test('multiple motion entries and CMS fields matching the same element split into distinct array items', async () => {
+  const html = `<!doctype html><html><head></head><body>
+<div id="main">
+  <div id="hero">
+    <h1 class="hero-title shared-target">Multi Target Title</h1>
+  </div>
+</div>
+</body></html>`;
+
+  await page.setContent(html);
+
+  const plan = createPlan({
+    sections: [{ name: 'Hero', selector: '#hero' }],
+    motion: [
+      { id: 'm1', selector: '.shared-target' },
+      { id: 'm2', selector: 'h1.hero-title' },
+    ],
+    cms: [
+      { field: 'title', value: 'Multi Target Title' },
+      { field: 'heading', value: 'Multi Target Title' },
+    ],
+  });
+
+  const out = (await page.evaluate(snapshotScript(plan))) as SnapshotOut;
+  const heroSection = out.sections.find((s) => s.name === 'Hero');
+  assert.ok(heroSection);
+  assert.deepEqual(heroSection.motion, ['m1', 'm2']);
+  assert.deepEqual(heroSection.cmsFields, ['title', 'heading']);
+  assert.match(heroSection.jsx, /data-motion="m1 m2"/);
+  assert.match(heroSection.jsx, /data-cms="title heading"/);
+});
+
 
