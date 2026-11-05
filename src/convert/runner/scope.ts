@@ -14,7 +14,7 @@ export interface TreeSnapshot {
   rootEntries: Set<string>;
 }
 
-const MAX_PUBLIC_BUFFER_SIZE = 5 * 1024 * 1024; // 5 MB
+export const MAX_FILE_BUFFER_SIZE = 5 * 1024 * 1024; // 5 MB
 
 const ROOT_CONFIGS = [
   'package.json',
@@ -123,8 +123,29 @@ async function cleanEmptyDirs(filePath: string, stopAt: string): Promise<void> {
   }
 }
 
+async function recordFileSnapshot(
+  fullPath: string,
+  rel: string,
+  files: Map<string, FileSnapshot>
+): Promise<void> {
+  const stat = await fs.stat(fullPath);
+  if (stat.size > MAX_FILE_BUFFER_SIZE) {
+    files.set(rel, {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+    });
+  } else {
+    const content = await fs.readFile(fullPath);
+    files.set(rel, {
+      content,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+    });
+  }
+}
+
 /**
- * Snapshots the project tree, recording watched files (with buffer content unless > 5 MB in public/**)
+ * Snapshots the project tree, recording watched files (with buffer content unless > 5 MB)
  * and root file names, while ignoring internal/runtime paths.
  */
 export async function snapshotTree(root: string): Promise<TreeSnapshot> {
@@ -154,12 +175,7 @@ export async function snapshotTree(root: string): Promise<TreeSnapshot> {
     try {
       const stat = await fs.stat(fullPath);
       if (stat.isFile()) {
-        const content = await fs.readFile(fullPath);
-        files.set(config, {
-          content,
-          size: stat.size,
-          mtimeMs: stat.mtimeMs,
-        });
+        await recordFileSnapshot(fullPath, config, files);
       }
     } catch (err: any) {
       if (err?.code !== 'ENOENT') throw err;
@@ -171,13 +187,7 @@ export async function snapshotTree(root: string): Promise<TreeSnapshot> {
   await walkDir(srcDir, async (fullPath) => {
     const rel = toPosixPath(path.relative(resolvedRoot, fullPath));
     if (isIgnored(rel)) return;
-    const stat = await fs.stat(fullPath);
-    const content = await fs.readFile(fullPath);
-    files.set(rel, {
-      content,
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-    });
+    await recordFileSnapshot(fullPath, rel, files);
   });
 
   // 4. public/**
@@ -185,20 +195,7 @@ export async function snapshotTree(root: string): Promise<TreeSnapshot> {
   await walkDir(publicDir, async (fullPath) => {
     const rel = toPosixPath(path.relative(resolvedRoot, fullPath));
     if (isIgnored(rel)) return;
-    const stat = await fs.stat(fullPath);
-    if (stat.size > MAX_PUBLIC_BUFFER_SIZE) {
-      files.set(rel, {
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-      });
-    } else {
-      const content = await fs.readFile(fullPath);
-      files.set(rel, {
-        content,
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-      });
-    }
+    await recordFileSnapshot(fullPath, rel, files);
   });
 
   // 5. .convert/tasks/**
@@ -206,13 +203,7 @@ export async function snapshotTree(root: string): Promise<TreeSnapshot> {
   await walkDir(tasksDir, async (fullPath) => {
     const rel = toPosixPath(path.relative(resolvedRoot, fullPath));
     if (isIgnored(rel)) return;
-    const stat = await fs.stat(fullPath);
-    const content = await fs.readFile(fullPath);
-    files.set(rel, {
-      content,
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-    });
+    await recordFileSnapshot(fullPath, rel, files);
   });
 
   return {
@@ -307,10 +298,12 @@ export async function revertOutOfScope(
             if (isIgnored(fileRel)) return;
             if (isAllowed(fileRel, allowed)) return;
             await fs.unlink(fullPath);
+            await cleanEmptyDirs(fullPath, dirPath);
             reverted.add(fileRel);
           });
+          // Only remove if completely empty (will not delete if allowed files remain)
           try {
-            await fs.rm(dirPath, { recursive: true, force: true });
+            await fs.rmdir(dirPath);
           } catch {}
         }
       }

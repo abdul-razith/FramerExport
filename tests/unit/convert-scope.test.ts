@@ -256,3 +256,41 @@ test('revertOutOfScope handles new files in unallowed subtrees and ignores conve
     '{"ok":true}'
   );
 });
+
+test('snapshotTree skips buffer for files > 5 MB in src as well', async () => {
+  const root = await createTempDir();
+  await fs.mkdir(path.join(root, 'src', 'assets'), { recursive: true });
+  const largeSize = 5 * 1024 * 1024 + 100;
+  const largeBuffer = Buffer.alloc(largeSize, 0x62);
+  await fs.writeFile(path.join(root, 'src', 'assets', 'large-asset.bin'), largeBuffer);
+
+  const snap = await snapshotTree(root);
+  assert.equal(snap.files.has('src/assets/large-asset.bin'), true);
+  assert.equal(snap.files.get('src/assets/large-asset.bin')?.content, undefined);
+  assert.equal(snap.files.get('src/assets/large-asset.bin')?.size, largeSize);
+});
+
+test('revertOutOfScope keeps allowed files in a new root directory without deleting the directory', async () => {
+  const root = await createTempDir();
+  const before = await snapshotTree(root);
+
+  // Agent creates a new root directory `custom_dir/`
+  const customDir = path.join(root, 'custom_dir');
+  await fs.mkdir(customDir, { recursive: true });
+  await fs.writeFile(path.join(customDir, 'allowed.txt'), 'keep me');
+  await fs.writeFile(path.join(customDir, 'unallowed.txt'), 'delete me');
+
+  const allowed = ['custom_dir/allowed.txt'];
+
+  const reverted = await revertOutOfScope(root, before, allowed);
+
+  assert.deepEqual(reverted, ['custom_dir/unallowed.txt']);
+  // Unallowed file removed
+  await assert.rejects(fs.stat(path.join(customDir, 'unallowed.txt')), { code: 'ENOENT' });
+  // Allowed file kept
+  assert.equal(await fs.readFile(path.join(customDir, 'allowed.txt'), 'utf8'), 'keep me');
+  // Directory still exists
+  const dirStat = await fs.stat(customDir);
+  assert.equal(dirStat.isDirectory(), true);
+});
+
