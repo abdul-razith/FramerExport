@@ -1,7 +1,13 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  detectAgents,
+  pickBinaryLine,
+  resolveAgentBinary,
+  type AgentId,
+} from '../../convert/runner/agent-process.js';
 import { framerAdapter } from '../../convert/adapters/framer/index.js';
 import { pickNextTask } from '../../convert/pipeline.js';
 import { addTime, formatDuration, formatLiveLine, startTicker, timeTaskId } from '../../convert/progress.js';
@@ -11,7 +17,8 @@ import type { ConvertState, TaskRecord } from '../../convert/types.js';
 import { uiConfirm, uiNote, uiSelect, uiSpinner } from '../ui/prompts.js';
 import { STAGE_LABELS, fitLine, formatVerifyError, formatVerifyResult, tickingMessage } from './convert-helpers.js';
 
-export type AgentId = 'agy' | 'claude';
+export type { AgentId };
+export { detectAgents, pickBinaryLine };
 export type AgentMode = 'one' | 'all';
 export type StopReason =
   | 'done'
@@ -36,37 +43,6 @@ export function buildAgentPrompt(taskFile: string): string {
 
 export function buildAgentCommand(agent: AgentId, prompt: string): { command: string; args: string[] } {
   return { command: agent, args: ['-p', prompt, '--dangerously-skip-permissions'] };
-}
-
-const run = (file: string, args: string[]): Promise<string> =>
-  new Promise((resolve, reject) =>
-    execFile(file, args, (error, stdout) => (error ? reject(error) : resolve(String(stdout))))
-  );
-
-/**
- * Picks the launchable path from `where`/`which` output. On Windows `where` also lists the extensionless shell
- * shim of an npm-installed CLI first; only .exe/.cmd/.bat can be spawned.
- */
-export function pickBinaryLine(output: string, platform: NodeJS.Platform): string | null {
-  const lines = output.split(/\r?\n/).filter((l) => l.trim());
-  if (platform === 'win32') return lines.find((l) => /\.(exe|cmd|bat)$/i.test(l.trim()))?.trim() ?? null;
-  return lines[0]?.trim() ?? null;
-}
-
-/** Absolute path of the launchable match for `name` on PATH, or null. */
-async function whichBinary(name: string): Promise<string | null> {
-  try {
-    const out = await run(process.platform === 'win32' ? 'where' : 'which', [name]);
-    return pickBinaryLine(out, process.platform);
-  } catch {
-    return null;
-  }
-}
-
-export async function detectAgents(): Promise<AgentId[]> {
-  const found: AgentId[] = [];
-  for (const agent of ['agy', 'claude'] as const) if (await whichBinary(agent)) found.push(agent);
-  return found;
 }
 
 async function snapshot(root: string): Promise<Map<string, string>> {
@@ -116,7 +92,7 @@ export async function runAgentOnTask(
   let file = command;
   let shell = false;
   if (command === agent && process.platform === 'win32') {
-    const resolved = await whichBinary(agent);
+    const resolved = await resolveAgentBinary(agent);
     if (resolved) {
       file = resolved;
       shell = /\.(cmd|bat)$/i.test(resolved);

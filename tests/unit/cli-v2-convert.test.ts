@@ -277,10 +277,10 @@ import { mkdir as mkdirp, readFile as readFileText } from 'node:fs/promises';
 import {
   buildAgentCommand,
   buildAgentPrompt,
-  pickBinaryLine,
   runAgentLoop,
   runAgentOnTask,
 } from '../../src/cli-v2/screens/convert-agent.js';
+import { pickBinaryLine } from '../../src/convert/runner/agent-process.js';
 import { recordAttempt, saveState } from '../../src/convert/state.js';
 
 test('buildAgentPrompt: fixed text with the task file, only shell-safe characters', () => {
