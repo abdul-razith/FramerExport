@@ -4,7 +4,7 @@ import path from 'node:path';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { readManifest, type GeneratedManifest } from '../generate/manifest.js';
+import { readManifest, type GeneratedManifest, type MotionAnchor } from '../generate/manifest.js';
 import { kebabName } from '../generate/names.js';
 import { routeSlug } from '../stages/tasks.js';
 import { loadState, writeFileAtomic } from '../state.js';
@@ -14,7 +14,10 @@ import { capturePageSections } from './capture-sections.js';
 import { diffClusters } from './clusters.js';
 import { ensureDevServer } from './dev-server.js';
 import { compareDom, type DomMismatch, type SectionDom } from './dom-check.js';
+import { checkMotion, movedTowards } from './motion-check.js';
 import { settleNext, withVerifyFlag } from './settle.js';
+
+export { checkMotion, movedTowards };
 
 export interface WidthResult {
   width: number;
@@ -656,6 +659,38 @@ export async function runCheck(
           clusters: pageClusters.slice(0, 3),
           images: firstImages
         });
+      }
+    }
+
+    // Motion presence check in full mode
+    let taskAnchors: MotionAnchor[] = [];
+    if (manifest?.motion) {
+      const candidates =
+        task.kind === 'page'
+          ? manifest.motion.filter(
+              (m) => m.route === task.route || (m.section && sectionNames.includes(m.section))
+            )
+          : manifest.motion.filter(
+              (m) =>
+                m.section === (task.section || task.id) ||
+                (m.section && kebabName(m.section) === kebabName(task.section || task.id)) ||
+                requiredMotion.includes(m.id)
+            );
+      const seenIds = new Set<string>();
+      for (const a of candidates) {
+        if (!seenIds.has(a.id)) {
+          seenIds.add(a.id);
+          taskAnchors.push(a);
+        }
+      }
+    }
+
+    if (taskAnchors.length > 0) {
+      try {
+        const motionResults = await checkMotion(page, targetUrl, taskAnchors);
+        motion.push(...motionResults);
+      } catch (err: any) {
+        errors.push(`Motion check failed: ${err.message || String(err)}`);
       }
     }
   } finally {
