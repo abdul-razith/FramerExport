@@ -161,7 +161,7 @@ export async function runScreenConvertDashboard(
       }
     } else if (action === 'options') {
       const agents = await detectAgents();
-      const defaults: RunOptions = state.options ?? { ...DEFAULT_OPTIONS, agent: 'agy' };
+      const defaults: RunOptions = state.options ?? { ...DEFAULT_OPTIONS, agent: agents[0] ?? 'agy' };
       const updated = await askRunOptions(defaults, agents);
       state.options = updated;
       await saveState(state);

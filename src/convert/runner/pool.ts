@@ -57,7 +57,8 @@ export type PoolEvent =
       ms: number;
     }
   | { type: 'reverted'; taskId: string; files: string[] }
-  | { type: 'quota'; hit: QuotaHit };
+  | { type: 'quota'; hit: QuotaHit }
+  | { type: 'agent-error'; taskId: string; message: string };
 
 export interface PoolDeps {
   spawn(
@@ -80,7 +81,12 @@ export async function runQueue(
   ctx: StageContext,
   deps: PoolDeps,
   pause: PauseController
-): Promise<{ stoppedFor: 'done' | 'paused' | 'quota'; quota?: QuotaHit; ran: string[] }> {
+): Promise<{
+  stoppedFor: 'done' | 'paused' | 'quota' | 'agent-error';
+  quota?: QuotaHit;
+  error?: string;
+  ran: string[];
+}> {
   const concurrency = ctx.state.options?.concurrency ?? 1;
   const running = new Set<string>();
   const runningTasks = new Map<string, TaskRecord>();
@@ -94,6 +100,7 @@ export async function runQueue(
   let nextSeq = 0;
 
   let quotaHit: QuotaHit | undefined;
+  let spawnFailure: string | undefined;
   let wakeUp: (() => void) | null = null;
 
   let stateSaveQueue = Promise.resolve();
@@ -211,8 +218,18 @@ export async function runQueue(
       return;
     }
 
-    // Case B: exit has quota
-    if (exit.quota) {
+    // Case S: the agent could not be started at all. Not a task failure: put the task back and stop the run.
+    if (exit.spawnError) {
+      spawnFailure = exit.spawnError;
+      await recoverTask(ctx.nextDir, task);
+      deps.onEvent?.({ type: 'agent-error', taskId: task.id, message: exit.spawnError });
+      await deps.lock.setAgent(task.id, null);
+      await safeSaveState();
+      return;
+    }
+
+    // Case B: exit has quota. A clean exit (code 0) that merely printed a matching line is finished work.
+    if (exit.quota && exit.exitCode !== 0) {
       quotaHit = exit.quota;
       await recoverTask(ctx.nextDir, task);
       deps.onEvent?.({ type: 'quota', hit: exit.quota });
@@ -282,8 +299,8 @@ export async function runQueue(
         break;
       }
 
-      // 2. If quota hit: stop dispatching
-      if (quotaHit) {
+      // 2. If quota hit or the agent cannot start: stop dispatching
+      if (quotaHit || spawnFailure) {
         break;
       }
 
@@ -348,6 +365,9 @@ export async function runQueue(
     unsubscribe?.();
   }
 
+  if (spawnFailure) {
+    return { stoppedFor: 'agent-error', error: spawnFailure, ran };
+  }
   if (quotaHit) {
     return { stoppedFor: 'quota', quota: quotaHit, ran };
   }

@@ -505,6 +505,7 @@ test('runQueue: quota exit resets task to pending (attempts unchanged), stops di
         return createFakeHandle({
           delayMs: 10,
           exit: {
+            exitCode: 3,
             quota: { line: '429 Rate limit exceeded', resetHint: 'in 15m' },
           },
         });
@@ -760,4 +761,36 @@ test('runQueue: C1 a slow task finishing after a fast one keeps the fast task ta
   assert.equal(await readFile(bFile, 'utf8'), '// b finished\n');
   const fixMd = await readFile(path.join(root, '.convert', 'tasks', 'fix-sec-b.md'), 'utf8');
   assert.ok(fixMd.length > 0);
+});
+
+test('runQueue: I4 a quota-looking line from an agent that exited 0 keeps the finished work', async () => {
+  const root = await makeTmp();
+  const state = initState('/export', root);
+  state.options = {
+    testing: true,
+    concurrency: 1,
+    sectionTimeoutMin: 15,
+    pageTimeoutMin: 15,
+    pixelTolerance: 0.01,
+    reportTolerance: 0.03,
+    agent: 'agy',
+  };
+  await saveState(state);
+  const ctx: StageContext = { state, exportDir: '/export', nextDir: root, log: () => {} };
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  state.tasks['sec-1'] = makeTask({ id: 'sec-1', kind: 'section' });
+  const file = path.join(root, 'src', 'sec-1.tsx');
+
+  const deps: PoolDeps = {
+    lock: fakeLock(),
+    spawn: () => {
+      setTimeout(() => void writeFile(file, '// finished'), 2);
+      return createFakeHandle({ delayMs: 20, exit: { exitCode: 0, quota: { line: 'x=429' } } });
+    },
+    check: async (taskId) => makePassResult(taskId),
+  };
+  const res = await runQueue(ctx, deps, createPauseController());
+  assert.equal(res.stoppedFor, 'done');
+  assert.equal(state.tasks['sec-1']!.status, 'done');
+  assert.equal(await readFile(file, 'utf8'), '// finished');
 });

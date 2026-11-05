@@ -20,9 +20,12 @@ export async function askRunOptions(
   const selectFn = deps?.select ?? uiSelect;
   const textFn = deps?.text ?? uiText;
 
+  if (agents.length === 0) {
+    throw new Error('No supported AI agent found on PATH. Install agy or claude, then try again.');
+  }
   const useDefaults = await confirmFn('Use default options?', true);
   if (useDefaults) {
-    return { ...defaults };
+    return { ...defaults, agent: agents.includes(defaults.agent) ? defaults.agent : agents[0] };
   }
 
   const testing = await confirmFn('Enable visual testing?', defaults.testing);
@@ -30,7 +33,7 @@ export async function askRunOptions(
   const agent = (await selectFn(
     'Select AI agent:',
     agents.map((a) => ({ label: a, value: a })),
-    defaults.agent
+    agents.includes(defaults.agent) ? defaults.agent : agents[0]
   )) as AgentId;
 
   const concurrencyStr = (await selectFn(

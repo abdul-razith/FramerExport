@@ -309,3 +309,55 @@ test('B-I4: the pool default check does not count check calls (counted from the 
     devUrl: 'http://localhost:3000',
   });
 });
+
+function i2Deps(over: Partial<RunDeps>): RunDeps {
+  return {
+    devServer: async () => ({ url: 'http://127.0.0.1:1', pid: process.pid, stop: async () => {} }),
+    check: async () => ({
+      taskId: 'sec-home-hero',
+      mode: 'full',
+      pass: false,
+      limitReached: false,
+      widths: [],
+      dom: [],
+      code: [],
+      motion: [],
+      errors: [],
+    }),
+    finalize: async () => ({ buildOk: true }),
+    detectAgents: async () => ['claude'],
+    ...over,
+  };
+}
+
+test('I2: a spawn error stops the run with a message naming the agent and leaves the task pending', async () => {
+  const root = await setupProject('claude');
+  const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
+  const deps = i2Deps({
+    spawn: () => ({
+      pid: undefined,
+      done: Promise.resolve({
+        exitCode: null,
+        timedOut: false,
+        killed: false,
+        quota: null,
+        spawnError: 'ENOENT: spawn claude ENOENT',
+      }),
+      kill: async () => {},
+    }),
+  });
+  await assert.rejects(runAgents(root, io, deps), /Could not start agent "claude".*ENOENT/);
+  const state = await loadState(root);
+  assert.equal(state?.tasks['sec-home-hero']?.status, 'pending');
+  assert.equal(state?.tasks['sec-home-hero']?.attempts, 0);
+  assert.equal(Object.keys(state?.tasks ?? {}).some((id) => id.startsWith('fix-')), false);
+});
+
+test('I2: a missing agent binary refuses to start and names the agent', async () => {
+  const root = await setupProject('claude');
+  const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
+  const deps = i2Deps({ resolveAgentBinary: async () => null });
+  await assert.rejects(runAgents(root, io, deps), /Agent "claude" was not found on PATH/);
+  const state = await loadState(root);
+  assert.equal(state?.tasks['sec-home-hero']?.status, 'pending');
+});

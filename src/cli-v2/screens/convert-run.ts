@@ -34,7 +34,7 @@ export async function runScreenConvertRun(
   if (!(await uiConfirm('Start conversion?'))) uiCancelAndExit('Conversion cancelled by user.');
 
   const agents = await detectAgents();
-  const defaults: RunOptions = opts.options ?? existing?.options ?? { ...DEFAULT_OPTIONS, agent: 'agy' };
+  const defaults: RunOptions = opts.options ?? existing?.options ?? { ...DEFAULT_OPTIONS, agent: agents[0] ?? 'agy' };
   const options = opts.options ?? (await askRunOptions(defaults, agents));
 
   let spinner = uiSpinner();

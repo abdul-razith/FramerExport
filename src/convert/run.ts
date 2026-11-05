@@ -3,7 +3,9 @@ import type { StageContext } from './adapters/types.js';
 import { readManifest, type GeneratedManifest } from './generate/manifest.js';
 import {
   agentCommand,
+  defaultAgent,
   detectAgents,
+  resolveAgentBinary,
   spawnAgent,
   type AgentHandle,
   type AgentId,
@@ -43,6 +45,7 @@ export type RunDeps = Partial<PoolDeps> & {
   finalize?: (ctx: StageContext) => Promise<{ buildOk: boolean; report?: string }>;
   manifest?: (root: string) => Promise<GeneratedManifest | null>;
   detectAgents?: () => Promise<AgentId[]>;
+  resolveAgentBinary?: (agent: AgentId) => Promise<string | null>;
 };
 
 function defaultBuild(cwd: string): Promise<{ ok: boolean; log: string }> {
@@ -107,12 +110,13 @@ function defaultFinalizeDeps(root: string, devUrl: string, ctx: StageContext): F
 function defaultSpawn(
   root: string,
   agent: AgentId,
+  binary: string | null,
   prompt: string,
   timeoutMs: number,
   logFile: string,
   onLine: (line: string) => void
 ): AgentHandle {
-  const { command, args } = agentCommand(agent, prompt);
+  const { command, args } = agentCommand(agent, prompt, binary);
   return spawnAgent({
     command,
     args,
@@ -176,7 +180,19 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
     });
 
     while (true) {
-      const currentAgent: AgentId = state.options?.agent ?? 'agy';
+      const detect = deps?.detectAgents ?? detectAgents;
+      const currentAgent: AgentId = state.options?.agent ?? (await defaultAgent(detect));
+      // Launch the resolved binary path (an npm .cmd shim is not found by bare name), and refuse to start
+      // when the agent is not installed instead of burning every task on a spawn error.
+      let agentBinary: string | null = null;
+      if (!deps?.spawn && !process.env.FEXPORT_AGENT_CMD) {
+        agentBinary = await (deps?.resolveAgentBinary ?? resolveAgentBinary)(currentAgent);
+        if (!agentBinary) {
+          throw new Error(
+            `Agent "${currentAgent}" was not found on PATH. Install it or pick another agent (--agent agy|claude).`
+          );
+        }
+      }
       const poolDeps: PoolDeps = {
         lock,
         onEvent: (e) => io.onEvent(e),
@@ -184,16 +200,24 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
         spawn:
           deps?.spawn ??
           ((task, prompt, timeoutMs, logFile, onLine) =>
-            defaultSpawn(resolvedRoot, state.options?.agent ?? currentAgent, prompt, timeoutMs, logFile, onLine)),
+            defaultSpawn(resolvedRoot, currentAgent, agentBinary, prompt, timeoutMs, logFile, onLine)),
         ...(deps?.now ? { now: deps.now } : {}),
       };
 
       const result = await runQueue(ctx, poolDeps, io.pause);
 
+      if (result.stoppedFor === 'agent-error') {
+        state.run = { status: 'paused', reason: 'user', pausedAt: new Date().toISOString() };
+        await saveState(state);
+        throw new Error(
+          `Could not start agent "${currentAgent}": ${result.error ?? 'unknown error'}. ` +
+            'Check that it is installed and on PATH, or pick another agent (--agent agy|claude).'
+        );
+      }
+
       if (result.stoppedFor === 'quota') {
         const hit = result.quota ?? { line: 'Quota exceeded' };
         const otherAgent: AgentId = currentAgent === 'agy' ? 'claude' : 'agy';
-        const detect = deps?.detectAgents ?? detectAgents;
         const available: AgentId[] = await detect().catch(() => []);
         const other: AgentId | null =
           available.length === 0 ? otherAgent : available.includes(otherAgent) ? otherAgent : null;

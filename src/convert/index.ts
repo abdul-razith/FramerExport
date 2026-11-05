@@ -7,7 +7,7 @@ import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipel
 import { DEFAULT_OPTIONS, findProjectRoot, loadState, saveState } from './state.js';
 import { CLI_INVOCATION } from './tasks/templates/index.js';
 import type { AnimationEntry, ConvertState, RunOptions } from './types.js';
-import type { AgentId } from './runner/agent-process.js';
+import { defaultAgent, type AgentId } from './runner/agent-process.js';
 
 export { formatStatus, runPipeline } from './pipeline.js';
 export type { ConvertIo } from './pipeline.js';
@@ -223,7 +223,7 @@ export async function runConvertCommand(
         const { uiOutro } = await import('../cli-v2/ui/prompts.js');
         const resolvedOpts: RunOptions | undefined =
           Object.keys(cliOptions).length > 0
-            ? { ...DEFAULT_OPTIONS, agent: 'agy', ...cliOptions }
+            ? { ...DEFAULT_OPTIONS, agent: await defaultAgent(), ...cliOptions }
             : undefined;
         const root = await runScreenConvertRun(args.exportDir, nextDir, { options: resolvedOpts });
         await runScreenConvertDashboard(root, { intro: false });
@@ -240,7 +240,7 @@ export async function runConvertCommand(
       confirm = (msg) => uiConfirm(msg, false);
     }
     try {
-      const resolvedOpts: RunOptions = { ...DEFAULT_OPTIONS, agent: 'agy', ...cliOptions };
+      const resolvedOpts: RunOptions = { ...DEFAULT_OPTIONS, agent: await defaultAgent(), ...cliOptions };
       await runPipeline(args.exportDir, nextDir, { confirm, log: (m) => console.log(m) }, resolvedOpts);
       return 0;
     } catch (error) {
@@ -277,6 +277,7 @@ export async function runConvertCommand(
     const { createPauseController } = await import('./runner/pool.js');
     const { formatWorkerLine } = await import('./progress.js');
     const { setInterruptHandler } = await import('./verify/proc.js');
+    const defaultAgentName = await defaultAgent();
     const pause = createPauseController();
     let ctrlCCount = 0;
     setInterruptHandler(() => {
@@ -300,7 +301,7 @@ export async function runConvertCommand(
               worker: e.worker,
               route: e.task.route || '/',
               section: e.task.section || e.task.id,
-              agent: state.options?.agent ?? 'agy',
+              agent: state.options?.agent ?? defaultAgentName,
               startTime: Date.now(),
               lastLine: '',
             };

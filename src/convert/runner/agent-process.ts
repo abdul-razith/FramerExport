@@ -13,6 +13,8 @@ export interface AgentExit {
   timedOut: boolean;
   killed: boolean;
   quota: QuotaHit | null;
+  /** Set when the process could not be started at all (ENOENT, EACCES, ...). */
+  spawnError?: string;
 }
 
 export interface AgentHandle {
@@ -34,7 +36,11 @@ export interface SpawnAgentOptions {
  * Builds the command invocation for an agent.
  * When `FEXPORT_AGENT_CMD` is set, uses Node to execute that test fixture instead of the real binary.
  */
-export function agentCommand(agent: AgentId, prompt: string): { command: string; args: string[] } {
+export function agentCommand(
+  agent: AgentId,
+  prompt: string,
+  resolvedBinary?: string | null
+): { command: string; args: string[] } {
   if (process.env.FEXPORT_AGENT_CMD) {
     return {
       command: process.execPath,
@@ -42,7 +48,7 @@ export function agentCommand(agent: AgentId, prompt: string): { command: string;
     };
   }
   return {
-    command: agent,
+    command: resolvedBinary ?? agent,
     args: ['-p', prompt, '--dangerously-skip-permissions'],
   };
 }
@@ -82,6 +88,15 @@ export async function detectAgents(): Promise<AgentId[]> {
   }
   return found;
 }
+
+/** First supported agent found on PATH; 'agy' when none is installed (callers must still check). */
+export async function defaultAgent(detect: () => Promise<AgentId[]> = detectAgents): Promise<AgentId> {
+  const found = await detect().catch(() => [] as AgentId[]);
+  return found[0] ?? 'agy';
+}
+
+/** Grace period after `exit` for the stdio pipes to drain before resolving without `close`. */
+const CLOSE_GRACE_MS = 500;
 
 /**
  * Launches an agent process via `spawnManaged`. Pipes and logs stdout and stderr to `logFile`,
@@ -154,6 +169,7 @@ export function spawnAgent(opts: SpawnAgentOptions): AgentHandle {
 
   const done = new Promise<AgentExit>((resolve) => {
     let settled = false;
+    let spawnError: string | undefined;
     const finish = async (): Promise<void> => {
       if (settled) return;
       settled = true;
@@ -169,12 +185,20 @@ export function spawnAgent(opts: SpawnAgentOptions): AgentHandle {
         timedOut,
         killed,
         quota: quotaHit,
+        ...(spawnError ? { spawnError } : {}),
       });
     };
 
+    // `exit` can fire before the last stdout/stderr data is delivered: resolve on `close`, and use
+    // `exit` only as a fallback in case a grandchild keeps the pipes open.
     child.once('close', () => { void finish(); });
-    child.once('exit', () => { void finish(); });
-    child.once('error', () => { void finish(); });
+    child.once('exit', () => {
+      setTimeout(() => void finish(), CLOSE_GRACE_MS);
+    });
+    child.once('error', (err: NodeJS.ErrnoException) => {
+      spawnError = err.code ? `${err.code}: ${err.message}` : err.message;
+      void finish();
+    });
   });
 
   return {

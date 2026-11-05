@@ -336,3 +336,25 @@ test('tickingMessage keeps the text and a growing elapsed time on the spinner', 
   assert.match(seen[0]!, /route 2\/9 · \d+s/);
   assert.ok(seen.length >= 2);
 });
+
+test('I2: askRunOptions refuses when no agent is installed', async () => {
+  await assert.rejects(
+    askRunOptions({ ...DEFAULT_OPTIONS, agent: 'agy' }, [], { confirm: async () => true }),
+    /No supported AI agent found/
+  );
+});
+
+test('I2: askRunOptions falls back to an installed agent when the default one is not installed', async () => {
+  const res = await askRunOptions({ ...DEFAULT_OPTIONS, agent: 'agy' }, ['claude'], { confirm: async () => true });
+  assert.equal(res.agent, 'claude');
+  let initial: string | undefined;
+  await askRunOptions({ ...DEFAULT_OPTIONS, agent: 'agy' }, ['claude'], {
+    confirm: async (m) => m !== 'Use default options?',
+    select: async (m, _o, init) => {
+      if (m === 'Select AI agent:') initial = init as string;
+      return (m === 'Worker concurrency:' ? '1' : 'claude') as never;
+    },
+    text: async () => '15',
+  });
+  assert.equal(initial, 'claude');
+});

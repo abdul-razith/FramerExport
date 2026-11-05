@@ -16,7 +16,7 @@ test('buildAgentPrompt returns fixed prompt with task file', () => {
   const prompt = buildAgentPrompt(task);
   assert.equal(
     prompt,
-    'Read AGENTS.md and .convert/tasks/sec-home-hero.md, then complete that task. Edit only the files listed under Edit only. When finished, run the check command in its "Done when" section and stop when it passes or reports the limit.'
+    'Read AGENTS.md and .convert/tasks/sec-home-hero.md, then complete that task. Edit only the files listed under Edit only. When finished, run the check command in its Done when section and stop when it passes or reports the limit.'
   );
 });
 
@@ -24,7 +24,7 @@ test('buildAgentPrompt accepts string path', () => {
   const prompt = buildAgentPrompt('.convert/tasks/shell-navigation.md');
   assert.equal(
     prompt,
-    'Read AGENTS.md and .convert/tasks/shell-navigation.md, then complete that task. Edit only the files listed under Edit only. When finished, run the check command in its "Done when" section and stop when it passes or reports the limit.'
+    'Read AGENTS.md and .convert/tasks/shell-navigation.md, then complete that task. Edit only the files listed under Edit only. When finished, run the check command in its Done when section and stop when it passes or reports the limit.'
   );
 });
 
@@ -49,4 +49,8 @@ test('buildAgentPrompt rejects unsafe characters', () => {
     () => buildAgentPrompt({ file: 'tasks/foo\nbar.md' } as TaskRecord),
     /Unsafe task file path/
   );
+});
+
+test('buildAgentPrompt contains no double quotes (they break .cmd argument quoting)', () => {
+  assert.ok(!buildAgentPrompt('.convert/tasks/a b.md').includes('"'));
 });

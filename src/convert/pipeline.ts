@@ -1,4 +1,5 @@
 import { mkdir, readFile } from 'node:fs/promises';
+import { defaultAgent } from './runner/agent-process.js';
 import path from 'node:path';
 import { framerAdapter } from './adapters/framer/index.js';
 import type { StageContext } from './adapters/types.js';
@@ -63,7 +64,7 @@ export async function runPipeline(
   const state = (await loadState(nextDir)) ?? initState(exportDir, nextDir);
 
   const isLegacyCall = options === undefined;
-  const defaultOpts: RunOptions = { ...DEFAULT_OPTIONS, agent: 'agy' };
+  const defaultOpts: RunOptions = { ...DEFAULT_OPTIONS, agent: await defaultAgent() };
   const resolvedOptions: RunOptions = options
     ? { ...defaultOpts, ...options }
     : (state.options ?? defaultOpts);
