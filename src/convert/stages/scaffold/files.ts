@@ -275,7 +275,7 @@ export function generateFiles(
   files.set('tsconfig.json', TSCONFIG);
   files.set(
     'next.config.ts',
-    `import type { NextConfig } from 'next';\n\nconst nextConfig: NextConfig = {\n  images: { unoptimized: false },\n};\n\nexport default nextConfig;\n`,
+    `import type { NextConfig } from 'next';\n\nconst nextConfig: NextConfig = {\n  images: { unoptimized: false },\n  agentRules: false,\n};\n\nexport default nextConfig;\n`,
   );
   files.set('postcss.config.mjs', `const config = {\n  plugins: { '@tailwindcss/postcss': {} },\n};\n\nexport default config;\n`);
   files.set(

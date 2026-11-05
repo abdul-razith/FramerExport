@@ -167,3 +167,10 @@ test('tsconfig matches what next build would rewrite it to', async () => {
   assert.ok(ts.include.includes('.next/types/**/*.ts'));
   assert.ok(ts.include.includes('.next/dev/types/**/*.ts'));
 });
+
+
+test('generated next.config.ts contains agentRules: false', async () => {
+  const ctx = await ran();
+  const nextConfig = await read(ctx, 'next.config.ts');
+  assert.match(nextConfig, /agentRules:\s*false/);
+});
