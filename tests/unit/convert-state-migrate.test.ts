@@ -57,6 +57,16 @@ test('resolveExportDir returns missing when neither absolute nor sibling exists'
   assert.deepEqual(r, { dir: stored, missing: true });
 });
 
+test('resolveExportDir with empty base does not falsely match sibling parent dir', async () => {
+  const root = await tmp();
+  const nextDir = path.join(root, 'out', 'portfolio-next');
+  // An absolute root path that does not exist as an export directory
+  const nonExistentRoot = process.platform === 'win32' ? 'Z:\\' : '/nonexistent-root-dir';
+  const r = resolveExportDir(nonExistentRoot, nextDir);
+  assert.equal(r.missing, true);
+  assert.notEqual(r.dir, path.dirname(nextDir));
+});
+
 test('v1 state with tasks is flagged legacy; with none it is not', async () => {
   const root = await tmp();
   const nextDir = path.join(root, 'site-next');

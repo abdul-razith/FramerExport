@@ -168,6 +168,19 @@ export function Hero() {
   assert.deepEqual(codeViolations(cleanSources, ['m1', 'm4']), []);
 });
 
+test('codeViolations accepts multi-token data-motion attributes (data-motion="m1 m2")', () => {
+  const sources = [
+    {
+      file: 'src/components/Hero.tsx',
+      text: '<div data-motion="m1 m2">Hero</div>'
+    }
+  ];
+  assert.deepEqual(codeViolations(sources, ['m1']), []);
+  assert.deepEqual(codeViolations(sources, ['m2']), []);
+  assert.deepEqual(codeViolations(sources, ['m1', 'm2']), []);
+  assert.deepEqual(codeViolations(sources, ['m1', 'm3']), ['missing data-motion="m3"']);
+});
+
 test('call counter: 3 calls limitReached: false, 4th true and formatCheck equals the limit message', async () => {
   const root = await tmp('convert check counter ');
   const state = initState(path.join(root, 'export'), root);

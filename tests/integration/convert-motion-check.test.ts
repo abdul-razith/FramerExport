@@ -89,6 +89,7 @@ before(async () => {
       <div id="hover-elem" data-motion="hero-hover" class="hover-box">Hover item</div>
       <div id="loop-elem" data-motion="hero-loop" class="spin-box">Spinning item</div>
       <div id="static-loop-elem" data-motion="hero-static-loop" class="static-box">Not spinning</div>
+      <div id="multi-elem" data-motion="hero-multi-1 hero-multi-2" class="fade-in">Multi motion item</div>
     </div>
     <div id="scroll-elem" data-motion="scroll-item" class="scroll-target">Scrolled item</div>
 
@@ -495,4 +496,49 @@ test('runCheck full mode: motion failures fail check, but lowConfidence failures
   assert.equal(res3.motion[0].pass, false);
   assert.equal(res3.motion[0].lowConfidence, true);
   assert.equal(res3.pass, true, 'Failing low-confidence motion must NOT fail CheckResult.pass');
+});
+
+test('checkMotion: multi-token data-motion="m1 m2" matches both m1 and m2', async () => {
+  const page = await browser.newPage();
+  try {
+    const anchors: MotionAnchor[] = [
+      {
+        id: 'hero-multi-1',
+        route: '/',
+        section: 'hero',
+        entry: {
+          route: '/',
+          selector: '#multi-elem',
+          trigger: 'appear',
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+          confidence: 'high'
+        },
+        matched: true
+      },
+      {
+        id: 'hero-multi-2',
+        route: '/',
+        section: 'hero',
+        entry: {
+          route: '/',
+          selector: '#multi-elem',
+          trigger: 'appear',
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+          confidence: 'high'
+        },
+        matched: true
+      }
+    ];
+
+    const results = await checkMotion(page, serverUrl, anchors);
+    assert.equal(results.length, 2);
+    assert.equal(results[0].id, 'hero-multi-1');
+    assert.equal(results[0].pass, true, 'hero-multi-1 should match and pass');
+    assert.equal(results[1].id, 'hero-multi-2');
+    assert.equal(results[1].pass, true, 'hero-multi-2 should match and pass');
+  } finally {
+    await page.close().catch(() => {});
+  }
 });

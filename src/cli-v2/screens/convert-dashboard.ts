@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile, rename, stat } from 'node:fs/promises';
+import { rename } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { readAnimations, readTaskGoal } from '../../convert/index.js';
@@ -8,7 +8,7 @@ import { formatProgressLine, formatRunBanner, formatTimeSummary } from '../../co
 import { DEFAULT_OPTIONS, findProjectRoot, loadState, saveState } from '../../convert/state.js';
 import { detectAgents } from '../../convert/runner/agent-process.js';
 import { runReport } from '../../convert/verify/report.js';
-import { type PageInfo, type RunOptions } from '../../convert/types.js';
+import { type RunOptions } from '../../convert/types.js';
 import { uiIntro, uiNote, uiOutro, uiSelect, uiSpinner, uiText } from '../ui/prompts.js';
 import {
   STAGE_LABELS,
@@ -22,30 +22,6 @@ import { runScreenConvertRun } from './convert-run.js';
 export interface ConvertDashboardOptions {
   /** Print the intro and the closing outro (default true). Callers that own both pass false. */
   intro?: boolean;
-}
-
-const exists = (p: string): Promise<boolean> => stat(p).then(() => true, () => false);
-
-async function readPages(root: string): Promise<PageInfo[]> {
-  try {
-    return JSON.parse(await readFile(path.join(root, '.convert', 'analysis', 'pages.json'), 'utf8')) as PageInfo[];
-  } catch {
-    return [];
-  }
-}
-
-/** Runs `npm install` in the project, returning the exit code and the last stderr lines. */
-function npmInstall(root: string): Promise<{ code: number; tail: string }> {
-  return new Promise((resolve) => {
-    const win = process.platform === 'win32';
-    const child = spawn(win ? 'npm.cmd' : 'npm', ['install'], { cwd: root, shell: win, stdio: ['ignore', 'ignore', 'pipe'] });
-    let err = '';
-    child.stderr?.on('data', (d: Buffer) => {
-      err += d.toString();
-    });
-    child.on('error', (e) => resolve({ code: 1, tail: e.message }));
-    child.on('close', (code) => resolve({ code: code ?? 1, tail: err.split(/\r?\n/).filter(Boolean).slice(-20).join('\n') }));
-  });
 }
 
 /** Finds a converted project, or lets the user open one / convert an export folder. Null means the user exited. */

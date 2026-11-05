@@ -19,7 +19,7 @@ import {
 } from './runner/pool.js';
 import { runFinalize, type FinalizeDeps } from './stages/finalize.js';
 import { manifestFallback, renderTaskFiles } from './stages/tasks.js';
-import { loadState, saveState } from './state.js';
+import { DEFAULT_OPTIONS, loadState, saveState } from './state.js';
 import type { TaskRecord } from './types.js';
 import { ensureDevServer, type DevServer } from './verify/dev-server.js';
 import { runCheck, type CheckResult } from './verify/check.js';
@@ -99,7 +99,7 @@ function defaultFinalizeDeps(root: string, devUrl: string, ctx: StageContext): F
   return {
     check: (id: string) => runCheck(root, id, { countCall: false, devUrl }),
     build: () => defaultBuild(root),
-    report: () => runReport(ctx, { tolerance: ctx.state.options?.reportTolerance ?? 0.03 }),
+    report: () => runReport(ctx, { tolerance: ctx.state.options?.reportTolerance ?? DEFAULT_OPTIONS.reportTolerance }),
   };
 }
 
@@ -201,14 +201,7 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
         if (decision === 'switch') {
           const targetAgent = other ?? otherAgent;
           state.options = {
-            ...(state.options ?? {
-              testing: true,
-              concurrency: 1,
-              sectionTimeoutMin: 15,
-              pageTimeoutMin: 15,
-              pixelTolerance: 0.01,
-              reportTolerance: 0.03,
-            }),
+            ...(state.options ?? DEFAULT_OPTIONS),
             agent: targetAgent,
           };
           await saveState(state);

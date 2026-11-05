@@ -23,7 +23,7 @@ export function resolveExportDir(stored: string, nextDir: string): { dir: string
   const parts = stored.split(/[/\\]+/).filter(Boolean);
   const base = parts.length > 0 ? parts[parts.length - 1] : '';
   const sibling = path.join(path.dirname(nextDir), base);
-  if (fs.existsSync(sibling)) {
+  if (base && fs.existsSync(sibling)) {
     return { dir: sibling, missing: false };
   }
 

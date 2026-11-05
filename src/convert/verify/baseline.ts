@@ -134,34 +134,38 @@ export async function runBaseline(
 
   try {
     const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(60_000);
+    try {
+      page.setDefaultNavigationTimeout(60_000);
 
-    for (const [route, routeTasks] of tasksByRoute) {
-      const concretePath = routeToPath(route, manifest);
-      const url = buildUrl(devUrl, concretePath);
-      const names = [...new Set(routeTasks.map((t) => t.section || t.id))];
+      for (const [route, routeTasks] of tasksByRoute) {
+        const concretePath = routeToPath(route, manifest);
+        const url = buildUrl(devUrl, concretePath);
+        const names = [...new Set(routeTasks.map((t) => t.section || t.id))];
 
-      for (const width of widths) {
-        ctx.log(`baseline: capturing route ${route} @ ${width}px (${names.join(', ')})`);
-        const sectionData = await capturePageSections(page, url, width, names);
+        for (const width of widths) {
+          ctx.log(`baseline: capturing route ${route} @ ${width}px (${names.join(', ')})`);
+          const sectionData = await capturePageSections(page, url, width, names);
 
-        for (const task of routeTasks) {
-          const name = task.section || task.id;
-          const data =
-            sectionData.get(name) ??
-            (name.includes('/') ? sectionData.get(name.split('/')[0]) : undefined);
+          for (const task of routeTasks) {
+            const name = task.section || task.id;
+            const data =
+              sectionData.get(name) ??
+              (name.includes('/') ? sectionData.get(name.split('/')[0]) : undefined);
 
-          if (!data) {
-            ctx.log(`baseline: section "${name}" for task ${task.id} not found on ${url}`);
-            continue;
+            if (!data) {
+              ctx.log(`baseline: section "${name}" for task ${task.id} not found on ${url}`);
+              continue;
+            }
+
+            const dir = baselineDir(ctx.nextDir, task);
+            await mkdir(dir, { recursive: true });
+            await writeFileAtomic(path.join(dir, `${width}.png`), PNG.sync.write(data.png));
+            await writeFileAtomic(path.join(dir, `${width}.json`), JSON.stringify(data.dom, null, 2) + '\n');
           }
-
-          const dir = baselineDir(ctx.nextDir, task);
-          await mkdir(dir, { recursive: true });
-          await writeFileAtomic(path.join(dir, `${width}.png`), PNG.sync.write(data.png));
-          await writeFileAtomic(path.join(dir, `${width}.json`), JSON.stringify(data.dom, null, 2) + '\n');
         }
       }
+    } finally {
+      await page.close().catch(() => {});
     }
   } finally {
     if (ownsBrowser) {

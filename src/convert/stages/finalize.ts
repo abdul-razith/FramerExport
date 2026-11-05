@@ -225,10 +225,9 @@ export async function runFinalize(
       if (attempts >= 2) {
         existingFix.status = 'needs-review';
         ctx.state.stages.finalize = 'failed';
-        await saveState(ctx.state);
-        return { buildOk: false, fixTask: 'fix-build' };
+      } else {
+        existingFix.status = 'pending';
       }
-      existingFix.status = 'pending';
     } else {
       const fixTask: TaskRecord = {
         id: 'fix-build',

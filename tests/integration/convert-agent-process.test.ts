@@ -235,3 +235,36 @@ test('spawnAgent: explicit kill stops agent and marks killed: true', async () =>
   assert.equal(exit.timedOut, false);
   assert.equal(isPidAlive(handle.pid!), false);
 });
+
+test('spawnAgent: stdout and stderr have separate accumulators and flush on close', async () => {
+  const cwd = await makeTmp('streams test ');
+  const logFile = path.join(cwd, 'logs', 'streams.log');
+
+  const lines: string[] = [];
+  const script = [
+    'process.stdout.write("hello ");',
+    'process.stderr.write("from stderr\\n");',
+    'process.stdout.write("from stdout\\n");',
+    'process.stdout.write("trailing chunk");',
+  ].join(' ');
+
+  const handle = spawnAgent({
+    command: process.execPath,
+    args: ['-e', script],
+    cwd,
+    timeoutMs: 10_000,
+    logFile,
+    onLine: (line) => lines.push(line),
+  });
+
+  const exit = await handle.done;
+  assert.equal(exit.exitCode, 0);
+  assert.equal(exit.timedOut, false);
+  assert.equal(exit.killed, false);
+
+  assert.deepEqual(lines, [
+    'from stderr',
+    'hello from stdout',
+    'trailing chunk',
+  ]);
+});

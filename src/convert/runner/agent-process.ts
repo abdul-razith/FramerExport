@@ -100,23 +100,38 @@ export function spawnAgent(opts: SpawnAgentOptions): AgentHandle {
   let quotaHit: QuotaHit | null = null;
   let timeoutTimer: NodeJS.Timeout | undefined;
 
-  let pending = '';
-  const onChunk = (chunk: Buffer): void => {
-    logStream.write(chunk);
-    pending += chunk.toString();
-    const parts = pending.split(/\r?\n/);
-    pending = parts.pop() ?? '';
-    for (const line of parts) {
-      if (line.trim()) {
-        opts.onLine?.(line);
-        const q = detectQuota(line);
-        if (q && !quotaHit) quotaHit = q;
-      }
-    }
+  const createLineAccumulator = () => {
+    let pending = '';
+    return {
+      push(chunk: Buffer): void {
+        logStream.write(chunk);
+        pending += chunk.toString();
+        const parts = pending.split(/\r?\n/);
+        pending = parts.pop() ?? '';
+        for (const line of parts) {
+          if (line.trim()) {
+            opts.onLine?.(line);
+            const q = detectQuota(line);
+            if (q && !quotaHit) quotaHit = q;
+          }
+        }
+      },
+      flush(): void {
+        if (pending.trim()) {
+          opts.onLine?.(pending);
+          const q = detectQuota(pending);
+          if (q && !quotaHit) quotaHit = q;
+        }
+        pending = '';
+      },
+    };
   };
 
-  child.stdout?.on('data', onChunk);
-  child.stderr?.on('data', onChunk);
+  const stdoutAcc = createLineAccumulator();
+  const stderrAcc = createLineAccumulator();
+
+  child.stdout?.on('data', (chunk: Buffer) => stdoutAcc.push(chunk));
+  child.stderr?.on('data', (chunk: Buffer) => stderrAcc.push(chunk));
 
   if (opts.timeoutMs > 0 && Number.isFinite(opts.timeoutMs)) {
     timeoutTimer = setTimeout(async () => {
@@ -144,11 +159,8 @@ export function spawnAgent(opts: SpawnAgentOptions): AgentHandle {
       settled = true;
       if (timeoutTimer) clearTimeout(timeoutTimer);
 
-      if (pending.trim()) {
-        opts.onLine?.(pending);
-        const q = detectQuota(pending);
-        if (q && !quotaHit) quotaHit = q;
-      }
+      stdoutAcc.flush();
+      stderrAcc.flush();
 
       await new Promise<void>((cb) => logStream.end(() => cb()));
 
@@ -161,6 +173,7 @@ export function spawnAgent(opts: SpawnAgentOptions): AgentHandle {
     };
 
     child.once('close', () => { void finish(); });
+    child.once('exit', () => { void finish(); });
     child.once('error', () => { void finish(); });
   });
 

@@ -140,7 +140,7 @@ export function movedTowards(
 
 async function getElementStyles(page: Page, motionId: string): Promise<Record<string, string> | null> {
   return await page.evaluate((id: string) => {
-    const el = document.querySelector(`[data-motion="${id}"]`);
+    const el = document.querySelector(`[data-motion~="${id}"]`);
     if (!el) return null;
     const s = window.getComputedStyle(el);
     return {
@@ -282,7 +282,7 @@ export async function checkMotion(
 
     try {
       await page.evaluate((id: string) => {
-        const el = document.querySelector(`[data-motion="${id}"]`);
+        const el = document.querySelector(`[data-motion~="${id}"]`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, a.id);
     } catch (err: any) {
@@ -340,7 +340,7 @@ export async function checkMotion(
     }
 
     try {
-      await page.hover(`[data-motion="${a.id}"]`);
+      await page.hover(`[data-motion~="${a.id}"]`);
     } catch (err: any) {
       resultsMap.set(a.id, {
         id: a.id,

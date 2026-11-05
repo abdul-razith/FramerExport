@@ -346,6 +346,10 @@ test('runFinalize failing build creates fix-build once, second failure sets fail
   assert.equal(loadedState2?.tasks['fix-build']?.attempts, 2);
   assert.equal(loadedState2?.tasks['fix-build']?.status, 'needs-review');
   assert.equal(loadedState2?.stages.finalize, 'failed');
+
+  const taskFileContent2 = await fs.readFile(taskFilePath, 'utf8');
+  assert.ok(taskFileContent2.includes('Error: Module still not found'));
+  assert.ok(taskFileContent2.includes('attempt 2'));
 });
 
 test('runFinalize testing off never calls check or report', async () => {

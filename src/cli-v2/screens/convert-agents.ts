@@ -42,6 +42,18 @@ export async function runScreenConvertAgents(
   const pause = createPauseController();
   const workers = new Map<number, WorkerState>();
   let prompting = false;
+  let running = true;
+
+  const isTTY = Boolean(process.stdin.isTTY);
+
+  const restoreRawMode = () => {
+    if (running && isTTY && !process.stdin.destroyed) {
+      try {
+        process.stdin.setRawMode?.(true);
+        process.stdin.resume();
+      } catch {}
+    }
+  };
 
   const promptPause = async () => {
     if (prompting) return;
@@ -54,13 +66,13 @@ export async function runScreenConvertAgents(
       pause.request(choice);
     } finally {
       prompting = false;
+      restoreRawMode();
     }
   };
 
-  const isTTY = Boolean(process.stdin.isTTY);
   const onKey = (data: Buffer) => {
     const key = data.toString('utf8');
-    if (key === 'p' || key === 'P') {
+    if (key === 'p' || key === 'P' || key === '\u0003') {
       void promptPause();
     }
   };
@@ -137,16 +149,21 @@ export async function runScreenConvertAgents(
         value: 'stay',
       });
 
-      return uiSelect<'switch' | 'stay'>(
-        `Agent quota reached: ${hit.line}`,
-        options
-      );
+      try {
+        return await uiSelect<'switch' | 'stay'>(
+          `Agent quota reached: ${hit.line}`,
+          options
+        );
+      } finally {
+        restoreRawMode();
+      }
     },
   };
 
   try {
     return await runAgents(root, io, deps);
   } finally {
+    running = false;
     setInterruptHandler(null);
     if (isTTY) {
       try {

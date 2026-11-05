@@ -275,6 +275,29 @@ test('askRunOptions prompts for each option when defaults declined', async () =>
   });
 });
 
+test('askRunOptions recognizes 0 as a valid numeric tolerance without falling back to defaults', async () => {
+  const defaults = { ...DEFAULT_OPTIONS, agent: 'agy' as const };
+  const textAnswers: Record<string, string> = {
+    'Section timeout (minutes):': '15',
+    'Page timeout (minutes):': '15',
+    'Pixel tolerance (0–1):': '0',
+    'Report tolerance (0–1):': '0',
+  };
+  const res = await askRunOptions(defaults, ['agy', 'claude'], {
+    confirm: async (msg) => {
+      if (msg === 'Use default options?') return false;
+      return true;
+    },
+    select: async (msg) => {
+      if (msg === 'Select AI agent:') return 'agy';
+      return '1';
+    },
+    text: async (msg) => textAnswers[msg] ?? '0',
+  });
+  assert.equal(res.pixelTolerance, 0);
+  assert.equal(res.reportTolerance, 0);
+});
+
 test('reconvert renames project to .old (suffix -2, -3 if taken)', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'reconvert-'));
   const projDir = path.join(dir, 'site-next');

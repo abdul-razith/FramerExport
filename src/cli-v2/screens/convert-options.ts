@@ -60,13 +60,15 @@ export async function askRunOptions(
     defaultValue: String(defaults.pixelTolerance),
     placeholder: String(defaults.pixelTolerance),
   });
-  const pixelTolerance = parseFloat(pixelToleranceStr) || defaults.pixelTolerance;
+  const parsedPixel = parseFloat(pixelToleranceStr);
+  const pixelTolerance = Number.isFinite(parsedPixel) ? parsedPixel : defaults.pixelTolerance;
 
   const reportToleranceStr = await textFn('Report tolerance (0–1):', {
     defaultValue: String(defaults.reportTolerance),
     placeholder: String(defaults.reportTolerance),
   });
-  const reportTolerance = parseFloat(reportToleranceStr) || defaults.reportTolerance;
+  const parsedReport = parseFloat(reportToleranceStr);
+  const reportTolerance = Number.isFinite(parsedReport) ? parsedReport : defaults.reportTolerance;
 
   return {
     testing,

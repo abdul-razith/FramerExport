@@ -126,7 +126,7 @@ export function codeViolations(
 
   for (const id of requiredMotion) {
     const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\bdata-motion\\s*=\\s*["'{]\\s*["']?${escaped}["']?\\s*[}"']`);
+    const re = new RegExp(`\\bdata-motion\\s*=\\s*["'{][^"'>}]*?\\b${escaped}\\b[^"'>}]*?["'}]`);
     const found = sources.some((s) => re.test(s.text));
     if (!found) {
       violations.push(`missing data-motion="${id}"`);
