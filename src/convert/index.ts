@@ -1,53 +1,147 @@
+import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { framerAdapter } from './adapters/framer/index.js';
 import type { StageContext } from './adapters/types.js';
 import { formatStatus, pickNextTask, runPipeline, type ConvertIo } from './pipeline.js';
-import { findProjectRoot, loadState, saveState } from './state.js';
+import { DEFAULT_OPTIONS, findProjectRoot, loadState, saveState } from './state.js';
 import { CLI_INVOCATION } from './tasks/templates/index.js';
-import { runVerify } from './stages/verify.js';
-import type { AnimationEntry, ConvertState, TaskRecord } from './types.js';
+import type { AnimationEntry, ConvertState, RunOptions, TaskRecord } from './types.js';
+import type { AgentId } from './runner/agent-process.js';
 
 export { formatStatus, runPipeline } from './pipeline.js';
 export type { ConvertIo } from './pipeline.js';
 
 export interface ConvertArgs {
-  command: 'run' | 'status' | 'next' | 'verify' | 'done' | 'ui' | 'generate';
+  command:
+    | 'convert'
+    | 'status'
+    | 'next'
+    | 'check'
+    | 'run'
+    | 'report'
+    | 'review'
+    | 'ui'
+    | 'done'
+    | 'generate';
   exportDir?: string;
   nextDir?: string;
   target?: string;
+  taskId?: string;
+  smoke?: boolean;
   yes: boolean;
+  testing?: boolean;
+  agent?: AgentId;
+  concurrency?: 1 | 2 | 3;
 }
 
 export const CONVERT_USAGE = `Usage:
-  fexport convert <exportDir> [nextDir] [--yes]   convert a Framer export to a Next.js project
-  fexport convert status                          show stages, tasks, warnings and the motion checklist
+  fexport convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent agy|claude] [--concurrency 1|2|3]
+  fexport convert status                          show stages, tasks, warnings and progress
   fexport convert next                            show the next task to give to your AI coding agent
-  fexport convert verify [target]                 build and compare against the export, write fix tasks
-  fexport convert done <taskId>                   mark a motion task done after ticking its checklist
-  fexport convert generate                        build pages and components automatically (no AI), then run verify
+  fexport convert check <taskId> [--smoke]        run checks on a completed task (exit 0/1/2)
+  fexport convert run                             headless AI agent runner (Ctrl+C pauses)
+  fexport convert report [route]                  visual comparison report against export (alias: verify)
+  fexport convert review <taskId>                 mark a needs-review task done
   fexport convert ui                              open the interactive Conversion Dashboard
 
-nextDir defaults to <exportDir>-next. status/next/verify run from inside the converted project.`;
+nextDir defaults to <exportDir>-next. status/next/check/run/report/review run from inside the converted project.`;
 
 /** Accepts argv with or without the leading "convert". */
 export function parseConvertArgs(argv: string[]): ConvertArgs {
-  const rest = argv[0] === 'convert' ? argv.slice(1) : argv;
-  const yes = rest.includes('--yes') || rest.includes('-y');
-  const [first, second] = rest.filter((a) => a !== '--yes' && a !== '-y');
+  const raw = argv[0] === 'convert' ? argv.slice(1) : argv;
+  let yes = false;
+  let smoke = false;
+  let testing: boolean | undefined;
+  let agent: AgentId | undefined;
+  let concurrency: (1 | 2 | 3) | undefined;
+
+  const positional: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i]!;
+    if (a === '--yes' || a === '-y') {
+      yes = true;
+    } else if (a === '--smoke') {
+      smoke = true;
+    } else if (a === '--testing') {
+      const next = raw[i + 1];
+      if (next === 'on' || next === 'true') {
+        testing = true;
+        i++;
+      } else if (next === 'off' || next === 'false') {
+        testing = false;
+        i++;
+      } else {
+        testing = true;
+      }
+    } else if (a.startsWith('--testing=')) {
+      const val = a.slice('--testing='.length);
+      testing = val === 'on' || val === 'true';
+    } else if (a === '--agent') {
+      const next = raw[i + 1];
+      if (next === 'agy' || next === 'claude') {
+        agent = next;
+        i++;
+      }
+    } else if (a.startsWith('--agent=')) {
+      const val = a.slice('--agent='.length);
+      if (val === 'agy' || val === 'claude') agent = val as AgentId;
+    } else if (a === '--concurrency') {
+      const next = raw[i + 1];
+      if (next && ['1', '2', '3'].includes(next)) {
+        concurrency = parseInt(next, 10) as 1 | 2 | 3;
+        i++;
+      }
+    } else if (a.startsWith('--concurrency=')) {
+      const val = a.slice('--concurrency='.length);
+      if (['1', '2', '3'].includes(val)) concurrency = parseInt(val, 10) as 1 | 2 | 3;
+    } else {
+      positional.push(a);
+    }
+  }
+
+  const [first, second, third] = positional;
   if (first === 'ui') {
-    return { command: 'ui', exportDir: undefined, nextDir: undefined, target: undefined, yes };
+    return { command: 'ui', yes };
   }
   if (first === 'status' || first === 'next' || first === 'generate') {
-    return { command: first, exportDir: undefined, nextDir: undefined, target: undefined, yes };
+    return { command: first, yes };
+  }
+  if (first === 'check') {
+    return { command: 'check', taskId: second, smoke, yes };
+  }
+  if (first === 'run') {
+    return { command: 'run', yes };
+  }
+  if (first === 'report' || first === 'verify') {
+    return { command: 'report', target: second, yes };
+  }
+  if (first === 'review') {
+    return { command: 'review', taskId: second, yes };
   }
   if (first === 'done') {
-    return { command: 'done', exportDir: undefined, nextDir: undefined, target: second, yes };
+    return { command: 'done', target: second, yes };
   }
-  if (first === 'verify') {
-    return { command: 'verify', exportDir: undefined, nextDir: undefined, target: second, yes };
+  if (first === 'convert') {
+    return {
+      command: 'convert',
+      exportDir: second,
+      nextDir: third,
+      yes,
+      testing,
+      agent,
+      concurrency,
+    };
   }
-  return { command: 'run', exportDir: first, nextDir: second, target: undefined, yes };
+  return {
+    command: 'convert',
+    exportDir: first,
+    nextDir: second,
+    yes,
+    testing,
+    agent,
+    concurrency,
+  };
 }
 
 export async function readAnimations(root: string): Promise<AnimationEntry[]> {
@@ -113,7 +207,8 @@ export async function runConvertCommand(
   }
   const args = parseConvertArgs(rest);
   // --yes always forces the headless path.
-  const wantsDashboard = !args.yes && (args.command === 'ui' || (args.command === 'run' && !args.exportDir));
+  const wantsDashboard =
+    !args.yes && (args.command === 'ui' || (args.command === 'convert' && !args.exportDir));
   if (wantsDashboard && isInteractiveTerminal()) {
     try {
       const { runScreenConvertDashboard } = await import('../cli-v2/screens/convert-dashboard.js');
@@ -128,7 +223,7 @@ export async function runConvertCommand(
     console.error('fexport convert ui needs an interactive terminal');
     return 1;
   }
-  if (args.command === 'run') {
+  if (args.command === 'convert') {
     if (!args.exportDir || args.exportDir.startsWith('-')) {
       console.error(CONVERT_USAGE);
       return 1;
@@ -140,12 +235,21 @@ export async function runConvertCommand(
       return 1;
     }
     const nextDir = args.nextDir ?? path.resolve(args.exportDir) + '-next';
+    const cliOptions: Partial<RunOptions> = {};
+    if (args.testing !== undefined) cliOptions.testing = args.testing;
+    if (args.agent) cliOptions.agent = args.agent;
+    if (args.concurrency) cliOptions.concurrency = args.concurrency;
+
     if (isInteractiveTerminal() && !args.yes) {
       try {
         const { runScreenConvertRun } = await import('../cli-v2/screens/convert-run.js');
         const { runScreenConvertDashboard } = await import('../cli-v2/screens/convert-dashboard.js');
         const { uiOutro } = await import('../cli-v2/ui/prompts.js');
-        const root = await runScreenConvertRun(args.exportDir, nextDir);
+        const resolvedOpts: RunOptions | undefined =
+          Object.keys(cliOptions).length > 0
+            ? { ...DEFAULT_OPTIONS, agent: 'agy', ...cliOptions }
+            : undefined;
+        const root = await runScreenConvertRun(args.exportDir, nextDir, { options: resolvedOpts });
         await runScreenConvertDashboard(root, { intro: false });
         uiOutro('Conversion session closed.');
         return 0;
@@ -160,7 +264,8 @@ export async function runConvertCommand(
       confirm = (msg) => uiConfirm(msg, false);
     }
     try {
-      await runPipeline(args.exportDir, nextDir, { confirm, log: (m) => console.log(m) });
+      const resolvedOpts: RunOptions = { ...DEFAULT_OPTIONS, agent: 'agy', ...cliOptions };
+      await runPipeline(args.exportDir, nextDir, { confirm, log: (m) => console.log(m) }, resolvedOpts);
       return 0;
     } catch (error) {
       console.error((error as Error).message);
@@ -174,13 +279,140 @@ export async function runConvertCommand(
     console.error('No .convert/state.json found; run "fexport convert <exportDir>" first');
     return 1;
   }
+
+  if (args.command === 'check') {
+    if (!args.taskId) {
+      console.error('Usage: fexport convert check <taskId> [--smoke]');
+      return 1;
+    }
+    const { runCheck, formatCheck } = await import('./verify/check.js');
+    try {
+      const res = await runCheck(root, args.taskId, { smoke: args.smoke });
+      console.log(formatCheck(res));
+      return res.limitReached ? 2 : res.pass ? 0 : 1;
+    } catch (error) {
+      console.error((error as Error).message);
+      return 1;
+    }
+  }
+
+  if (args.command === 'run') {
+    const { runAgents } = await import('./run.js');
+    const { createPauseController } = await import('./runner/pool.js');
+    const { formatWorkerLine } = await import('./progress.js');
+    const { setInterruptHandler } = await import('./verify/proc.js');
+    const pause = createPauseController();
+    let ctrlCCount = 0;
+    setInterruptHandler(() => {
+      ctrlCCount++;
+      if (ctrlCCount === 1) {
+        console.log('\nPausing after running tasks... (press Ctrl+C again to pause now)');
+        pause.request('after-running');
+      } else {
+        console.log('\nPausing now...');
+        pause.request('now');
+      }
+    });
+
+    const workers = new Map<number, { worker: number; route: string; section: string; agent: AgentId; startTime: number; lastLine: string }>();
+    try {
+      const outcome = await runAgents(root, {
+        pause,
+        onEvent(e) {
+          if (e.type === 'start') {
+            const wState = {
+              worker: e.worker,
+              route: e.task.route || '/',
+              section: e.task.section || e.task.id,
+              agent: state.options?.agent ?? 'agy',
+              startTime: Date.now(),
+              lastLine: '',
+            };
+            workers.set(e.worker, wState);
+            console.log(formatWorkerLine({ ...wState, ms: 0, lastLine: 'started' }));
+          } else if (e.type === 'line') {
+            const wState = workers.get(e.worker);
+            if (wState) {
+              wState.lastLine = e.line;
+              console.log(formatWorkerLine({ ...wState, ms: Date.now() - wState.startTime, lastLine: e.line }));
+            }
+          } else if (e.type === 'end') {
+            workers.delete(e.worker);
+            console.log(`[W${e.worker}] finished ${e.taskId}: ${e.outcome}`);
+          } else if (e.type === 'reverted') {
+            console.log(`[revert] ${e.taskId}: ${e.files.join(', ')}`);
+          } else if (e.type === 'quota') {
+            console.log(`[quota] ${e.hit.line}`);
+          }
+        },
+        async onQuota(_hit, other) {
+          if (other) {
+            console.log(`Quota hit, switching to ${other}...`);
+            return 'switch';
+          }
+          return 'stay';
+        },
+      });
+      return outcome.status === 'done' ? 0 : 1;
+    } catch (error) {
+      console.error((error as Error).message);
+      return 1;
+    } finally {
+      setInterruptHandler(null);
+    }
+  }
+
+  if (args.command === 'report') {
+    if (
+      state.stages.scaffold !== 'done' ||
+      (state.stages.tasks !== 'needs-ai' && state.stages.tasks !== 'done')
+    ) {
+      console.error('Pipeline incomplete: run "fexport convert <exportDir>" first');
+      return 1;
+    }
+    if (!existsSync(path.join(root, 'node_modules'))) {
+      console.error(`Dependencies not installed: run "npm install" in ${root}`);
+      return 1;
+    }
+    const { runReport } = await import('./verify/report.js');
+    const ctx: StageContext = { state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) };
+    try {
+      const res = await runReport(ctx, { tolerance: state.options?.reportTolerance ?? 0.03, route: args.target });
+      console.log(`Report: ${res.file}`);
+      return res.over === 0 ? 0 : 1;
+    } catch (error) {
+      console.error((error as Error).message);
+      return 1;
+    }
+  }
+
+  if (args.command === 'review') {
+    if (!args.taskId) {
+      console.error('Usage: fexport convert review <taskId>');
+      return 1;
+    }
+    const task = state.tasks[args.taskId];
+    if (!task) {
+      console.error(`Unknown task: ${args.taskId}`);
+      return 1;
+    }
+    if (task.status !== 'needs-review') {
+      console.error(`Task ${args.taskId} is ${task.status}, not needs-review`);
+      return 1;
+    }
+    task.status = 'done';
+    await saveState(state);
+    console.log(`Marked ${task.id} done.`);
+    return 0;
+  }
+
   if (args.command === 'generate') {
     const { runGenerate } = await import('./generate/index.js');
     try {
       const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) });
       const totalSections = r.pages.reduce((acc, p) => acc + p.sections.length, 0);
       console.log(`Generated ${r.pages.length} page(s), ${totalSections} section(s), ${r.stubs.length} stub(s).`);
-      console.log(`Next: run "${CLI_INVOCATION} verify" to check them.`);
+      console.log(`Next: run "${CLI_INVOCATION} report" to check them.`);
       return 0;
     } catch (error) {
       console.error((error as Error).message);
@@ -214,16 +446,7 @@ export async function runConvertCommand(
     console.log(`Marked ${result.task.id} done.`);
     return 0;
   }
-  const ctx: StageContext = { state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) };
-  let result: Awaited<ReturnType<typeof runVerify>>;
-  try {
-    result = await runVerify(ctx, framerAdapter, args.target);
-  } catch (error) {
-    console.error((error as Error).message);
-    return 1;
-  }
-  console.log(`Passed: ${result.passed.length}`);
-  console.log(`Failed: ${result.failed.length}`);
-  console.log(`Report: ${path.join(root, '.convert', 'diffs', 'report.json')}`);
-  return result.failed.length === 0 ? 0 : 1;
+
+  console.error(CONVERT_USAGE);
+  return 1;
 }

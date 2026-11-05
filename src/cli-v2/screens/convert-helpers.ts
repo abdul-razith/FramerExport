@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
 import { pickNextTask } from '../../convert/pipeline.js';
@@ -16,12 +17,24 @@ export const STAGE_LABELS: Record<StageName, string> = {
   verify: 'Stage 5/5: Verify against export',
 };
 
-export type DashboardAction = 'status' | 'next' | 'install' | 'generate' | 'verify' | 'agent' | 'done' | 'refresh' | 'exit';
+export type DashboardAction =
+  | 'resume'
+  | 'agent'
+  | 'report'
+  | 'open-report'
+  | 'review'
+  | 'options'
+  | 'status'
+  | 'next'
+  | 'reconvert'
+  | 'refresh'
+  | 'exit';
 
 export interface Choice<T> {
   label: string;
   value: T;
   hint?: string;
+  selected?: boolean;
 }
 
 /** Maps the pipeline's "Running <stage>..." log line to its stage. */
@@ -59,17 +72,73 @@ export function getMotionChoices(state: ConvertState): Choice<string>[] {
     .map((t) => ({ label: t.id, value: t.id, hint: t.route }));
 }
 
-export function getDashboardChoices(state: ConvertState, hasNodeModules: boolean): Choice<DashboardAction>[] {
+export function getDashboardChoices(
+  state: ConvertState,
+  deps?: { reportExists?: boolean }
+): Choice<DashboardAction>[] {
   const choices: Choice<DashboardAction>[] = [];
-  if (!hasNodeModules) choices.push({ label: 'Install dependencies', value: 'install', hint: 'required before verify' });
+
+  const isPaused = state.run?.status === 'paused';
+  if (isPaused) {
+    choices.push({
+      label: 'Resume conversion',
+      value: 'resume',
+      selected: true,
+      hint: 'continue after pause',
+    });
+  }
+
+  choices.push({
+    label: isPaused ? 'Run AI agents (reconfigure)' : 'Run AI agents',
+    value: 'agent',
+    hint: 'start agent workers',
+  });
+
+  choices.push({
+    label: 'Generate visual report',
+    value: 'report',
+    hint: 'capture & diff all pages',
+  });
+
+  const reportFile = state.nextDir
+    ? path.join(state.nextDir, '.convert', 'report', 'index.html')
+    : undefined;
+  const reportExists =
+    deps?.reportExists !== undefined
+      ? deps.reportExists
+      : Boolean(reportFile && existsSync(reportFile));
+
+  if (reportExists) {
+    choices.push({
+      label: 'Open visual report',
+      value: 'open-report',
+      hint: 'open HTML report in browser',
+    });
+  }
+
+  const hasNeedsReview = Object.values(state.tasks).some((t) => t.status === 'needs-review');
+  if (hasNeedsReview) {
+    choices.push({
+      label: 'Review tasks',
+      value: 'review',
+      hint: 'mark needs-review tasks done',
+    });
+  }
+
   choices.push(
-    { label: 'Generate pages & components automatically', value: 'generate', hint: 'fast, no AI' },
-    { label: 'Inspect next task', value: 'next' },
-    { label: 'Run AI agent', value: 'agent', hint: 'agy or claude, optional' },
-    { label: 'Run verification', value: 'verify', hint: 'Stage 5/5' },
-    { label: 'View status & task backlog', value: 'status' }
+    { label: 'Run options', value: 'options', hint: 'agent, concurrency, testing' },
+    { label: 'View status & task backlog', value: 'status' },
+    { label: 'Inspect next task', value: 'next' }
   );
-  if (getMotionChoices(state).length > 0) choices.push({ label: 'Mark motion task done', value: 'done' });
+
+  if (state.legacyTasks) {
+    choices.push({
+      label: 'Re-convert legacy project',
+      value: 'reconvert',
+      hint: 'upgrade old project to section refactor pipeline',
+    });
+  }
+
   choices.push({ label: 'Refresh', value: 'refresh' }, { label: 'Exit', value: 'exit' });
   return choices;
 }

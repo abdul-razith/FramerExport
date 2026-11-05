@@ -1,27 +1,22 @@
 import { existsSync } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, rename, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { framerAdapter } from '../../convert/adapters/framer/index.js';
-import { markTaskDone, readAnimations, readTaskGoal } from '../../convert/index.js';
+import { readAnimations, readTaskGoal } from '../../convert/index.js';
 import { formatStatus, pickNextTask } from '../../convert/pipeline.js';
-import { addTime, formatProgressLine, formatTimeSummary } from '../../convert/progress.js';
-import { findProjectRoot, loadState, saveState } from '../../convert/state.js';
-import { runVerify } from '../../convert/stages/verify.js';
-import type { PageInfo } from '../../convert/types.js';
+import { formatProgressLine, formatRunBanner, formatTimeSummary } from '../../convert/progress.js';
+import { DEFAULT_OPTIONS, findProjectRoot, loadState, saveState } from '../../convert/state.js';
+import { detectAgents } from '../../convert/runner/agent-process.js';
+import { runReport } from '../../convert/verify/report.js';
+import { type PageInfo, type RunOptions } from '../../convert/types.js';
 import { uiIntro, uiNote, uiOutro, uiSelect, uiSpinner, uiText } from '../ui/prompts.js';
 import {
   STAGE_LABELS,
-  formatVerifyError,
-  formatVerifyResult,
   getDashboardChoices,
-  getMotionChoices,
-  getVerifyTargetChoices,
-  tickingMessage,
   type DashboardAction,
 } from './convert-helpers.js';
-import { runAgentFlow } from './convert-agent.js';
-import { runGenerate } from '../../convert/generate/index.js';
+import { runScreenConvertAgents } from './convert-agents.js';
+import { askRunOptions } from './convert-options.js';
 import { runScreenConvertRun } from './convert-run.js';
 
 export interface ConvertDashboardOptions {
@@ -95,13 +90,18 @@ export async function runScreenConvertDashboard(
       uiNote(`No .convert/state.json in ${root}`, 'Conversion Dashboard');
       break;
     }
-    const hasModules = await exists(path.join(root, 'node_modules'));
-    const choices = getDashboardChoices(state, hasModules);
+    const choices = getDashboardChoices(state);
+    const banner = formatRunBanner(state);
+    const message = [
+      'What next?',
+      ...(banner ? [banner] : []),
+      formatProgressLine(state),
+    ].join('\n');
+
     const action = await uiSelect<DashboardAction>(
-      `What next?
-${formatProgressLine(state)}`,
+      message,
       choices,
-      initial ?? (!hasModules ? 'install' : (await exists(path.join(root, 'src', 'views'))) ? 'next' : 'generate')
+      initial ?? choices.find((c) => c.selected)?.value ?? choices[0]?.value
     );
     initial = undefined;
     if (action === 'exit') {
@@ -122,83 +122,89 @@ ${formatProgressLine(state)}`,
             `${task.id} (${task.status})`,
             `File: ${file}`,
             ...(goal ? ['', 'Goal', goal] : []),
-            '',
-            'Give this file to your AI agent, then choose "Run verification" here.',
           ].join('\n'),
           'Next task'
         );
       }
-    } else if (action === 'install') {
-      const spinner = uiSpinner();
-      spinner.start('Installing dependencies…');
-      const live = tickingMessage(spinner, 'Installing dependencies…');
-      const installStart = Date.now();
-      const { code, tail } = await npmInstall(root);
-      live.stop();
-      addTime(state, 'setup', Date.now() - installStart);
-      await saveState(state);
-      if (code === 0) spinner.stop('Dependencies installed');
-      else {
-        spinner.stop(`npm install failed (exit ${code})`);
-        if (tail) uiNote(tail, 'npm install');
-      }
-    } else if (action === 'generate') {
-      const spinner = uiSpinner();
-      spinner.start('Generating pages and components…');
-      const live = tickingMessage(spinner, 'Generating pages and components…');
+    } else if (action === 'resume' || action === 'agent') {
       try {
-        const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => live.update(m.slice(0, 80)) });
-        live.stop();
-        spinner.stop('Generation finished');
-        const totalSections = r.pages.reduce((acc, p) => acc + p.sections.length, 0);
+        await runScreenConvertAgents(root);
+      } catch (error) {
+        uiNote((error as Error).message, 'Agent Execution');
+      }
+    } else if (action === 'report') {
+      const spinner = uiSpinner();
+      spinner.start('Generating visual comparison report…');
+      try {
+        const res = await runReport(
+          { state, exportDir: state.exportDir, nextDir: root, log: () => {} },
+          { tolerance: state.options?.reportTolerance ?? 0.03 }
+        );
+        spinner.stop('Report generated');
         uiNote(
-          `Pages: ${r.pages.length}
-Sections: ${totalSections}
-Stubs: ${r.stubs.length}
-
-Now choose "Run verification" to see which pages still need work.`,
-          'Generated'
+          `Report generated: ${res.file}\nSections over threshold: ${res.over}`,
+          'Visual Report'
         );
-      } catch (error) {
-        live.stop();
-        spinner.stop('Generation failed');
-        uiNote((error as Error).message, 'Generate');
+      } catch (err: any) {
+        spinner.stop('Report failed');
+        uiNote(err.message || String(err), 'Report Error');
       }
-    } else if (action === 'verify') {
-      const target = await uiSelect('Verify which target?', getVerifyTargetChoices(state, await readPages(root)) as any);
-      const spinner = uiSpinner();
-      spinner.start(STAGE_LABELS.verify);
-      const live = tickingMessage(spinner, STAGE_LABELS.verify);
-      try {
-        const result = await runVerify(
-          { state, exportDir: state.exportDir, nextDir: root, log: (m) => live.update(m.slice(0, 80)) },
-          framerAdapter,
-          target as string | undefined
+    } else if (action === 'open-report') {
+      const reportPath = path.join(root, '.convert', 'report', 'index.html');
+      if (existsSync(reportPath)) {
+        try {
+          if (process.platform === 'win32') {
+            spawn('cmd.exe', ['/c', 'start', '""', reportPath], { detached: true, stdio: 'ignore' });
+          } else if (process.platform === 'darwin') {
+            spawn('open', [reportPath], { detached: true, stdio: 'ignore' });
+          } else {
+            spawn('xdg-open', [reportPath], { detached: true, stdio: 'ignore' });
+          }
+          uiNote(`Opened report: ${reportPath}`, 'Open Report');
+        } catch {
+          uiNote(`Report located at: ${reportPath}`, 'Open Report');
+        }
+      } else {
+        uiNote('No report found. Run "Generate visual report" first.', 'Open Report');
+      }
+    } else if (action === 'review') {
+      const reviewTasks = Object.values(state.tasks).filter((t) => t.status === 'needs-review');
+      if (reviewTasks.length === 0) {
+        uiNote('No tasks needing review.', 'Review');
+      } else {
+        const id = await uiSelect(
+          'Which task do you want to mark done?',
+          reviewTasks.map((t) => ({ label: `${t.id} (${t.kind})`, value: t.id }))
         );
-        live.stop();
-        spinner.stop('Verification finished');
-        uiNote(formatVerifyResult(result, root), 'Verification result');
-      } catch (error) {
-        live.stop();
-        spinner.stop('Verification failed');
-        uiNote(formatVerifyError(error), 'Verification error');
+        const task = state.tasks[id];
+        if (task) {
+          task.status = 'done';
+          await saveState(state);
+          uiNote(`Marked ${id} done.`, 'Review');
+        }
       }
+    } else if (action === 'options') {
+      const agents = await detectAgents();
+      const defaults: RunOptions = state.options ?? { ...DEFAULT_OPTIONS, agent: 'agy' };
+      const updated = await askRunOptions(defaults, agents);
+      state.options = updated;
       await saveState(state);
-    } else if (action === 'agent') {
-      try {
-        await runAgentFlow(root);
-      } catch (error) {
-        uiNote((error as Error).message, 'AI agent');
+      uiNote('Run options saved.', 'Run Options');
+    } else if (action === 'reconvert') {
+      const baseName = path.basename(root);
+      const parentDir = path.dirname(root);
+      let targetName = `${baseName}.old`;
+      let suffix = 2;
+      while (existsSync(path.join(parentDir, targetName))) {
+        targetName = `${baseName}.old-${suffix}`;
+        suffix++;
       }
-    } else if (action === 'done') {
-      const id = await uiSelect('Which motion task is finished?', getMotionChoices(state));
-      const result = markTaskDone(state, id);
-      if (result.ok) {
-        await saveState(state);
-        uiNote(`Marked ${result.task.id} done.`, 'Motion task');
-      } else uiNote(result.error, 'Motion task');
+      const oldPath = path.join(parentDir, targetName);
+      await rename(root, oldPath);
+      uiNote(`Renamed existing project to ${targetName}`, 'Reconvert');
+      await runScreenConvertRun(state.exportDir, root, { intro: false });
     }
-    // 'refresh' falls through: the next pass reloads the state.
+    // 'refresh' falls through: next pass reloads state.
   }
   if (standalone) uiOutro('Dashboard closed.');
 }

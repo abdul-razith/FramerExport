@@ -1,4 +1,4 @@
-import type { ConvertState, TaskStatus } from './types.js';
+import type { AgentId, ConvertState, TaskStatus } from './types.js';
 
 /** `45s`, `4m 12s`, `1h 02m`. Negative values count as zero. */
 export function formatDuration(ms: number): string {
@@ -99,7 +99,57 @@ export function formatProgressLine(state: ConvertState): string {
   const parts = [`${progressBar(p.pagesDone, p.pagesTotal)} Pages ${p.pagesDone}/${p.pagesTotal}`];
   if (p.sectionsTotal) parts.push(`Sections ${p.sectionsDone}/${p.sectionsTotal}`);
   if (p.motionTotal) parts.push(`Motion ${p.motionDone}/${p.motionTotal}`);
+  const reviewCount = Object.values(state.tasks).filter((t) => t.status === 'needs-review').length;
+  if (reviewCount > 0) parts.push(`Review ${reviewCount}`);
   parts.push(`Overall ${formatDuration(p.overallMs)}`);
+  return parts.join(' · ');
+}
+
+/** Formats a banner when a run is paused, or returns null if not paused. */
+export function formatRunBanner(state: ConvertState): string | null {
+  if (state.run?.status !== 'paused') {
+    return null;
+  }
+  const p = summarizeProgress(state);
+  const location =
+    p.sectionsTotal > 0
+      ? `Sections ${p.sectionsDone}/${p.sectionsTotal}`
+      : p.pagesTotal > 0
+      ? `Pages ${p.pagesDone}/${p.pagesTotal}`
+      : '';
+  const prefix = location ? `Paused at ${location}` : 'Paused';
+
+  let reasonStr = '';
+  if (state.run.reason === 'quota') {
+    const agent = state.options?.agent ? `${state.options.agent} ` : '';
+    const reset = state.run.quotaResetHint ? ` (resets in ${state.run.quotaResetHint})` : '';
+    reasonStr = `${agent}quota${reset}`;
+  } else if (state.run.reason) {
+    reasonStr = state.run.reason;
+  }
+
+  return reasonStr ? `${prefix} · reason: ${reasonStr}` : prefix;
+}
+
+/** One line describing the current activity of an agent worker. */
+export function formatWorkerLine(w: {
+  worker: number;
+  route: string;
+  section: string;
+  agent: AgentId;
+  ms: number;
+  lastLine: string;
+}): string {
+  const parts = [
+    `W${w.worker}`,
+    w.route,
+    w.section,
+    w.agent,
+    formatDuration(w.ms),
+  ];
+  if (w.lastLine?.trim()) {
+    parts.push(w.lastLine.trim());
+  }
   return parts.join(' · ');
 }
 

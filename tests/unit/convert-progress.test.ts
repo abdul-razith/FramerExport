@@ -4,7 +4,9 @@ import {
   addTime,
   formatDuration,
   formatProgressLine,
+  formatRunBanner,
   formatTimeSummary,
+  formatWorkerLine,
   progressBar,
   summarizeProgress,
   timeTaskId,
@@ -118,6 +120,55 @@ test('formatProgressLine is one compact line', () => {
   assert.match(line, /Pages 1\/2/);
   assert.match(line, /Sections 1\/3/);
   assert.match(line, /1m 30s/);
+});
+
+test('formatProgressLine contains Review 1 when needs-review tasks exist', () => {
+  const s = stateWith(
+    task('101-page-home', 'page', { status: 'done', route: '/', sections: ['A'], passedSections: ['A'] }),
+    task('102-page-about', 'page', { status: 'needs-review', route: '/about', sections: ['A', 'B'], passedSections: [] }),
+  );
+  const line = formatProgressLine(s);
+  assert.ok(line.includes('Review 1'), `expected line to contain "Review 1", got "${line}"`);
+});
+
+test('formatRunBanner: returns null when not paused, formatted string when paused', () => {
+  const s = stateWith(
+    task('101-page-home', 'page', { status: 'done', route: '/', sections: Array.from({ length: 14 }, (_, i) => `S${i}`), passedSections: Array.from({ length: 14 }, (_, i) => `S${i}`) }),
+    task('102-page-about', 'page', { status: 'pending', route: '/about', sections: Array.from({ length: 17 }, (_, i) => `T${i}`), passedSections: [] }),
+  );
+  assert.equal(formatRunBanner(s), null);
+
+  s.run = {
+    status: 'paused',
+    reason: 'quota',
+    quotaResetHint: '43h24m17s',
+  };
+  s.options = {
+    agent: 'agy',
+    testing: true,
+    concurrency: 1,
+    sectionTimeoutMin: 15,
+    pageTimeoutMin: 15,
+    pixelTolerance: 0.01,
+    reportTolerance: 0.03,
+  };
+
+  assert.equal(
+    formatRunBanner(s),
+    'Paused at Sections 14/31 · reason: agy quota (resets in 43h24m17s)'
+  );
+});
+
+test('formatWorkerLine formats exact string', () => {
+  const line = formatWorkerLine({
+    worker: 1,
+    route: '/',
+    section: 'Hero + About',
+    agent: 'claude',
+    ms: 252_000,
+    lastLine: 'editing HeroAbout.tsx',
+  });
+  assert.equal(line, 'W1 · / · Hero + About · claude · 4m 12s · editing HeroAbout.tsx');
 });
 
 test('formatTimeSummary lists each page and names the slowest', () => {

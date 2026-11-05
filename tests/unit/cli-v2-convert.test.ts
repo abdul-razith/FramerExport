@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -104,30 +105,55 @@ test('stripNextSteps removes the pipeline Next steps block', () => {
   );
 });
 
-test('getDashboardChoices: install first when node_modules is missing, hidden otherwise', () => {
-  const state = stateWith(task('001-component-A', 'component'));
-  assert.equal(getDashboardChoices(state, false)[0].value, 'install');
-  assert.ok(!getDashboardChoices(state, true).some((c) => c.value === 'install'));
+test('getDashboardChoices: paused state puts resume first and preselected', () => {
+  const state = stateWith(task('101-page-home', 'page'));
+  state.run = { status: 'paused', reason: 'quota' };
+  const choices = getDashboardChoices(state);
+  assert.equal(choices[0].value, 'resume');
+  assert.equal(choices[0].selected, true);
 });
 
-test('getDashboardChoices: generate is offered before next', () => {
-  const values = getDashboardChoices(stateWith(task('001-component-A', 'component')), true).map((c) => c.value);
-  assert.ok(values.indexOf('generate') >= 0 && values.indexOf('generate') < values.indexOf('next'));
+test('getDashboardChoices: legacy state offers reconvert', () => {
+  const state = stateWith(task('101-page-home', 'page'));
+  state.legacyTasks = true;
+  const choices = getDashboardChoices(state);
+  assert.ok(choices.some((c) => c.value === 'reconvert'));
+
+  const modern = stateWith(task('101-page-home', 'page'));
+  modern.legacyTasks = undefined;
+  assert.ok(!getDashboardChoices(modern).some((c) => c.value === 'reconvert'));
 });
 
-test('getDashboardChoices: agent sits between next and verify', () => {
-  const values = getDashboardChoices(stateWith(task('001-component-A', 'component')), true).map((c) => c.value);
-  assert.ok(values.indexOf('next') < values.indexOf('agent'));
-  assert.ok(values.indexOf('agent') < values.indexOf('verify'));
+test('getDashboardChoices: needs-review state offers review', () => {
+  const state = stateWith(task('101-page-home', 'page', { status: 'needs-review' }));
+  const choices = getDashboardChoices(state);
+  assert.ok(choices.some((c) => c.value === 'review'));
+
+  const doneState = stateWith(task('101-page-home', 'page', { status: 'done' }));
+  assert.ok(!getDashboardChoices(doneState).some((c) => c.value === 'review'));
 });
 
-test('getDashboardChoices: "done" only appears when a motion task is incomplete', () => {
-  const none = stateWith(task('101-page-home', 'page'));
-  assert.ok(!getDashboardChoices(none, true).some((c) => c.value === 'done'));
-  const some = stateWith(task('201-motion-home', 'motion', { route: '/' }));
-  assert.ok(getDashboardChoices(some, true).some((c) => c.value === 'done'));
-  const finished = stateWith(task('201-motion-home', 'motion', { status: 'done' }));
-  assert.ok(!getDashboardChoices(finished, true).some((c) => c.value === 'done'));
+test('getDashboardChoices: fresh state includes standard choices and excludes contextual ones', () => {
+  const state = stateWith(task('101-page-home', 'page'));
+  const choices = getDashboardChoices(state);
+  const values = choices.map((c) => c.value);
+  assert.ok(values.includes('agent'));
+  assert.ok(values.includes('report'));
+  assert.ok(values.includes('options'));
+  assert.ok(values.includes('status'));
+  assert.ok(values.includes('next'));
+  assert.ok(values.includes('refresh'));
+  assert.ok(values.includes('exit'));
+  assert.ok(!values.includes('resume'));
+  assert.ok(!values.includes('reconvert'));
+  assert.ok(!values.includes('review'));
+  assert.ok(!values.includes('open-report'));
+});
+
+test('getDashboardChoices: open-report only offered when report exists', () => {
+  const state = stateWith(task('101-page-home', 'page'));
+  assert.ok(!getDashboardChoices(state, { reportExists: false }).some((c) => c.value === 'open-report'));
+  assert.ok(getDashboardChoices(state, { reportExists: true }).some((c) => c.value === 'open-report'));
 });
 
 test('getMotionChoices lists incomplete motion tasks and their fix tasks only', () => {
@@ -180,7 +206,7 @@ function capture() {
 test('parseConvertArgs: bare "ui" is the dashboard command, "./ui" is an export folder', () => {
   assert.equal(parseConvertArgs(['convert', 'ui']).command, 'ui');
   const run = parseConvertArgs(['convert', './ui']);
-  assert.equal(run.command, 'run');
+  assert.equal(run.command, 'convert');
   assert.equal(run.exportDir, './ui');
 });
 
@@ -271,195 +297,12 @@ test('resolveCliInvocation: the source entry (tsx src/cli/index.ts) of a built c
   assert.ok(out.startsWith('node "'), out);
 });
 
-// ---- Task 6: AI agent runner -------------------------------------------------------------------------
+// ---- Task 22: Live multi-worker agent runner & options ------------------------------------------------
 
 import { mkdir as mkdirp, readFile as readFileText } from 'node:fs/promises';
-import {
-  buildAgentCommand,
-  buildAgentPrompt,
-  runAgentLoop,
-  runAgentOnTask,
-} from '../../src/cli-v2/screens/convert-agent.js';
 import { pickBinaryLine } from '../../src/convert/runner/agent-process.js';
-import { recordAttempt, saveState } from '../../src/convert/state.js';
-
-test('buildAgentPrompt: fixed text with the task file, only shell-safe characters', () => {
-  const p = buildAgentPrompt('.convert/tasks/001-component-Arrow.md');
-  assert.equal(
-    p,
-    'Read AGENTS.md and .convert/tasks/001-component-Arrow.md then complete that task. Edit only the files listed under Edit only. Do not run verify, the dashboard runs it afterwards.'
-  );
-  assert.match(p, /^[A-Za-z0-9 ./_,-]+$/);
-});
-
-test('buildAgentPrompt rejects characters that are unsafe to quote', () => {
-  assert.throws(() => buildAgentPrompt('a"b.md'));
-  assert.throws(() => buildAgentPrompt('x & y.md'));
-});
-
-test('buildAgentCommand: same shape for agy and claude, no sandbox flag', () => {
-  for (const agent of ['agy', 'claude'] as const) {
-    const cmd = buildAgentCommand(agent, 'hello');
-    assert.deepEqual(cmd, { command: agent, args: ['-p', 'hello', '--dangerously-skip-permissions'] });
-    assert.ok(!cmd.args.includes('--sandbox'));
-  }
-});
-
-test('runAgentOnTask runs in the project, reports files changed outside the task targets', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agent-'));
-  await mkdirp(path.join(root, 'src'), { recursive: true });
-  await mkdirp(path.join(root, 'node_modules', 'x'), { recursive: true });
-  await writeFile(path.join(root, 'src', 'allowed.ts'), 'a');
-  await writeFile(path.join(root, 'src', 'other.ts'), 'o');
-  const stub = path.join(root, 'stub-agent.mjs');
-  await writeFile(
-    stub,
-    [
-      "import fs from 'node:fs';",
-      "fs.writeFileSync('src/allowed.ts', 'changed by agent, longer');",
-      "fs.writeFileSync('src/other.ts', 'changed by agent too, longer');",
-      "fs.writeFileSync('node_modules/x/ignored.js', 'ignored');",
-      "fs.writeFileSync('cwd.txt', process.cwd());",
-    ].join('\n')
-  );
-  const result = await runAgentOnTask(root, 'claude', '.convert/tasks/001.md', ['src/allowed.ts'], {
-    buildCommand: () => ({ command: process.execPath, args: [stub] }),
-  });
-  assert.equal(result.exitCode, 0);
-  assert.ok(result.outside.includes('src/other.ts'), result.outside.join(','));
-  assert.ok(!result.outside.includes('src/allowed.ts'));
-  assert.ok(!result.outside.some((f) => f.startsWith('node_modules')));
-  assert.equal((await readFileText(path.join(root, 'cwd.txt'), 'utf8')).toLowerCase(), root.toLowerCase());
-});
-
-async function loopProject(...tasks: TaskRecord[]) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'loop-'));
-  const state = initState('/e', root);
-  for (const t of tasks) state.tasks[t.id] = t;
-  await saveState(state);
-  return root;
-}
-
-const okAgent = async () => ({ exitCode: 0, outside: [] as string[] });
-
-test('runAgentLoop mode one runs exactly one task', async () => {
-  const root = await loopProject(task('001-component-A', 'component'), task('002-component-B', 'component'));
-  const ran: string[] = [];
-  const result = await runAgentLoop(root, 'agy', 'one', {
-    runAgent: async (_r, _a, t) => (ran.push(t.id), { exitCode: 0, outside: [] }),
-    verify: async (r, state, id) => {
-      state.tasks[id].status = 'done';
-      await saveState(state);
-      return { passed: [id], failed: [] };
-    },
-  });
-  assert.deepEqual(ran, ['001-component-A']);
-  assert.equal(result.stoppedFor, 'single');
-});
-
-test('runAgentLoop mode all stops at needs-human after three failed verifications', async () => {
-  const root = await loopProject(task('101-page-home', 'page', { route: '/' }));
-  const result = await runAgentLoop(root, 'claude', 'all', {
-    runAgent: okAgent,
-    verify: async (r, state, id) => {
-      recordAttempt(state, id, false);
-      await saveState(state);
-      return { passed: [], failed: [id] };
-    },
-  });
-  assert.equal(result.stoppedFor, 'needs-human');
-  assert.equal(result.ran.length, 3);
-});
-
-test('runAgentLoop mode all stops at motion tasks and finishes with done otherwise', async () => {
-  const root = await loopProject(task('101-page-home', 'page'), task('201-motion-home', 'motion', { route: '/' }));
-  const result = await runAgentLoop(root, 'agy', 'all', {
-    runAgent: okAgent,
-    verify: async (r, state, id) => {
-      state.tasks[id].status = 'done';
-      await saveState(state);
-      return { passed: [id], failed: [] };
-    },
-  });
-  assert.equal(result.stoppedFor, 'motion');
-  assert.deepEqual(result.ran, ['101-page-home']);
-
-  const root2 = await loopProject(task('101-page-home', 'page'));
-  const done = await runAgentLoop(root2, 'agy', 'all', {
-    runAgent: okAgent,
-    verify: async (r, state, id) => {
-      state.tasks[id].status = 'done';
-      await saveState(state);
-      return { passed: [id], failed: [] };
-    },
-  });
-  assert.equal(done.stoppedFor, 'done');
-});
-
-test('runAgentLoop stops with failed-agent when the agent exits non-zero, and reports verify errors', async () => {
-  const root = await loopProject(task('001-component-A', 'component'));
-  const failed = await runAgentLoop(root, 'agy', 'all', {
-    runAgent: async () => ({ exitCode: 2, outside: [] }),
-    verify: async () => ({ passed: [], failed: [] }),
-  });
-  assert.equal(failed.stoppedFor, 'failed-agent');
-  const verr = await runAgentLoop(root, 'agy', 'all', {
-    runAgent: okAgent,
-    verify: async () => {
-      throw new Error('Dependencies not installed');
-    },
-  });
-  assert.equal(verr.stoppedFor, 'verify-error');
-});
-
-test('runAgentLoop stops at the task limit', async () => {
-  const root = await loopProject(
-    task('001-component-A', 'component'),
-    task('002-component-B', 'component'),
-    task('003-component-C', 'component')
-  );
-  const result = await runAgentLoop(root, 'agy', 'all', {
-    runAgent: okAgent,
-    verify: async (r, state, id) => {
-      state.tasks[id].status = 'done';
-      await saveState(state);
-      return { passed: [id], failed: [] };
-    },
-    maxTasks: 2,
-  });
-  assert.equal(result.stoppedFor, 'limit');
-  assert.equal(result.ran.length, 2);
-});
-
-test('runAgentLoop stops at needs-human when the failing task is a fix task (real verify leaves the fix pending)', async () => {
-  const root = await loopProject(task('101-page-home', 'page', { route: '/' }));
-  const result = await runAgentLoop(root, 'claude', 'all', {
-    runAgent: okAgent,
-    // Mirrors stages/verify.ts: attempts are recorded on the original task and fix files stay pending.
-    verify: async (r, state, id) => {
-      const original = id.replace(/^fix-/, '').replace(/-\d+$/, '');
-      const status = recordAttempt(state, original, false);
-      if (status !== 'needs-human') {
-        const n = state.tasks[original].attempts;
-        state.tasks[`fix-${original}-${n}`] = task(`fix-${original}-${n}`, 'fix', { route: '/' });
-      }
-      await saveState(state);
-      return { passed: [], failed: [original] };
-    },
-  });
-  assert.equal(result.stoppedFor, 'needs-human');
-  assert.equal(result.ran.length, 3);
-});
-
-test('runAgentLoop stops as stalled when verification leaves the same task unchanged', async () => {
-  const root = await loopProject(task('001-component-A', 'component'));
-  const result = await runAgentLoop(root, 'agy', 'all', {
-    runAgent: okAgent,
-    verify: async () => ({ passed: [], failed: [] }),
-  });
-  assert.equal(result.stoppedFor, 'stalled');
-  assert.equal(result.ran.length, 2);
-});
+import { askRunOptions } from '../../src/cli-v2/screens/convert-options.js';
+import { DEFAULT_OPTIONS } from '../../src/convert/state.js';
 
 test('pickBinaryLine prefers a launchable file on Windows (.exe/.cmd/.bat) over a bare shim', () => {
   const out = 'C:\\nodejs\\claude\r\nC:\\nodejs\\claude.cmd\r\n';
@@ -468,61 +311,62 @@ test('pickBinaryLine prefers a launchable file on Windows (.exe/.cmd/.bat) over 
   assert.equal(pickBinaryLine('', 'win32'), null);
 });
 
-test('runAgentLoop books the agent time on the task and reports start and end of each task', async () => {
-  const root = await loopProject(task('101-page-home', 'page', { route: '/' }));
-  const events: string[] = [];
-  let clock = 1_000;
-  await runAgentLoop(root, 'agy', 'one', {
-    now: () => clock,
-    runAgent: async () => {
-      clock += 90_000;
-      return { exitCode: 0, outside: [] };
-    },
-    verify: async (_r, state, id) => {
-      state.tasks[id].status = 'done';
-      await saveState(state);
-      return { passed: [id], failed: [] };
-    },
-    onTaskStart: ({ task: t, state }) => events.push(`start ${t.id} ${state.timing?.byTask[t.id] ?? 0}`),
-    onTaskEnd: ({ task: t, ms }) => events.push(`end ${t.id} ${ms}`),
+test('askRunOptions returns defaults when default options accepted', async () => {
+  const defaults = { ...DEFAULT_OPTIONS, agent: 'agy' as const };
+  const res = await askRunOptions(defaults, ['agy', 'claude'], {
+    confirm: async () => true,
   });
-  assert.deepEqual(events, ['start 101-page-home 0', 'end 101-page-home 90000']);
-  const { loadState } = await import('../../src/convert/state.js');
-  assert.equal((await loadState(root))!.timing!.byTask['101-page-home'], 90_000);
+  assert.deepEqual(res, defaults);
 });
 
-test('runAgentLoop books the time of a fix task on the task it fixes', async () => {
-  const root = await loopProject(
-    task('101-page-home', 'page', { route: '/', status: 'in-progress' }),
-    task('fix-101-page-home-1', 'fix', { route: '/' })
-  );
-  let clock = 0;
-  await runAgentLoop(root, 'agy', 'one', {
-    now: () => clock,
-    runAgent: async () => {
-      clock += 30_000;
-      return { exitCode: 0, outside: [] };
+test('askRunOptions prompts for each option when defaults declined', async () => {
+  const defaults = { ...DEFAULT_OPTIONS, agent: 'agy' as const };
+  const textAnswers: Record<string, string> = {
+    'Section timeout (minutes):': '20',
+    'Page timeout (minutes):': '25',
+    'Pixel tolerance (0–1):': '0.02',
+    'Report tolerance (0–1):': '0.05',
+  };
+  const res = await askRunOptions(defaults, ['agy', 'claude'], {
+    confirm: async (msg) => {
+      if (msg === 'Use default options?') return false;
+      if (msg === 'Enable visual testing?') return false;
+      return true;
     },
-    verify: async (_r, state) => ({ passed: [], failed: [] }),
+    select: async (msg) => {
+      if (msg === 'Select AI agent:') return 'claude';
+      if (msg === 'Worker concurrency:') return '2';
+      return '1';
+    },
+    text: async (msg) => textAnswers[msg] ?? '15',
   });
-  const { loadState } = await import('../../src/convert/state.js');
-  assert.equal((await loadState(root))!.timing!.byTask['101-page-home'], 30_000);
+  assert.deepEqual(res, {
+    testing: false,
+    agent: 'claude',
+    concurrency: 2,
+    sectionTimeoutMin: 20,
+    pageTimeoutMin: 25,
+    pixelTolerance: 0.02,
+    reportTolerance: 0.05,
+  });
 });
 
-test('runAgentOnTask with a log file keeps the agent output off the terminal and reports the last line', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agent-log-'));
-  const stub = path.join(root, 'talker.mjs');
-  await writeFile(stub, "console.log('first line'); console.log('second line');");
-  const lines: string[] = [];
-  const logFile = path.join(root, '.convert', 'logs', 'task.log');
-  const result = await runAgentOnTask(root, 'claude', '.convert/tasks/001.md', [], {
-    buildCommand: () => ({ command: process.execPath, args: [stub] }),
-    logFile,
-    onOutput: (l) => lines.push(l),
-  });
-  assert.equal(result.exitCode, 0);
-  assert.match(await readFileText(logFile, 'utf8'), /first line\r?\nsecond line/);
-  assert.equal(lines.at(-1), 'second line');
+test('reconvert renames project to .old (suffix -2, -3 if taken)', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'reconvert-'));
+  const projDir = path.join(dir, 'site-next');
+  await mkdirp(projDir);
+  await mkdirp(path.join(dir, 'site-next.old'));
+  await mkdirp(path.join(dir, 'site-next.old-2'));
+
+  const baseName = path.basename(projDir);
+  const parentDir = path.dirname(projDir);
+  let targetName = `${baseName}.old`;
+  let suffix = 2;
+  while (existsSync(path.join(parentDir, targetName))) {
+    targetName = `${baseName}.old-${suffix}`;
+    suffix++;
+  }
+  assert.equal(targetName, 'site-next.old-3');
 });
 
 import { fitLine, tickingMessage } from '../../src/cli-v2/screens/convert-helpers.js';

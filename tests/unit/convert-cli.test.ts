@@ -15,14 +15,81 @@ after(async () => {
 });
 const io = () => ({ confirm: async () => true, log: () => {} });
 
-test('parseConvertArgs handles each form', () => {
-  assert.deepEqual(parseConvertArgs(['convert', './exp']), { command: 'run', exportDir: './exp', nextDir: undefined, target: undefined, yes: false });
-  assert.deepEqual(parseConvertArgs(['convert', './exp', './out', '--yes']), { command: 'run', exportDir: './exp', nextDir: './out', target: undefined, yes: true });
+test('parseConvertArgs handles every command and flag', () => {
+  // convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent agy|claude] [--concurrency 1|2|3]
+  assert.deepEqual(parseConvertArgs(['convert', './exp']), {
+    command: 'convert',
+    exportDir: './exp',
+    nextDir: undefined,
+    yes: false,
+    testing: undefined,
+    agent: undefined,
+    concurrency: undefined,
+  });
+
+  assert.deepEqual(parseConvertArgs(['convert', './exp', './out', '--yes', '--testing', 'off', '--agent', 'claude', '--concurrency', '2']), {
+    command: 'convert',
+    exportDir: './exp',
+    nextDir: './out',
+    yes: true,
+    testing: false,
+    agent: 'claude',
+    concurrency: 2,
+  });
+
+  assert.deepEqual(parseConvertArgs(['convert', './exp', '--testing', 'on', '--concurrency', '3']), {
+    command: 'convert',
+    exportDir: './exp',
+    nextDir: undefined,
+    yes: false,
+    testing: true,
+    agent: undefined,
+    concurrency: 3,
+  });
+
+  // status, next, ui
   assert.equal(parseConvertArgs(['convert', 'status']).command, 'status');
   assert.equal(parseConvertArgs(['convert', 'next']).command, 'next');
-  const v = parseConvertArgs(['convert', 'verify', '/about']);
-  assert.equal(v.command, 'verify');
-  assert.equal(v.target, '/about');
+  assert.equal(parseConvertArgs(['convert', 'ui']).command, 'ui');
+
+  // check <taskId> [--smoke]
+  assert.deepEqual(parseConvertArgs(['convert', 'check', '101-page-home']), {
+    command: 'check',
+    taskId: '101-page-home',
+    smoke: false,
+    yes: false,
+  });
+  assert.deepEqual(parseConvertArgs(['convert', 'check', '101-page-home', '--smoke']), {
+    command: 'check',
+    taskId: '101-page-home',
+    smoke: true,
+    yes: false,
+  });
+
+  // run
+  assert.deepEqual(parseConvertArgs(['convert', 'run']), {
+    command: 'run',
+    yes: false,
+  });
+
+  // report & verify (alias)
+  assert.deepEqual(parseConvertArgs(['convert', 'report']), {
+    command: 'report',
+    target: undefined,
+    yes: false,
+  });
+  assert.deepEqual(parseConvertArgs(['convert', 'verify', '/about']), {
+    command: 'report',
+    target: '/about',
+    yes: false,
+  });
+
+  // review <taskId>
+  assert.deepEqual(parseConvertArgs(['convert', 'review', '101-page-home']), {
+    command: 'review',
+    taskId: '101-page-home',
+    yes: false,
+  });
 });
 
 test('runPipeline refuses non-framer exports', async () => {
@@ -95,4 +162,57 @@ test('pickNextTask prefers fix tasks', () => {
   const mk = (id: string, kind: 'fix' | 'component') => ({ id, kind, file: id + '.md', status: 'pending' as const, attempts: 0, targets: [] });
   state.tasks = { '001-a': mk('001-a', 'component'), 'fix-002': mk('fix-002', 'fix') };
   assert.equal(pickNextTask(state)?.id, 'fix-002');
+});
+
+test('runConvertCommand review transitions needs-review to done', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'fexport review '));
+  tmps.push(dir);
+  const state = initState('/e', dir);
+  state.tasks['101-page-home'] = {
+    id: '101-page-home',
+    kind: 'page',
+    file: '.convert/tasks/101-page-home.md',
+    status: 'needs-review',
+    attempts: 1,
+    targets: [],
+  };
+  state.tasks['102-page-about'] = {
+    id: '102-page-about',
+    kind: 'page',
+    file: '.convert/tasks/102-page-about.md',
+    status: 'in-progress',
+    attempts: 0,
+    targets: [],
+  };
+  const { saveState } = await import('../../src/convert/state.js');
+  await saveState(state);
+
+  const prev = process.cwd();
+  process.chdir(dir);
+  try {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const sink = { log: (m: string) => logs.push(m), error: (m: string) => errors.push(m) };
+
+    // Review non-needs-review task
+    const code1 = await runConvertCommand(['convert', 'review', '102-page-about'], sink);
+    assert.equal(code1, 1);
+    assert.match(errors.join(' '), /is in-progress, not needs-review/);
+
+    // Review unknown task
+    const code2 = await runConvertCommand(['convert', 'review', 'non-existent'], sink);
+    assert.equal(code2, 1);
+    assert.match(errors.join(' '), /Unknown task/);
+
+    // Review valid needs-review task
+    const code0 = await runConvertCommand(['convert', 'review', '101-page-home'], sink);
+    assert.equal(code0, 0);
+    assert.match(logs.join(' '), /Marked 101-page-home done/);
+
+    const { loadState } = await import('../../src/convert/state.js');
+    const updated = await loadState(dir);
+    assert.equal(updated!.tasks['101-page-home']!.status, 'done');
+  } finally {
+    process.chdir(prev);
+  }
 });
