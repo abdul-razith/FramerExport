@@ -150,10 +150,11 @@ ${formatProgressLine(state)}`,
         const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => live.update(m.slice(0, 80)) });
         live.stop();
         spinner.stop('Generation finished');
+        const totalSections = r.pages.reduce((acc, p) => acc + p.sections.length, 0);
         uiNote(
           `Pages: ${r.pages.length}
-Components: ${r.components.length}
-Left alone (already done): ${r.skipped.length}
+Sections: ${totalSections}
+Stubs: ${r.stubs.length}
 
 Now choose "Run verification" to see which pages still need work.`,
           'Generated'

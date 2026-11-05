@@ -64,3 +64,9 @@ test('rewriteTokens handles empty string, empty map, or missing arguments', () =
   assert.equal(rewriteTokens('div', {}), 'div');
   assert.equal(rewriteTokens('var(--token-1)', {}), 'var(--token-1)');
 });
+
+test('rewriteTokens handles nested var expressions in fallback', () => {
+  const s = 'var(--extracted-r6o4lv, var(--token-1, rgb(255, 255, 255)))';
+  const map = { '--token-1': 'White' };
+  assert.equal(rewriteTokens(s, map), 'var(--extracted-r6o4lv, var(--color-white))');
+});

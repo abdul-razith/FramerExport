@@ -113,6 +113,9 @@ export function rewriteTokens(jsx: string, tokenMap: Record<string, string>): st
 
     if (name) {
       result += `var(--color-${kebab(name)})`;
+    } else if (commaIdx !== -1) {
+      const fallback = inside.slice(commaIdx + 1).trimStart();
+      result += `var(${token}, ${rewriteTokens(fallback, tokenMap)})`;
     } else {
       result += fullVar;
     }

@@ -178,7 +178,8 @@ export async function runConvertCommand(
     const { runGenerate } = await import('./generate/index.js');
     try {
       const r = await runGenerate({ state, exportDir: state.exportDir, nextDir: root, log: (m) => console.log(m) });
-      console.log(`Generated ${r.pages.length} page(s) and ${r.components.length} component(s); left ${r.skipped.length} finished task(s) alone.`);
+      const totalSections = r.pages.reduce((acc, p) => acc + p.sections.length, 0);
+      console.log(`Generated ${r.pages.length} page(s), ${totalSections} section(s), ${r.stubs.length} stub(s).`);
       console.log(`Next: run "${CLI_INVOCATION} verify" to check them.`);
       return 0;
     } catch (error) {

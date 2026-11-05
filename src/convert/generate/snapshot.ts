@@ -31,6 +31,7 @@ export interface SnapshotOut {
   sections: SnapshotSection[];
   unmatchedMotion: string[];
   slimmed: number;
+  stubs: Array<{ section: string | null; kind: string }>;
 }
 
 /**
@@ -80,6 +81,26 @@ export function snapshotScript(plan: SnapshotPlan): string {
 
     // 4. slim #main
     var slimmedCount = slim(main);
+
+    // 4b. collect stubs (iframe, form, data-code-component-plugin-id with no visible content)
+    var stubsOut = [];
+    var stubCandidates = Array.prototype.slice.call(
+      main.querySelectorAll('iframe, form, [data-code-component-plugin-id]')
+    );
+    if (main.matches && main.matches('iframe, form, [data-code-component-plugin-id]')) {
+      stubCandidates.unshift(main);
+    }
+    stubCandidates.forEach(function (el) {
+      var text = (el.textContent || '').trim();
+      var hasVisible = text.length > 0 || Boolean(el.querySelector('img, svg, video, canvas, input, select, textarea, button'));
+      if (!hasVisible) {
+        var tag = (el.tagName || '').toLowerCase();
+        var kind = tag === 'iframe' ? 'iframe' : tag === 'form' ? 'form' : (el.getAttribute('data-framer-name') || 'code component');
+        var secEl = el.closest ? el.closest('[data-section]') : null;
+        var secName = secEl ? secEl.getAttribute('data-section') : null;
+        stubsOut.push({ section: secName, kind: kind });
+      }
+    });
 
     // 5. convert sections
     var emptyLimit = typeof plan.emptyBytes === 'number' ? plan.emptyBytes : 1000;
@@ -212,7 +233,8 @@ export function snapshotScript(plan: SnapshotPlan): string {
       viewJsx: viewJsx,
       sections: sectionsOut,
       unmatchedMotion: unmatchedMotion,
-      slimmed: slimmedCount
+      slimmed: slimmedCount,
+      stubs: stubsOut
     };
   })(${planJson})`;
 }
