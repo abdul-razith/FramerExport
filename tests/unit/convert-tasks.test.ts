@@ -516,3 +516,88 @@ test('part tasks carry the motion, script-drawn, variants, repeated and cms info
   assert.match(page, /`m3`/, 'root-level anchor goes to the page task');
   assert.doesNotMatch(page, /`m5`/);
 });
+
+// ---- Fix 5 item 4: the shell task consolidates the per-page copies ----
+
+const sec = (slug: string, name: string, component: string) => ({
+  name,
+  component,
+  file: `src/sections/${slug}/${component}.tsx`,
+  parts: [],
+  motion: [],
+  scriptDrawn: [],
+  hasVariants: false,
+  repeated: [],
+  cmsFields: [],
+});
+
+const copiesManifest: GeneratedManifest = {
+  version: 1,
+  shell: [
+    {
+      name: 'Header + Line',
+      component: 'HeaderLine',
+      file: 'src/components/shell/HeaderLine.tsx',
+      pages: ['/', '/about'],
+      differences: ['/about: <a href="/about"> data-framer-name "desktop--active" (first page: "desktop--inactive")'],
+      copies: [
+        { route: '/', component: 'HeaderLine', file: 'src/sections/home/HeaderLine.tsx', view: 'src/views/home.tsx' },
+        { route: '/about', component: 'HeaderLine', file: 'src/sections/about/HeaderLine.tsx', view: 'src/views/about.tsx' },
+      ],
+    },
+  ],
+  pages: [
+    { route: '/', slug: 'home', view: 'src/views/home.tsx', sections: [sec('home', 'Hero', 'Hero')], inline: [], shell: ['Header + Line'] },
+    { route: '/about', slug: 'about', view: 'src/views/about.tsx', sections: [sec('about', 'Team', 'Team')], inline: [], shell: ['Header + Line'] },
+  ],
+  motion: [],
+  scriptDrawn: [],
+  stubs: [],
+  warnings: [],
+};
+
+test('Fix5 item 4: shell task targets are the shell file and dir, every per-page copy and every view; no section task for the shell section', async () => {
+  const ctx = await makeContext();
+  const records = await runTasks(ctx, copiesManifest);
+  assert.deepEqual(
+    records.map((r) => r.id),
+    ['shell-header-line', 'sec-home-hero', 'sec-about-team', 'page-home', 'page-about'],
+  );
+  const shell = records.find((r) => r.id === 'shell-header-line')!;
+  assert.deepEqual(shell.targets, [
+    'src/components/shell/HeaderLine.tsx',
+    'src/components/shell/HeaderLine/',
+    'src/sections/home/HeaderLine.tsx',
+    'src/sections/about/HeaderLine.tsx',
+    'src/views/home.tsx',
+    'src/views/about.tsx',
+  ]);
+  assert.deepEqual(shell.dependsOn, []);
+  // shell tasks run before section and page tasks
+  assert.deepEqual(records.find((r) => r.id === 'sec-home-hero')!.dependsOn, ['shell-header-line']);
+  assert.deepEqual(records.find((r) => r.id === 'page-about')!.dependsOn, ['sec-about-team', 'shell-header-line']);
+});
+
+test('Fix5 item 4: shell task text says to add props, switch every view to the shell component and delete the copies', async () => {
+  const ctx = await makeContext();
+  await runTasks(ctx, copiesManifest);
+  const md = await read(ctx, '.convert/tasks/shell-header-line.md');
+  assert.match(md, /props/i);
+  assert.match(md, /import HeaderLine from '@\/components\/shell\/HeaderLine'/);
+  assert.match(md, /delete/i);
+  for (const f of ['src/sections/home/HeaderLine.tsx', 'src/sections/about/HeaderLine.tsx', 'src/views/home.tsx', 'src/views/about.tsx']) {
+    assert.ok(md.includes('`' + f + '`'), `task text lists ${f}`);
+  }
+  assert.match(md, /desktop--active/, 'per-page differences are listed');
+  const edit = md.split('## Edit only')[1]!.split('## Inputs')[0]!;
+  assert.ok(edit.includes('`src/views/about.tsx`'));
+});
+
+test('Fix5 item 4: a shell without copies (older manifest) keeps the old targets', async () => {
+  const ctx = await makeContext();
+  const records = await runTasks(ctx, sampleManifest);
+  assert.deepEqual(records.find((r) => r.id === 'shell-navigation')!.targets, [
+    'src/components/shell/Navigation.tsx',
+    'src/components/shell/Navigation/',
+  ]);
+});

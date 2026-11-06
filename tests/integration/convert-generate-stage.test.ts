@@ -9,6 +9,7 @@ import { readManifest } from '../../src/convert/generate/manifest.js';
 import { runAnalyze } from '../../src/convert/stages/analyze.js';
 import { runExtractCms } from '../../src/convert/stages/extract-cms.js';
 import { runScaffold } from '../../src/convert/stages/scaffold/index.js';
+import { runTasks } from '../../src/convert/stages/tasks.js';
 import { initState } from '../../src/convert/state.js';
 import { stopAllManaged } from '../../src/convert/verify/proc.js';
 
@@ -202,4 +203,45 @@ test('generate stage writes sections, views, shell and manifest end-to-end', { t
     heroSection.scriptDrawn.includes('s1'),
     `Hero + About section.scriptDrawn should contain 's1', got: ${JSON.stringify(heroSection.scriptDrawn)}`,
   );
+
+  // Fix 5: sections shared across pages are shells (nav with an active link, CTA, smooth scroll, background grid);
+  // every page still imports its own faithful copy until the shell task consolidates them.
+  const shellNames = manifest.shell.map((s) => s.name);
+  for (const name of ['Header + Line', 'CTA', 'Smooth Scroll', 'section-1']) {
+    assert.ok(shellNames.includes(name), `"${name}" should be a shell section, got ${JSON.stringify(shellNames)}`);
+  }
+  for (const sh of manifest.shell) {
+    assert.ok(await exists(path.join(nextDir, sh.file)), `shell component ${sh.file} exists`);
+    assert.equal(sh.copies?.length, sh.pages.length, `${sh.name}: one copy per page`);
+    for (const c of sh.copies ?? []) {
+      assert.ok(await exists(path.join(nextDir, c.file)), `per-page copy ${c.file} exists`);
+      const copyText = await readFile(path.join(nextDir, c.file), 'utf8');
+      assert.ok(copyText.includes(`data-section="${sh.name}"`), `${c.file} keeps data-section`);
+      const viewText = await readFile(path.join(nextDir, c.view), 'utf8');
+      assert.match(viewText, new RegExp(`import ${c.component} from '@/sections/[^']+/${c.component}'`), `${c.view} imports its own copy`);
+      assert.doesNotMatch(viewText, /@\/components\/shell\//,`${c.view} does not import the shell component yet`);
+    }
+    for (const page of manifest.pages.filter((p) => sh.pages.includes(p.route))) {
+      assert.ok(page.shell.includes(sh.name), `${page.route} lists shell ${sh.name}`);
+      assert.ok(!page.sections.some((s) => s.name === sh.name), `${page.route}: no section entry for shell ${sh.name}`);
+    }
+  }
+
+  // The tasks stage: no section task for any instance of a shell section; the shell task owns copies and views.
+  const records = await runTasks(ctx, manifest);
+  const sectionTaskNames = records.filter((r) => r.kind === 'section').map((r) => r.section);
+  for (const name of shellNames) assert.ok(!sectionTaskNames.includes(name), `no section task for shell section ${name}`);
+  const navShell = records.find((r) => r.id === 'shell-header-line');
+  assert.ok(navShell, 'shell task for the nav');
+  const navEntry = manifest.shell.find((s) => s.name === 'Header + Line')!;
+  for (const c of navEntry.copies ?? []) {
+    assert.ok(navShell.targets?.includes(c.file), `shell task targets copy ${c.file}`);
+    assert.ok(navShell.targets?.includes(c.view), `shell task targets view ${c.view}`);
+  }
+  assert.ok(navEntry.differences.length > 0 && navEntry.differences.length <= 10, 'the active-link differences are listed (max 10)');
+  for (const t of records.filter((r) => r.kind === 'section' || r.kind === 'page')) {
+    for (const sh of records.filter((r) => r.kind === 'shell')) {
+      if (t.kind === 'section') assert.ok(t.dependsOn?.includes(sh.id), `${t.id} runs after ${sh.id}`);
+    }
+  }
 });

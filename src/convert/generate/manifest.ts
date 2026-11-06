@@ -40,12 +40,23 @@ export interface GeneratedPage {
   shell: string[];
 }
 
+/** One page's own copy of a shell section (written by generate; the shell task consolidates them). */
+export interface GeneratedShellCopy {
+  route: string;
+  component: string;
+  file: string;
+  /** The view that imports this copy. */
+  view: string;
+}
+
 export interface GeneratedShell {
   name: string;
   component: string;
   file: string;
   pages: string[];
   differences: string[];
+  /** Per-page copies the views import until the shell task runs. Absent in manifests from older runs. */
+  copies?: GeneratedShellCopy[];
 }
 
 export interface MotionAnchor {

@@ -25,6 +25,7 @@ import {
   type GeneratedPart,
   type GeneratedSection,
   type GeneratedShell,
+  type GeneratedShellCopy,
   type MotionAnchor,
 } from './manifest.js';
 
@@ -45,6 +46,22 @@ async function readJson<T>(file: string, fallback: T): Promise<T> {
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/** A section's JSX with its parts put back in place of the `<fexport-part>` placeholders. */
+export function inlineParts(s: { jsx: string; parts: Array<{ name: string; jsx: string }> }): string {
+  let out = s.jsx;
+  for (const part of s.parts) {
+    const partRe = new RegExp(
+      `<fexport-part\\b[^>]*\\bdata-name="${escapeRegex(part.name)}"[^>]*(?:\\/>|>(?:[\\s\\S]*?<\\/fexport-part>)?)`,
+      'g',
+    );
+    out = out.replace(partRe, () => part.jsx);
+  }
+  return out;
+}
+
+const componentFile = (comp: string, jsx: string): string =>
+  `${FILE_HEADER}export default function ${comp}({ item }: { item?: any } = {}) {\n  return (\n${jsx}\n  );\n}\n`;
 
 /** Inserts the generated imports and view body into a scaffolded page file; safe to run again. */
 export function patchPage(source: string, imports: string, body: string): string {
@@ -355,13 +372,14 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
   // Shell detection across all pages
   const shellInput = rawPages.map((rp) => ({
     route: rp.page.route,
-    sections: rp.sections.filter((s) => !s.empty).map((s) => ({ name: s.name, jsx: s.jsx })),
+    // Compared as written to the files (links, assets, tokens rewritten) so page-depth path noise does not count.
+    sections: rp.sections.filter((s) => !s.empty).map((s) => ({ name: s.name, jsx: rewrite(inlineParts(s)) })),
   }));
   const shellCandidates = findShellSections(shellInput);
 
   const shellTaken = new Set<string>();
   const manifestShell: GeneratedShell[] = [];
-  const shellByName = new Map<string, { candidate: ShellCandidate; component: string; file: string }>();
+  const shellByName = new Map<string, { candidate: ShellCandidate; entry: GeneratedShell }>();
 
   for (const candidate of shellCandidates) {
     const comp = componentName(candidate.name, shellTaken);
@@ -370,7 +388,7 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
 
     const firstPage = rawPages.find((rp) => candidate.pages.includes(rp.page.route));
     const firstSec = firstPage?.sections.find((s) => s.name === candidate.name);
-    let rawJsx = firstSec ? firstSec.jsx : '';
+    const rawJsx = firstSec ? inlineParts(firstSec) : '';
     let rewrittenJsx = rewrite(rawJsx);
 
     if (!rewrittenJsx.includes(`data-section="${candidate.name}"`)) {
@@ -378,20 +396,18 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
     }
 
     await mkdir(path.dirname(absFile), { recursive: true });
-    await writeFile(
-      absFile,
-      `${FILE_HEADER}export default function ${comp}({ item }: { item?: any } = {}) {\n  return (\n${rewrittenJsx}\n  );\n}\n`,
-      'utf8',
-    );
+    await writeFile(absFile, componentFile(comp, rewrittenJsx), 'utf8');
 
-    manifestShell.push({
+    const entry: GeneratedShell = {
       name: candidate.name,
       component: comp,
       file: relFile,
       pages: candidate.pages,
       differences: candidate.differences,
-    });
-    shellByName.set(candidate.name, { candidate, component: comp, file: relFile });
+      copies: [],
+    };
+    manifestShell.push(entry);
+    shellByName.set(candidate.name, { candidate, entry });
     ctx.log(`generate: shell component ${comp} (${candidate.pages.length} pages)`);
   }
 
@@ -403,7 +419,8 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
     const pageInline: string[] = [];
     const pageShellNames: string[] = [];
     const pageTaken = new Set<string>();
-    const sectionComponentByName = new Map<string, { component: string; isShell: boolean }>();
+    const sectionComponentByName = new Map<string, { component: string }>();
+    const viewRelFile = `src/views/${rp.slug}.tsx`;
 
     for (const s of rp.sections) {
       if (s.empty) {
@@ -412,16 +429,25 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
       }
 
       const shellInfo = shellByName.get(s.name);
-      if (shellInfo && shellInfo.candidate.pages.includes(rp.page.route)) {
-        pageShellNames.push(s.name);
-        sectionComponentByName.set(s.name, { component: shellInfo.component, isShell: true });
-        continue;
-      }
 
       const comp = componentName(s.name, pageTaken);
       const relFile = `src/sections/${rp.slug}/${comp}.tsx`;
       const absFile = path.join(nextDir, relFile);
       await mkdir(path.dirname(absFile), { recursive: true });
+
+      if (shellInfo && shellInfo.candidate.pages.includes(rp.page.route)) {
+        // The page keeps its own faithful copy (its view imports it) until the shell task consolidates the copies.
+        let copyJsx = rewrite(inlineParts(s));
+        if (!copyJsx.includes(`data-section="${s.name}"`)) {
+          copyJsx = copyJsx.replace(/^<([A-Za-z0-9_-]+)/, `<$1 data-section="${s.name}"`);
+        }
+        await writeFile(absFile, componentFile(comp, copyJsx), 'utf8');
+        const copy: GeneratedShellCopy = { route: rp.page.route, component: comp, file: relFile, view: viewRelFile };
+        shellInfo.entry.copies!.push(copy);
+        pageShellNames.push(s.name);
+        sectionComponentByName.set(s.name, { component: comp });
+        continue;
+      }
 
       // Handle parts for oversized sections
       const partRecords: GeneratedPart[] = [];
@@ -486,7 +512,7 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
         repeated: s.repeated,
         cmsFields: s.cmsFields,
       });
-      sectionComponentByName.set(s.name, { component: comp, isShell: false });
+      sectionComponentByName.set(s.name, { component: comp });
     }
 
     // Replace fexport-section placeholders in viewJsx
@@ -505,14 +531,9 @@ export async function runGenerate(ctx: StageContext): Promise<GeneratedManifest>
       if (s.empty) continue;
       const info = sectionComponentByName.get(s.name);
       if (!info) continue;
-      if (info.isShell) {
-        componentImports.push(`import ${info.component} from '@/components/shell/${info.component}';`);
-      } else {
-        componentImports.push(`import ${info.component} from '@/sections/${rp.slug}/${info.component}';`);
-      }
+      componentImports.push(`import ${info.component} from '@/sections/${rp.slug}/${info.component}';`);
     }
 
-    const viewRelFile = `src/views/${rp.slug}.tsx`;
     const viewAbsFile = path.join(nextDir, viewRelFile);
     await mkdir(path.dirname(viewAbsFile), { recursive: true });
 

@@ -137,6 +137,15 @@ ${bullets(sds.map(formatScriptDrawnLine), '  ')}`);
 const dirTarget = (file: string): string => file.replace(/\.tsx$/, '') + '/';
 
 /**
+ * Files the shell task may edit: the shell component and its directory, plus (when generate wrote per-page
+ * copies) every copy and every view that imports one, so the task can switch the views and delete the copies.
+ */
+export function shellTargets(sh: GeneratedShell): string[] {
+  const copies = sh.copies ?? [];
+  return [...new Set([sh.file, dirTarget(sh.file), ...copies.map((c) => c.file), ...copies.map((c) => c.view)])];
+}
+
+/**
  * Builds a fallback manifest from pages.json and animations.json if generated.json
  * does not exist on disk (e.g. during pipeline tests before generate is run).
  */
@@ -223,12 +232,26 @@ export async function renderTaskFiles(ctx: StageContext, manifest: GeneratedMani
   for (const sh of manifest.shell) {
     const kebab = kebabName(sh.name);
     const id = `shell-${kebab}`;
-    const targets = [sh.file, dirTarget(sh.file)];
+    const targets = shellTargets(sh);
 
     const reqLines: string[] = [
       `- Export the React component \`${sh.component}\` from ${code(sh.file)}.`,
       `- Shared across pages: ${sh.pages.map(code).join(', ')}.`,
     ];
+    const copies = sh.copies ?? [];
+    if (copies.length > 0) {
+      const importLine = `import ${sh.component} from '@/components/shell/${sh.component}'`;
+      reqLines.push(
+        `- Consolidate: every page still has its own copy of this section and its view imports that copy, so the site looks exactly like the original until you finish. Refactor ${code(sh.file)} into the one clean component, then:
+  1. Add props for the per-page differences listed below (for example which link is the active page) so one component renders every page as it looks now.
+  2. In every view below, replace the import of the page's copy with ${code(importLine)} and render \`<${sh.component} />\` with the right props.
+  3. Delete each per-page copy once no view imports it.`,
+        `- Per-page copies and the views that import them:\n${bullets(
+          copies.map((c) => `${code(c.route)}: copy ${code(c.file)}, view ${code(c.view)}`),
+          '  ',
+        )}`,
+      );
+    }
     if (sh.differences && sh.differences.length > 0) {
       reqLines.push(`- Differences across pages to support via props:\n${bullets(sh.differences, '  ')}`);
     }
@@ -408,7 +431,7 @@ export async function runTasks(
     const kebab = kebabName(sh.name);
     const id = `shell-${kebab}`;
     const file = `.convert/tasks/${id}.md`;
-    const targets = [sh.file, dirTarget(sh.file)];
+    const targets = shellTargets(sh);
     const prev = ctx.state.tasks[id];
     return {
       id,

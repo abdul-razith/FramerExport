@@ -294,3 +294,50 @@ test('revertOutOfScope keeps allowed files in a new root directory without delet
   assert.equal(dirStat.isDirectory(), true);
 });
 
+
+test('Fix5 item 4: scope revert keeps the shell task consolidation (views edited, copies deleted, shell files added) and reverts everything else', async () => {
+  const { shellTargets } = await import('../../src/convert/stages/tasks.js');
+  const root = await createTempDir();
+  try {
+    const put = async (rel: string, text: string) => {
+      await fs.mkdir(path.dirname(path.join(root, rel)), { recursive: true });
+      await fs.writeFile(path.join(root, rel), text);
+    };
+    await put('src/components/shell/Nav.tsx', 'shell');
+    await put('src/sections/home/Nav.tsx', 'copy-home');
+    await put('src/sections/about/Nav.tsx', 'copy-about');
+    await put('src/views/home.tsx', 'view-home');
+    await put('src/views/about.tsx', 'view-about');
+    await put('src/views/contact.tsx', 'view-contact');
+    await put('src/sections/home/Hero.tsx', 'hero');
+    const targets = shellTargets({
+      name: 'Nav',
+      component: 'Nav',
+      file: 'src/components/shell/Nav.tsx',
+      pages: ['/', '/about'],
+      differences: [],
+      copies: [
+        { route: '/', component: 'Nav', file: 'src/sections/home/Nav.tsx', view: 'src/views/home.tsx' },
+        { route: '/about', component: 'Nav', file: 'src/sections/about/Nav.tsx', view: 'src/views/about.tsx' },
+      ],
+    });
+    const before = await snapshotTree(root);
+
+    await put('src/components/shell/Nav.tsx', 'shell-refactored');
+    await put('src/components/shell/Nav/Item.tsx', 'new shell part');
+    await put('src/views/home.tsx', 'view-home-switched');
+    await put('src/views/about.tsx', 'view-about-switched');
+    await fs.rm(path.join(root, 'src/sections/home/Nav.tsx'));
+    await fs.rm(path.join(root, 'src/sections/about/Nav.tsx'));
+    await put('src/views/contact.tsx', 'view-contact-EDITED');
+    await put('src/sections/home/Hero.tsx', 'hero-EDITED');
+
+    const reverted = await revertOutOfScope(root, before, targets);
+    assert.deepEqual(reverted, ['src/sections/home/Hero.tsx', 'src/views/contact.tsx']);
+    assert.equal(await fs.readFile(path.join(root, 'src/views/home.tsx'), 'utf8'), 'view-home-switched');
+    assert.equal(await fs.readFile(path.join(root, 'src/components/shell/Nav/Item.tsx'), 'utf8'), 'new shell part');
+    await assert.rejects(fs.stat(path.join(root, 'src/sections/home/Nav.tsx')));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
