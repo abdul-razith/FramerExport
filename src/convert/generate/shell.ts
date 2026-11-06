@@ -1,3 +1,12 @@
+import {
+  collectIdMap,
+  describeNoiseDiffs,
+  maskFramerClasses,
+  maskIdRefs,
+  maskIdTokens,
+  type ElementNoise,
+} from './shell-normalize.js';
+
 export interface ShellCandidate {
   name: string;
   pages: string[];
@@ -12,12 +21,17 @@ export interface Slot {
 export interface MaskResult {
   template: string;
   slots: Slot[];
+  /** Masked per-instance attributes (variant classes, names, styles, current-page markers), per element. */
+  noise: ElementNoise[];
 }
 
 const TARGET_ATTRS = new Set(['href', 'src', 'alt']);
 
 /** Per-page annotations (unique ids per page); ignored when comparing instances of a shared section. */
 const ANNOTATION_ATTRS = new Set(['data-motion', 'data-script-drawn', 'data-cms']);
+
+/** Markers whose presence/absence (and value) is per page, e.g. the active nav link. */
+const PRESENCE_ATTRS = new Set(['data-framer-page-link-current', 'aria-current']);
 
 /**
  * Normalizes and extracts placeholders from JSX. Replaces text nodes and
@@ -26,6 +40,9 @@ const ANNOTATION_ATTRS = new Set(['data-motion', 'data-script-drawn', 'data-cms'
  */
 export function maskJsx(jsx: string): MaskResult {
   const slots: Slot[] = [];
+  const noise: ElementNoise[] = [];
+  const ids = collectIdMap(jsx);
+  let ordinal = 0;
   let template = '';
   let i = 0;
 
@@ -118,15 +135,20 @@ export function maskJsx(jsx: string): MaskResult {
 
     const tagName = nameMatch[0].toLowerCase();
     const attrsStr = inner.slice(nameMatch[0].length).trim();
-    const { templateAttrs, tagSlots } = parseAndMaskAttrs(attrsStr);
+    const { templateAttrs, tagSlots, noiseAttrs } = parseAndMaskAttrs(attrsStr, ids);
     for (const s of tagSlots) {
       slots.push(s);
+    }
+    ordinal++;
+    if (Object.keys(noiseAttrs).length > 0) {
+      const href = tagSlots.find((s) => s.type === 'href')?.value;
+      noise.push({ ordinal, tag: tagName, ...(href ? { href } : {}), attrs: noiseAttrs });
     }
 
     template += `<${tagName}${templateAttrs ? ' ' + templateAttrs : ''}${isSelfClosing ? ' />' : '>'}`;
   }
 
-  return { template, slots };
+  return { template, slots, noise };
 }
 
 function cleanText(raw: string): string {
@@ -155,10 +177,14 @@ interface AttrItem {
   slot?: Slot;
 }
 
-function parseAndMaskAttrs(attrsStr: string): { templateAttrs: string; tagSlots: Slot[] } {
-  if (!attrsStr) return { templateAttrs: '', tagSlots: [] };
+function parseAndMaskAttrs(
+  attrsStr: string,
+  ids: Map<string, string>,
+): { templateAttrs: string; tagSlots: Slot[]; noiseAttrs: Record<string, string> } {
+  if (!attrsStr) return { templateAttrs: '', tagSlots: [], noiseAttrs: {} };
 
   const items: AttrItem[] = [];
+  const noiseAttrs: Record<string, string> = {};
   let k = 0;
 
   while (k < attrsStr.length) {
@@ -178,6 +204,10 @@ function parseAndMaskAttrs(attrsStr: string): { templateAttrs: string; tagSlots:
 
     if (k >= attrsStr.length || attrsStr[k] !== '=') {
       if (ANNOTATION_ATTRS.has(attrName.toLowerCase())) continue;
+      if (PRESENCE_ATTRS.has(attrName.toLowerCase())) {
+        noiseAttrs[attrName.toLowerCase()] = 'true';
+        continue;
+      }
       items.push({
         name: attrName.toLowerCase(),
         templateStr: `${attrName}={true}`,
@@ -254,17 +284,32 @@ function parseAndMaskAttrs(attrsStr: string): { templateAttrs: string; tagSlots:
     if (ANNOTATION_ATTRS.has(lower)) {
       continue;
     }
-    if (TARGET_ATTRS.has(lower)) {
+    if (PRESENCE_ATTRS.has(lower)) {
+      noiseAttrs[lower] = innerVal;
+      continue;
+    }
+    if (lower === 'data-framer-name') {
+      noiseAttrs[lower] = innerVal;
+      items.push({ name: lower, templateStr: `${attrName}="__SHELL_NAME__"` });
+    } else if (lower === 'style') {
+      noiseAttrs[lower] = innerVal;
+      items.push({ name: lower, templateStr: `${attrName}={__SHELL_STYLE__}` });
+    } else if (lower === 'id') {
+      items.push({ name: lower, templateStr: `${attrName}="${ids.get(innerVal) ?? innerVal}"` });
+    } else if (lower === 'classname' || lower === 'class') {
+      const { masked, tokens } = maskFramerClasses(rawVal);
+      if (tokens.length > 0) noiseAttrs['class'] = tokens.join(' ');
+      items.push({ name: lower, templateStr: `${attrName}=${masked}` });
+    } else if (TARGET_ATTRS.has(lower)) {
       items.push({
         name: lower,
         templateStr: `${attrName}="__SHELL_ATTR__"`,
-        slot: { type: lower as 'href' | 'src' | 'alt', value: innerVal },
+        slot: { type: lower as 'href' | 'src' | 'alt', value: maskIdRefs(innerVal, ids) },
       });
+    } else if (lower.startsWith('aria-') || lower === 'htmlfor') {
+      items.push({ name: lower, templateStr: `${attrName}=${maskIdTokens(rawVal, ids)}` });
     } else {
-      items.push({
-        name: lower,
-        templateStr: `${attrName}=${rawVal}`,
-      });
+      items.push({ name: lower, templateStr: `${attrName}=${maskIdRefs(rawVal, ids)}` });
     }
   }
 
@@ -276,7 +321,16 @@ function parseAndMaskAttrs(attrsStr: string): { templateAttrs: string; tagSlots:
   }
 
   const templateAttrs = items.map((it) => it.templateStr).join(' ');
-  return { templateAttrs, tagSlots };
+  return { templateAttrs, tagSlots, noiseAttrs };
+}
+
+const MAX_DIFFERENCES = 10;
+
+/** At most 10 lines; when there are more, the last line says how many were left out. */
+function capDifferences(lines: string[]): string[] {
+  if (lines.length <= MAX_DIFFERENCES) return lines;
+  const left = lines.length - (MAX_DIFFERENCES - 1);
+  return [...lines.slice(0, MAX_DIFFERENCES - 1), `... and ${left} more (compare the per-page copies)`];
 }
 
 /**
@@ -306,9 +360,11 @@ export function findShellSections(
 
   for (const name of candidateNames) {
     const trimmed = name.trim();
-    if (!trimmed || trimmed.toLowerCase() === 'page' || /^section-\d+$/i.test(trimmed)) {
+    if (!trimmed || trimmed.toLowerCase() === 'page') {
       continue;
     }
+    // `section-<n>` names are positional: only equal markup (not merely text-different) may merge them.
+    const generic = /^section-\d+(-\d+)?$/i.test(trimmed);
 
     const matchingPages: Array<{ route: string; jsx: string }> = [];
     for (const page of pages) {
@@ -347,19 +403,20 @@ export function findShellSections(
         break;
       }
 
+      let slotDiffs = 0;
       for (let s = 0; s < baseMask.slots.length; s++) {
         const baseVal = baseMask.slots[s]!.value;
         const instVal = instMask.slots[s]!.value;
         if (instVal !== baseVal) {
+          slotDiffs++;
           differences.push(`${inst.route}: ${instVal}`);
-          if (differences.length >= 10) {
-            break;
-          }
         }
       }
-      if (differences.length >= 10) {
+      if (generic && slotDiffs > 0) {
+        matchesStructure = false;
         break;
       }
+      differences.push(...describeNoiseDiffs(inst.route, baseMask.noise, instMask.noise));
     }
 
     if (!matchesStructure) {
@@ -369,7 +426,7 @@ export function findShellSections(
     results.push({
       name,
       pages: matchingPages.map((p) => p.route),
-      differences: differences.slice(0, 10),
+      differences: capDifferences(differences),
     });
   }
 

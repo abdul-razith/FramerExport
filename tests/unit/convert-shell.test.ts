@@ -60,7 +60,7 @@ test('findShellSections: structurally different Footer -> none', () => {
   assert.equal(candidates.length, 0);
 });
 
-test('findShellSections: section-2 on two pages -> none (excludes section-<n>)', () => {
+test('findShellSections: identical section-2 on two pages -> shell (generic names merge only on equal markup, Fix5 item 2)', () => {
   const pages = [
     {
       route: '/',
@@ -73,7 +73,8 @@ test('findShellSections: section-2 on two pages -> none (excludes section-<n>)',
   ];
 
   const candidates = findShellSections(pages);
-  assert.equal(candidates.length, 0);
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0], { name: 'section-2', pages: ['/', '/about'], differences: [] });
 });
 
 test('findShellSections: page on two pages -> none (excludes page)', () => {
@@ -282,4 +283,122 @@ test('findShellSections: nav differing only in data-motion / data-script-drawn /
   const candidates = findShellSections(pages);
   assert.equal(candidates.length, 1);
   assert.deepEqual(candidates[0], { name: 'Navigation', pages: ['/', '/about', '/contact'], differences: [] });
+});
+
+// ---- Fix 5 item 1: normalized comparison ----
+
+const navJsx = (o: { v: string; name: string; current: boolean; bg: string; sd: string; href: string }): string =>
+  `<header className="framer-hdr" data-framer-name="Header + Line" data-script-drawn="${o.sd}">` +
+  `<a className="framer-yadmh framer-v-${o.v} framer-1szvw3r" data-framer-name="${o.name}" href="${o.href}"` +
+  `${o.current ? ' data-framer-page-link-current="true" aria-current="page"' : ''}` +
+  ` style={{"backgroundColor":"${o.bg}"}}>Blog</a></header>`;
+
+test('Fix5 item 1: active nav link (variant class, data-framer-name, page-link-current, style) is still one shell, with readable differences', () => {
+  const pages = [
+    { route: '/', sections: [{ name: 'Header + Line', jsx: navJsx({ v: '1lelg4r', name: 'desktop--active', current: true, bg: 'var(--color-surface-2)', sd: 's1 s2', href: '/blog' }) }] },
+    { route: '/blog', sections: [{ name: 'Header + Line', jsx: navJsx({ v: 'pwe3fj', name: 'desktop--inactive', current: false, bg: 'var(--color-surface-4)', sd: 's9', href: '/blog' }) }] },
+  ];
+  const candidates = findShellSections(pages);
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0]!.pages, ['/', '/blog']);
+  const diffs = candidates[0]!.differences;
+  assert.ok(diffs.length >= 1 && diffs.length <= 10);
+  const joined = diffs.join('\n');
+  assert.match(joined, /\/blog/);
+  assert.match(joined, /desktop--inactive/);
+  assert.match(joined, /desktop--active/);
+  assert.match(joined, /framer-v-pwe3fj/);
+});
+
+test('Fix5 item 1: randomly generated svg ids and their url(#...) / href="#..." / aria references are masked', () => {
+  const svg = (id: string, clip: string): string =>
+    `<svg><defs><pattern id="${id}" width="100"><path d="M0 0" /></pattern><clipPath id="${clip}"><rect width="1" /></clipPath></defs>` +
+    `<rect fill="url(#${id})" clipPath="url(#${clip})" /><use xlinkHref="#${id}" /><a href="#${clip}" aria-labelledby="${id} ${clip}">x</a></svg>`;
+  const candidates = findShellSections([
+    { route: '/', sections: [{ name: 'Grid', jsx: svg('paper-pattern-grid-q2qacvrfj', 'clip-aaa') }] },
+    { route: '/about', sections: [{ name: 'Grid', jsx: svg('paper-pattern-grid-afdh306n0', 'clip-bbb') }] },
+  ]);
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0]!.differences, []);
+});
+
+test('Fix5 item 1: random framer container class hash is masked', () => {
+  const pages = [
+    { route: '/', sections: [{ name: 'Smooth Scroll', jsx: '<div className="framer-e4j7mq-container" data-framer-name="Smooth Scroll"><i /></div>' }] },
+    { route: '/about', sections: [{ name: 'Smooth Scroll', jsx: '<div className="framer-1tvkrgo-container" data-framer-name="Smooth Scroll"><i /></div>' }] },
+  ];
+  assert.equal(findShellSections(pages).length, 1);
+});
+
+test('Fix5 item 1: a structurally different instance (tag, attribute name, order) is not merged', () => {
+  const base = '<header><a href="/" id="a1">x</a><b>y</b></header>';
+  const variants = [
+    '<header><a href="/" id="a1">x</a><i>y</i></header>',
+    '<header><a href="/" id="a1" title="t">x</a><b>y</b></header>',
+    '<header><b>y</b><a href="/" id="a1">x</a></header>',
+    '<header><a href="/">x</a><b>y</b></header>',
+  ];
+  for (const v of variants) {
+    const r = findShellSections([
+      { route: '/', sections: [{ name: 'Header', jsx: base }] },
+      { route: '/b', sections: [{ name: 'Header', jsx: v }] },
+    ]);
+    assert.equal(r.length, 0, v);
+  }
+});
+
+test('Fix5 item 1: a different non-masked className value is still rejected', () => {
+  const r = findShellSections([
+    { route: '/', sections: [{ name: 'Header', jsx: '<a className="framer-v-abc one">x</a>' }] },
+    { route: '/b', sections: [{ name: 'Header', jsx: '<a className="framer-v-def two">x</a>' }] },
+  ]);
+  assert.equal(r.length, 0);
+});
+
+test('Fix5 item 1: differences are capped at 10 lines per shell across many pages', () => {
+  const pages = Array.from({ length: 9 }, (_, i) => ({
+    route: `/p${i}`,
+    sections: [{ name: 'Header + Line', jsx: navJsx({ v: `v${i}`, name: `n${i}`, current: i % 2 === 0, bg: `c${i}`, sd: `s${i}`, href: `/h${i}` }) }],
+  }));
+  const c = findShellSections(pages);
+  assert.equal(c.length, 1);
+  assert.ok(c[0]!.differences.length > 0 && c[0]!.differences.length <= 10);
+});
+
+// ---- Fix 5 item 2: generic names ----
+
+test('Fix5 item 2: section-<n> becomes a shell only when the normalized markup is equal (random id only)', () => {
+  const grid = (id: string): string => `<svg><pattern id="${id}"></pattern><rect fill="url(#${id})" /></svg>`;
+  const c = findShellSections([
+    { route: '/', sections: [{ name: 'section-1', jsx: grid('p-aaa') }] },
+    { route: '/about', sections: [{ name: 'section-1', jsx: grid('p-bbb') }] },
+  ]);
+  assert.equal(c.length, 1);
+  assert.equal(c[0]!.name, 'section-1');
+  assert.deepEqual(c[0]!.differences, []);
+});
+
+test('Fix5 item 2: section-<n> that differs in text only is never a shell', () => {
+  const c = findShellSections([
+    { route: '/', sections: [{ name: 'section-2', jsx: '<div><p>One</p></div>' }] },
+    { route: '/about', sections: [{ name: 'section-2', jsx: '<div><p>Two</p></div>' }] },
+  ]);
+  assert.equal(c.length, 0);
+});
+
+test('Fix5 item 2: unrelated sections at the same index never merge; page never does', () => {
+  assert.equal(
+    findShellSections([
+      { route: '/', sections: [{ name: 'section-1', jsx: '<div><h1>a</h1></div>' }] },
+      { route: '/b', sections: [{ name: 'section-1', jsx: '<section><img src="/x.png" /></section>' }] },
+    ]).length,
+    0,
+  );
+  assert.equal(
+    findShellSections([
+      { route: '/', sections: [{ name: 'page', jsx: '<main id="a"></main>' }] },
+      { route: '/b', sections: [{ name: 'page', jsx: '<main id="b"></main>' }] },
+    ]).length,
+    0,
+  );
 });
