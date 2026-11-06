@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { StageContext } from './adapters/types.js';
 import { readManifest, type GeneratedManifest } from './generate/manifest.js';
@@ -25,9 +26,10 @@ import { manifestFallback, renderTaskFiles } from './stages/tasks.js';
 import { DEFAULT_OPTIONS, loadState, saveState } from './state.js';
 import type { TaskRecord } from './types.js';
 import { ensureDevServer, type DevServer } from './verify/dev-server.js';
-import { runCheck, type CheckResult } from './verify/check.js';
+import { DEV_SERVER_DOWN, runCheck, type CheckResult } from './verify/check.js';
 import { hasInterruptHandler, npmCommand, setInterruptHandler, spawnManaged } from './verify/proc.js';
 import { runReport } from './verify/report.js';
+import { runBaseline } from './verify/baseline.js';
 
 export type { AgentId, QuotaHit };
 
@@ -56,6 +58,7 @@ export type RunDeps = Partial<PoolDeps> & {
   devServer?: (root: string) => Promise<DevServer>;
   finalize?: (ctx: StageContext) => Promise<{ buildOk: boolean; report?: string }>;
   manifest?: (root: string) => Promise<GeneratedManifest | null>;
+  baseline?: (ctx: StageContext, devUrl: string) => Promise<void>;
   detectAgents?: () => Promise<AgentId[]>;
   resolveAgentBinary?: (agent: AgentId) => Promise<string | null>;
 };
@@ -197,6 +200,13 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
     devServer = await devServerFn(resolvedRoot);
     await lock.setDevServer(devServer.pid);
 
+    // Full checks compare against reference screenshots of the original; without them every check fails with
+    // "Missing baseline". Capture them once, here, where the dev server is already up.
+    if (state.options?.testing !== false && state.stages.baseline !== 'done' && existsSync(state.exportDir)) {
+      await (deps?.baseline ?? ((c, url) => runBaseline(c, url)))(ctx, devServer.url);
+      await saveState(state);
+    }
+
     // The caller owns Ctrl+C when it installed a handler; otherwise use the no-prompt default
     // (first Ctrl+C finishes running tasks then pauses, second pauses now).
     if (!hasInterruptHandler()) {
@@ -224,15 +234,27 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
           );
         }
       }
+      const rawCheck =
+        deps?.check ?? ((taskId: string, smoke: boolean) => defaultCheck(resolvedRoot, devServer!.url, taskId, smoke));
+      // A dev server that died mid-run (a crash under load) is restarted once and the check retried, instead of
+      // every following task failing against a dead server.
+      const checkWithRestart = async (taskId: string, smoke: boolean): Promise<CheckResult> => {
+        const first = await rawCheck(taskId, smoke);
+        if (first.pass || !first.errors.some((e) => e.startsWith(DEV_SERVER_DOWN))) return first;
+        devServer = await devServerFn(resolvedRoot);
+        await lock.setDevServer(devServer.pid);
+        return rawCheck(taskId, smoke);
+      };
       const poolDeps: PoolDeps = {
         lock,
         onEvent: (e) => io.onEvent(e),
-        check: deps?.check ?? ((taskId, smoke) => defaultCheck(resolvedRoot, devServer!.url, taskId, smoke)),
+        check: checkWithRestart,
         spawn:
           deps?.spawn ??
           ((task, prompt, timeoutMs, logFile, onLine) =>
             defaultSpawn(resolvedRoot, currentAgent, agentBinary, prompt, timeoutMs, logFile, onLine)),
         ...(deps?.now ? { now: deps.now } : {}),
+        precheck: deps?.precheck ?? true,
       };
 
       const result = await runQueue(ctx, poolDeps, io.pause);

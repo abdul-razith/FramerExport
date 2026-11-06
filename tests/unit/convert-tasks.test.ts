@@ -176,7 +176,7 @@ test('SHARED_RULES contains spec 6.3 verbatim bullets', () => {
   assert.match(SHARED_RULES, /Keep `img` elements' `src`, `srcSet`, `sizes` and `alt` \(plain `img`, not `next\/image`\)\./);
   assert.match(SHARED_RULES, /Use `src\/lib\/motion\.ts` \/ `src\/lib\/gsap\.ts`; framer-motion for appear and hover, GSAP ScrollTrigger for scroll-linked motion\. Under `\?__verify=1` everything renders in its finished state\./);
   assert.match(SHARED_RULES, /\*\*Never run `npm run build`, `next dev`, `next start` or `npm install`\.\*\*/);
-  assert.match(SHARED_RULES, /Testing on: check with `fexport convert check <taskId>`; testing off: `fexport convert check <taskId> --smoke`\. Stop when it passes or when it says the limit is reached\./);
+  assert.match(SHARED_RULES, /Do not run `fexport convert check` yourself either: the runner checks your work as soon as you stop/);
 });
 
 test('runTasks creates records with correct ids, kinds, targets, dependsOn, no task for inline section', async () => {
@@ -273,6 +273,7 @@ test('Done when contains check <id> and after testing=false re-rendering check <
 
   const heroBefore = await read(ctx, '.convert/tasks/sec-home-hero.md');
   assert.match(heroBefore, /check sec-home-hero/);
+  assert.match(heroBefore, /Do not run the check, the dev server or the build/);
   assert.doesNotMatch(heroBefore, /check sec-home-hero --smoke/);
 
   // Toggle testing off and re-render

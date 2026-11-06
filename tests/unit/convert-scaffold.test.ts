@@ -174,3 +174,9 @@ test('generated next.config.ts contains agentRules: false', async () => {
   const nextConfig = await read(ctx, 'next.config.ts');
   assert.match(nextConfig, /agentRules:\s*false/);
 });
+
+test('generated next.config.ts pins the Turbopack root to the project (a parent lockfile must not widen it)', async () => {
+  const ctx = await ran();
+  const nextConfig = await read(ctx, 'next.config.ts');
+  assert.match(nextConfig, /turbopack:\s*\{\s*root:\s*process\.cwd\(\)\s*\}/);
+});

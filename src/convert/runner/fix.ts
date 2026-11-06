@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { StageContext } from '../adapters/types.js';
 import { writeFileAtomic } from '../state.js';
 import { renderTemplate } from '../stages/tasks.js';
-import { checkCommand, SHARED_RULES } from '../tasks/templates/index.js';
+import { doneWhenText, SHARED_RULES } from '../tasks/templates/index.js';
 import type { CheckResult } from '../verify/check.js';
 import type { TaskRecord } from '../types.js';
 
@@ -79,7 +79,7 @@ export async function writeFixTask(
     targets: targetsFormatted,
     failures,
     rules: SHARED_RULES,
-    doneWhen: `Run \`${checkCommand(fixId, testing)}\` and stop when it passes or reports the limit.`,
+    doneWhen: doneWhenText(fixId, testing),
   });
 
   const fullPath = path.join(ctx.nextDir, relFile);

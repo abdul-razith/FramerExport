@@ -85,6 +85,17 @@ export async function probeServer(
   return last;
 }
 
+/**
+ * Next allows one dev server per project. A second one exits with "Another next dev server is already running"
+ * and prints the first one's port and pid; returns them so the caller can use that server instead of failing.
+ */
+export function parseExistingDevServer(output: string): { port: number; pid: number } | null {
+  if (!/Another next dev server is already running/i.test(output)) return null;
+  const port = /-\s*Local:\s*https?:\/\/[^\s:]+:(\d+)/i.exec(output)?.[1];
+  const pid = /-\s*PID:\s*(\d+)/i.exec(output)?.[1];
+  return port && pid ? { port: Number(port), pid: Number(pid) } : null;
+}
+
 const WORD = '(^|[^a-z0-9_-])';
 const END = '([^a-z0-9_-]|$)';
 
@@ -240,6 +251,20 @@ async function ensureDevServerLocked(nextDir: string, opts?: EnsureDevServerOpti
       if (managedProc) await managedProc.stop().catch(() => {});
       else await killPidTree(pid).catch(() => {});
       const log = output();
+      // Another process (a parallel check, a leftover server) already owns this project's dev server: use it.
+      const existingServer = parseExistingDevServer(log);
+      if (existingServer && (await probeServer(`http://127.0.0.1:${existingServer.port}/`, opts?.probeTimeoutMs)) === 'ok') {
+        await mkdir(path.dirname(infoPath), { recursive: true });
+        await writeFileAtomic(
+          infoPath,
+          JSON.stringify({ pid: existingServer.pid, port: existingServer.port, startedAt: new Date().toISOString() }, null, 2)
+        );
+        return {
+          url: `http://127.0.0.1:${existingServer.port}`,
+          pid: existingServer.pid,
+          stop: () => stopDevServer(nextDir)
+        };
+      }
       const details = log ? `.\n${log.slice(-4000)}` : '.';
       throw new Error(`dev server exited before becoming ready (code ${child.exitCode})${details}`);
     }

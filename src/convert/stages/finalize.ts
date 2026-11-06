@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { StageContext } from '../adapters/types.js';
 import { saveState, writeFileAtomic } from '../state.js';
 import { renderTemplate } from './tasks.js';
-import { checkCommand, SHARED_RULES } from '../tasks/templates/index.js';
+import { doneWhenText, SHARED_RULES } from '../tasks/templates/index.js';
 import { baselineDir } from '../verify/baseline.js';
 import type { CheckResult } from '../verify/check.js';
 import type { TaskRecord } from '../types.js';
@@ -251,7 +251,7 @@ export async function runFinalize(
       targets: '- `src/`',
       failures: buildRes.log || 'Production build failed.',
       rules: SHARED_RULES,
-      doneWhen: `Run \`${checkCommand('fix-build', isTesting)}\` and stop when it passes or reports the limit.`,
+      doneWhen: doneWhenText('fix-build', isTesting),
     });
     await writeFileAtomic(fixFilePath, templateContent);
     await saveState(ctx.state);

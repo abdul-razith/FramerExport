@@ -14,13 +14,16 @@ import { capturePageSections } from './capture-sections.js';
 import { diffClusters } from './clusters.js';
 import { codeViolations, readTargetSources, shellCopyViolations } from './check-code.js';
 import { requiredMotionIds, runMotionOnFreshPage, taskMotionAnchors } from './check-motion.js';
-import { ensureDevServer, resolveDevUrl } from './dev-server.js';
+import { ensureDevServer, probeServer, resolveDevUrl } from './dev-server.js';
 import { compareDom, type DomMismatch, type SectionDom } from './dom-check.js';
 import { movedTowards } from './motion-check.js';
 import { settleNext, withVerifyFlag } from './settle.js';
 
 export { checkMotion, movedTowards } from './motion-check.js';
 export { codeViolations, shellCopyViolations };
+
+/** Start of the error a check reports when the dev server does not answer; the runner restarts the server on it. */
+export const DEV_SERVER_DOWN = 'Dev server is not responding';
 
 export interface WidthResult {
   width: number;
@@ -326,6 +329,22 @@ export async function runCheck(
   } else {
     // The pool's devUrl goes stale when the server was restarted on another port.
     devUrl = await resolveDevUrl(root, devUrl);
+  }
+
+  // A dev server that does not answer would otherwise cost a navigation timeout per width (minutes) before the
+  // check says anything: fail at once, with the reason.
+  if ((await probeServer(devUrl, 20_000, 2)) !== 'ok') {
+    return {
+      taskId,
+      mode,
+      pass: false,
+      limitReached: false,
+      widths: [],
+      dom: [],
+      code: [],
+      motion: [],
+      errors: [`${DEV_SERVER_DOWN} at ${devUrl}. Stop any stale \`next dev\` for this project and run again.`]
+    };
   }
 
   const manifest = await readManifest(root).catch(() => null);

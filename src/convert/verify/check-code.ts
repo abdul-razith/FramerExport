@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { GENERATED_MARKER } from '../generate/marker.js';
 import { hasFramerClassName } from '../stages/finalize.js';
 
 const SOURCE_EXTENSIONS = new Set(['.tsx', '.ts']);
@@ -16,7 +17,9 @@ export function codeViolations(
   const violations: string[] = [];
 
   for (const { file, text } of sources) {
-    if (hasFramerClassName(text)) {
+    // Generated markup keeps the original Framer classes on purpose (it is the exact copy); only hand-written or
+    // rewritten files must be free of them.
+    if (!text.slice(0, 400).includes(GENERATED_MARKER) && hasFramerClassName(text)) {
       violations.push(`${file}: framer- class name`);
     }
   }

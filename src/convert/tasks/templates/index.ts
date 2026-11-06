@@ -54,6 +54,11 @@ export function checkCommand(taskId: string, testing: boolean): string {
   return `${CLI_INVOCATION} check ${taskId}${testing ? '' : ' --smoke'}`;
 }
 
+/** What a task file says under "Done when": the agent only edits; the runner runs the check (a hanging check or dev server must never block the agent). */
+export function doneWhenText(taskId: string, testing: boolean): string {
+  return `Stop when your edits are finished. Do not run the check, the dev server or the build yourself: the runner runs \`${checkCommand(taskId, testing)}\` for you right after you stop.`;
+}
+
 export const SHARED_RULES = [
   '- Edit only the listed targets (a target ending in `/` allows new files inside that directory).',
   '- Tailwind utilities (arbitrary values allowed); no `framer-` class names; no inline `style` except motion values and CSS custom properties.',
@@ -61,7 +66,7 @@ export const SHARED_RULES = [
   "- Keep `img` elements' `src`, `srcSet`, `sizes` and `alt` (plain `img`, not `next/image`).",
   '- Use `src/lib/motion.ts` / `src/lib/gsap.ts`; framer-motion for appear and hover, GSAP ScrollTrigger for scroll-linked motion. Under `?__verify=1` everything renders in its finished state.',
   '- **Never run `npm run build`, `next dev`, `next start` or `npm install`.**',
-  '- Testing on: check with `fexport convert check <taskId>`; testing off: `fexport convert check <taskId> --smoke`. Stop when it passes or when it says the limit is reached.',
+  '- Do not run `fexport convert check` yourself either: the runner checks your work as soon as you stop, and a failed check comes back to you as a fix task.',
 ].join('\n');
 
 export const TEMPLATES = {
