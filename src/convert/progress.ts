@@ -206,3 +206,19 @@ export function startTicker(update: (elapsedMs: number) => void, everyMs = 1000)
   timer.unref?.();
   return () => clearInterval(timer);
 }
+
+/** What to show while a finished page waits for review in the browser. */
+export function formatPageReviewMessage(
+  state: ConvertState,
+  info: { route: string; url: string; taskId: string }
+): string {
+  const t = state.tasks[info.taskId];
+  const p = summarizeProgress(state);
+  const ms = state.timing?.byTask[info.taskId] ?? 0;
+  const flag = t?.status === 'needs-review' ? ' (needs review: it did not pass every check)' : '';
+  return [
+    `Page ${info.route} is done${flag} in ${formatDuration(ms)}.`,
+    `Open it in the browser: ${info.url}`,
+    `Pages ${p.pagesDone}/${p.pagesTotal} · Overall ${formatDuration(p.overallMs)}`,
+  ].join('\n');
+}

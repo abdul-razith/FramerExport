@@ -35,11 +35,22 @@ export interface RunIo {
   onEvent(e: PoolEvent): void;
   pause: PauseController;
   onQuota(hit: QuotaHit, other: AgentId | null): Promise<'switch' | 'stay'>;
+  /**
+   * Called while the dev server is still running after a page finished in `pause` mode, so the page can be opened
+   * in the browser. Without it the run just pauses (resume continues with the next page).
+   */
+  onPageReview?(info: { route: string; url: string; taskId: string }): Promise<'continue' | 'stop'>;
+}
+
+/** The dev-server address of a route, for the page review. */
+export function pageUrl(base: string, route: string): string {
+  return base.replace(/\/+$/, '') + (route.startsWith('/') ? route : '/' + route);
 }
 
 export type RunOutcome =
   | { status: 'done'; report?: string }
-  | { status: 'paused'; reason: 'user' | 'quota'; quotaResetHint?: string };
+  | { status: 'paused'; reason: 'user' | 'quota'; quotaResetHint?: string }
+  | { status: 'paused'; reason: 'page-review'; page: { route: string; url: string } };
 
 export type RunDeps = Partial<PoolDeps> & {
   devServer?: (root: string) => Promise<DevServer>;
@@ -272,6 +283,21 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
           reason: 'quota',
           ...(hit.resetHint ? { quotaResetHint: hit.resetHint } : {}),
         };
+      }
+
+      if (result.stoppedFor === 'page-review') {
+        const page = result.page!;
+        const url = pageUrl(devServer!.url, page.route);
+        const decision = io.onPageReview
+          ? await io.onPageReview({ route: page.route, url, taskId: page.taskId })
+          : 'stop';
+        if (decision === 'continue') {
+          await saveState(state);
+          continue;
+        }
+        state.run = { status: 'paused', reason: 'page-review', pausedAt: new Date().toISOString() };
+        await saveState(state);
+        return { status: 'paused', reason: 'page-review', page: { route: page.route, url } };
       }
 
       if (result.stoppedFor === 'paused') {

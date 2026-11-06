@@ -114,3 +114,46 @@ test('readyTasks: while a non-shell task is in running, shell tasks can be ready
   const ready = readyTasks(state, runningSec);
   assert.deepEqual(ready.map((t) => t.id), ['shell-nav']);
 });
+
+function pageSet(state: ReturnType<typeof initState>, slug: string, route: string, sections: string[]) {
+  for (const s of sections) {
+    state.tasks[`sec-${slug}-${s}`] = makeTask({ id: `sec-${slug}-${s}`, kind: 'section', route });
+  }
+  state.tasks[`page-${slug}`] = makeTask({
+    id: `page-${slug}`,
+    kind: 'page',
+    route,
+    dependsOn: sections.map((s) => `sec-${slug}-${s}`),
+  });
+}
+
+test('readyTasks: works one page at a time, home first, sections before the page task', () => {
+  const state = initState('/exp', '/next');
+  pageSet(state, 'about', '/about', ['hero']);
+  pageSet(state, 'home', '/', ['hero', 'faq']);
+  assert.deepEqual(readyTasks(state, new Set()).map((t) => t.id), ['sec-home-faq', 'sec-home-hero']);
+  state.tasks['sec-home-faq']!.status = 'done';
+  state.tasks['sec-home-hero']!.status = 'done';
+  assert.deepEqual(readyTasks(state, new Set()).map((t) => t.id), ['page-home']);
+  state.tasks['page-home']!.status = 'done';
+  assert.deepEqual(readyTasks(state, new Set()).map((t) => t.id), ['sec-about-hero']);
+});
+
+test('readyTasks: a page still awaiting a fix keeps later pages waiting', () => {
+  const state = initState('/exp', '/next');
+  pageSet(state, 'home', '/', ['hero']);
+  pageSet(state, 'about', '/about', ['hero']);
+  state.tasks['sec-home-hero']!.status = 'done';
+  state.tasks['page-home']!.status = 'awaiting-fix';
+  state.tasks['fix-page-home-1'] = makeTask({ id: 'fix-page-home-1', kind: 'fix', fixOf: 'page-home' });
+  assert.deepEqual(readyTasks(state, new Set()).map((t) => t.id), ['fix-page-home-1']);
+});
+
+test('readyTasks: a needs-review page counts as finished for moving on', () => {
+  const state = initState('/exp', '/next');
+  pageSet(state, 'home', '/', ['hero']);
+  pageSet(state, 'about', '/about', ['hero']);
+  state.tasks['sec-home-hero']!.status = 'done';
+  state.tasks['page-home']!.status = 'needs-review';
+  assert.deepEqual(readyTasks(state, new Set()).map((t) => t.id), ['sec-about-hero']);
+});

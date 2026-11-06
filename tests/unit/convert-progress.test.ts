@@ -221,3 +221,24 @@ test('startTicker calls update on an interval and stops cleanly', async () => {
   assert.equal(calls, after);
 });
 
+
+import { formatPageReviewMessage } from '../../src/convert/progress.js';
+
+test('formatPageReviewMessage names the page, its url, time and how far the run is', () => {
+  const s = stateWith(
+    task('page-home', 'page', { status: 'done', route: '/' }),
+    task('page-about', 'page', { route: '/about' }),
+  );
+  addTime(s, 'page-home', 125_000);
+  const msg = formatPageReviewMessage(s, { route: '/', url: 'http://127.0.0.1:4321/', taskId: 'page-home' });
+  assert.match(msg, /Page \/ is done/);
+  assert.match(msg, /http:\/\/127\.0\.0\.1:4321\//);
+  assert.match(msg, /2m 05s/);
+  assert.match(msg, /Pages 1\/2/);
+  assert.ok(!formatPageReviewMessage(s, { route: '/', url: 'u', taskId: 'page-home' }).includes('needs review'));
+});
+
+test('formatPageReviewMessage flags a page that ended as needs-review', () => {
+  const s = stateWith(task('page-home', 'page', { status: 'needs-review', route: '/' }));
+  assert.match(formatPageReviewMessage(s, { route: '/', url: 'u', taskId: 'page-home' }), /needs review/);
+});

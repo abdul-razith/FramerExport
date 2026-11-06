@@ -44,6 +44,8 @@ export interface RunOptions {
   testing: boolean;
   agent: AgentId;
   concurrency: 1 | 2 | 3;
+  /** `pause`: stop after each finished page so it can be reviewed; `auto`: go straight on to the next page. Absent in older projects (treated as `auto`). */
+  pageMode?: 'pause' | 'auto';
   sectionTimeoutMin: number;
   pageTimeoutMin: number;
   pixelTolerance: number;
@@ -52,7 +54,7 @@ export interface RunOptions {
 
 export interface RunState {
   status: 'idle' | 'running' | 'paused' | 'done';
-  reason?: 'user' | 'quota' | 'crash';
+  reason?: 'user' | 'quota' | 'crash' | 'page-review';
   quotaResetHint?: string;
   pausedAt?: string;
 }

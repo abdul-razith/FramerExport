@@ -794,3 +794,116 @@ test('runQueue: I4 a quota-looking line from an agent that exited 0 keeps the fi
   assert.equal(state.tasks['sec-1']!.status, 'done');
   assert.equal(await readFile(file, 'utf8'), '// finished');
 });
+
+async function twoPageQueue(pageMode: 'pause' | 'auto' | undefined, opts: { testing?: boolean } = {}) {
+  const root = await makeTmp();
+  const state = initState('/export', root);
+  state.options = {
+    testing: opts.testing ?? true,
+    concurrency: 1,
+    ...(pageMode ? { pageMode } : {}),
+    sectionTimeoutMin: 15,
+    pageTimeoutMin: 15,
+    pixelTolerance: 0.01,
+    reportTolerance: 0.03,
+    agent: 'agy',
+  };
+  await saveState(state);
+  const ctx: StageContext = { state, exportDir: '/export', nextDir: root, log: () => {} };
+  state.tasks['sec-home-hero'] = makeTask({ id: 'sec-home-hero', kind: 'section', route: '/' });
+  state.tasks['page-home'] = makeTask({ id: 'page-home', kind: 'page', route: '/', dependsOn: ['sec-home-hero'] });
+  state.tasks['sec-about-hero'] = makeTask({ id: 'sec-about-hero', kind: 'section', route: '/about' });
+  state.tasks['page-about'] = makeTask({ id: 'page-about', kind: 'page', route: '/about', dependsOn: ['sec-about-hero'] });
+  return { ctx, state };
+}
+
+test('runQueue: pageMode pause stops after a finished page and leaves the next page untouched', async () => {
+  const { ctx, state } = await twoPageQueue('pause');
+  const events: PoolEvent[] = [];
+  const res = await runQueue(
+    ctx,
+    {
+      lock: fakeLock(),
+      spawn: () => createFakeHandle({ delayMs: 5 }),
+      check: async (id) => makePassResult(id),
+      onEvent: (e) => events.push(e),
+    },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'page-review');
+  assert.deepEqual(res.page, { route: '/', taskId: 'page-home' });
+  assert.equal(state.tasks['page-home']!.status, 'done');
+  assert.equal(state.tasks['sec-about-hero']!.status, 'pending');
+  assert.deepEqual(res.ran, ['sec-home-hero', 'page-home']);
+  assert.ok(events.some((e) => e.type === 'page-complete' && e.route === '/'));
+});
+
+test('runQueue: pageMode auto carries on to the next page without stopping', async () => {
+  const { ctx, state } = await twoPageQueue('auto');
+  const res = await runQueue(
+    ctx,
+    { lock: fakeLock(), spawn: () => createFakeHandle({ delayMs: 5 }), check: async (id) => makePassResult(id) },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'done');
+  assert.equal(state.tasks['page-about']!.status, 'done');
+});
+
+test('runQueue: a project without pageMode behaves as auto', async () => {
+  const { ctx } = await twoPageQueue(undefined);
+  const res = await runQueue(
+    ctx,
+    { lock: fakeLock(), spawn: () => createFakeHandle({ delayMs: 5 }), check: async (id) => makePassResult(id) },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'done');
+});
+
+test('runQueue: pageMode pause also stops on a page that ended as needs-review', async () => {
+  const { ctx, state } = await twoPageQueue('pause', { testing: false });
+  const res = await runQueue(
+    ctx,
+    {
+      lock: fakeLock(),
+      spawn: () => createFakeHandle({ delayMs: 5 }),
+      check: async (id) => (id === 'page-home' ? makeFailResult(id) : makePassResult(id)),
+    },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'page-review');
+  assert.equal(state.tasks['page-home']!.status, 'needs-review');
+});
+
+test('runQueue: pageMode pause does not stop while the page awaits a fix, and stops once the fix passes', async () => {
+  const { ctx, state } = await twoPageQueue('pause');
+  let pageChecks = 0;
+  const res = await runQueue(
+    ctx,
+    {
+      lock: fakeLock(),
+      spawn: () => createFakeHandle({ delayMs: 5 }),
+      check: async (id) => {
+        if (id === 'page-home' && pageChecks++ === 0) return makeFailResult(id);
+        return makePassResult(id);
+      },
+    },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'page-review');
+  assert.equal(state.tasks['page-home']!.status, 'done');
+  assert.ok(res.ran.some((id) => id.startsWith('fix-')), 'the fix task ran before the pause');
+  assert.equal(state.tasks['sec-about-hero']!.status, 'pending');
+});
+
+test('runQueue: pageMode pause does not stop after the last page (finalize comes next)', async () => {
+  const { ctx, state } = await twoPageQueue('pause');
+  state.tasks['sec-about-hero']!.status = 'done';
+  state.tasks['page-about']!.status = 'done';
+  const res = await runQueue(
+    ctx,
+    { lock: fakeLock(), spawn: () => createFakeHandle({ delayMs: 5 }), check: async (id) => makePassResult(id) },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'done');
+  assert.equal(state.tasks['page-home']!.status, 'done');
+});

@@ -4,7 +4,7 @@ import { createPauseController } from '../../convert/runner/pool.js';
 import { createPauseInput } from '../../convert/runner/pause-input.js';
 import { runAgents, type RunDeps, type RunIo, type RunOutcome } from '../../convert/run.js';
 import { loadState } from '../../convert/state.js';
-import { formatWorkerLine } from '../../convert/progress.js';
+import { formatPageReviewMessage, formatWorkerLine } from '../../convert/progress.js';
 import { setInterruptHandler } from '../../convert/verify/proc.js';
 import { uiIntro, uiNote, uiSelect, uiSelectOrCancel } from '../ui/prompts.js';
 
@@ -149,6 +149,18 @@ export async function runScreenConvertAgents(
           `Agent quota reached: ${hit.line}`,
           options
         );
+      } finally {
+        restoreRawMode();
+      }
+    },
+    async onPageReview(info) {
+      const current = await loadState(root);
+      if (current) uiNote(formatPageReviewMessage(current, info), 'Page finished');
+      try {
+        return await uiSelect<'continue' | 'stop'>('What next?', [
+          { label: 'Continue with the next page', value: 'continue' },
+          { label: 'Stop here (resume later continues with the next page)', value: 'stop' },
+        ]);
       } finally {
         restoreRawMode();
       }

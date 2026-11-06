@@ -239,8 +239,32 @@ test('askRunOptions returns defaults when default options accepted', async () =>
   const defaults = { ...DEFAULT_OPTIONS, agent: 'agy' as const };
   const res = await askRunOptions(defaults, ['agy', 'claude'], {
     confirm: async () => true,
+    select: async (_msg, _options, initial) => initial as never,
   });
   assert.deepEqual(res, defaults);
+});
+
+test('askRunOptions always asks how pages are completed, defaulting to pause after each page', async () => {
+  assert.equal(DEFAULT_OPTIONS.pageMode, 'pause');
+  const defaults = { ...DEFAULT_OPTIONS, agent: 'agy' as const };
+  const asked: Array<{ msg: string; initial: unknown; values: unknown[] }> = [];
+  const res = await askRunOptions(defaults, ['agy'], {
+    confirm: async () => true,
+    select: async (msg, options, initial) => {
+      asked.push({ msg, initial, values: options.map((o) => o.value) });
+      return 'auto' as never;
+    },
+  });
+  assert.equal(asked[0]?.msg, 'How should pages be completed?');
+  assert.equal(asked[0]?.initial, 'pause');
+  assert.deepEqual(asked[0]?.values, ['pause', 'auto']);
+  assert.equal(res.pageMode, 'auto');
+});
+
+test('parseConvertArgs: --page-mode pause|auto, anything else is an error', () => {
+  assert.equal(parseConvertArgs(['convert', 'exp', '--page-mode', 'auto']).pageMode, 'auto');
+  assert.equal(parseConvertArgs(['convert', 'exp', '--page-mode=pause']).pageMode, 'pause');
+  assert.match(parseConvertArgs(['convert', 'exp', '--page-mode', 'x']).error ?? '', /--page-mode/);
 });
 
 test('askRunOptions prompts for each option when defaults declined', async () => {
@@ -260,6 +284,7 @@ test('askRunOptions prompts for each option when defaults declined', async () =>
     select: async (msg) => {
       if (msg === 'Select AI agent:') return 'claude';
       if (msg === 'Worker concurrency:') return '2';
+      if (msg === 'How should pages be completed?') return 'pause';
       return '1';
     },
     text: async (msg) => textAnswers[msg] ?? '15',
@@ -268,6 +293,7 @@ test('askRunOptions prompts for each option when defaults declined', async () =>
     testing: false,
     agent: 'claude',
     concurrency: 2,
+    pageMode: 'pause',
     sectionTimeoutMin: 20,
     pageTimeoutMin: 25,
     pixelTolerance: 0.02,
@@ -290,6 +316,7 @@ test('askRunOptions recognizes 0 as a valid numeric tolerance without falling ba
     },
     select: async (msg) => {
       if (msg === 'Select AI agent:') return 'agy';
+      if (msg === 'How should pages be completed?') return 'pause';
       return '1';
     },
     text: async (msg) => textAnswers[msg] ?? '0',
@@ -345,13 +372,17 @@ test('I2: askRunOptions refuses when no agent is installed', async () => {
 });
 
 test('I2: askRunOptions falls back to an installed agent when the default one is not installed', async () => {
-  const res = await askRunOptions({ ...DEFAULT_OPTIONS, agent: 'agy' }, ['claude'], { confirm: async () => true });
+  const res = await askRunOptions({ ...DEFAULT_OPTIONS, agent: 'agy' }, ['claude'], {
+    confirm: async () => true,
+    select: async (_m, _o, init) => init as never,
+  });
   assert.equal(res.agent, 'claude');
   let initial: string | undefined;
   await askRunOptions({ ...DEFAULT_OPTIONS, agent: 'agy' }, ['claude'], {
     confirm: async (m) => m !== 'Use default options?',
     select: async (m, _o, init) => {
       if (m === 'Select AI agent:') initial = init as string;
+      if (m === 'How should pages be completed?') return 'pause' as never;
       return (m === 'Worker concurrency:' ? '1' : 'claude') as never;
     },
     text: async () => '15',

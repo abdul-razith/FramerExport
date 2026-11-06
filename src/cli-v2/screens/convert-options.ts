@@ -23,9 +23,19 @@ export async function askRunOptions(
   if (agents.length === 0) {
     throw new Error('No supported AI agent found on PATH. Install agy or claude, then try again.');
   }
+  // Asked every time: it decides whether the run stops for your review after each page.
+  const pageMode = (await selectFn(
+    'How should pages be completed?',
+    [
+      { label: 'Page by page, pause after each page', value: 'pause', hint: 'review each page in the browser, then continue' },
+      { label: 'Page by page, automatic', value: 'auto', hint: 'go straight on to the next page' },
+    ],
+    defaults.pageMode ?? 'pause'
+  )) as 'pause' | 'auto';
+
   const useDefaults = await confirmFn('Use default options?', true);
   if (useDefaults) {
-    return { ...defaults, agent: agents.includes(defaults.agent) ? defaults.agent : agents[0] };
+    return { ...defaults, pageMode, agent: agents.includes(defaults.agent) ? defaults.agent : agents[0] };
   }
 
   const testing = await confirmFn('Enable visual testing?', defaults.testing);
@@ -77,6 +87,7 @@ export async function askRunOptions(
     testing,
     agent,
     concurrency,
+    pageMode,
     sectionTimeoutMin,
     pageTimeoutMin,
     pixelTolerance,
