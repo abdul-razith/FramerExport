@@ -12,7 +12,7 @@ import type { Box, TaskRecord } from '../types.js';
 import { baselineDir, BASELINE_WIDTHS, taskRoutes } from './baseline.js';
 import { capturePageSections } from './capture-sections.js';
 import { diffClusters } from './clusters.js';
-import { codeViolations, readTargetSources } from './check-code.js';
+import { codeViolations, readTargetSources, shellCopyViolations } from './check-code.js';
 import { requiredMotionIds, runMotionOnFreshPage, taskMotionAnchors } from './check-motion.js';
 import { ensureDevServer, resolveDevUrl } from './dev-server.js';
 import { compareDom, type DomMismatch, type SectionDom } from './dom-check.js';
@@ -20,7 +20,7 @@ import { movedTowards } from './motion-check.js';
 import { settleNext, withVerifyFlag } from './settle.js';
 
 export { checkMotion, movedTowards } from './motion-check.js';
-export { codeViolations };
+export { codeViolations, shellCopyViolations };
 
 export interface WidthResult {
   width: number;
@@ -169,14 +169,18 @@ export function formatCheck(r: CheckResult): string {
  * Files whose code is inspected for a task. A shell task is judged on the shell component only: its other
  * targets (per-page copies, views) are edited to consolidate but are cleaned up by their own tasks.
  */
+function shellFor(task: TaskRecord, manifest: GeneratedManifest | null) {
+  return manifest?.shell?.find(
+    (s) =>
+      s.name === task.section ||
+      kebabName(s.name) === kebabName(task.section || '') ||
+      task.id.endsWith(kebabName(s.name))
+  );
+}
+
 export function codeTargetsFor(task: TaskRecord, manifest: GeneratedManifest | null): string[] {
   if (task.kind === 'shell' && manifest?.shell) {
-    const sh = manifest.shell.find(
-      (s) =>
-        s.name === task.section ||
-        kebabName(s.name) === kebabName(task.section || '') ||
-        task.id.endsWith(kebabName(s.name))
-    );
+    const sh = shellFor(task, manifest);
     if (sh?.copies && sh.copies.length > 0) return [sh.file, sh.file.replace(/\.tsx$/, '') + '/'];
   }
   return task.targets && task.targets.length > 0 ? task.targets : task.file ? [task.file] : [];
@@ -338,6 +342,8 @@ export async function runCheck(
   const requiredMotion = requiredMotionIds(manifest, task);
 
   const code = codeViolations(sources, requiredMotion);
+  const shellEntry = task.kind === 'shell' ? shellFor(task, manifest) : undefined;
+  if (shellEntry?.copies?.length) code.push(...(await shellCopyViolations(root, shellEntry.copies)));
   const dom: DomMismatch[] = [];
   const widths: WidthResult[] = [];
   const motion: MotionResult[] = [];
@@ -392,6 +398,7 @@ export async function runCheck(
         }
       }
 
+      if (shellEntry?.copies?.length) errors.push(...code.filter((c) => c.includes('per-page copy') || c.includes('still imports')));
       const pass = errors.length === 0;
       widths.push({
         width: 1440,

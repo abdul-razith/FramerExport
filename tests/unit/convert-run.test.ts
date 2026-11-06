@@ -565,3 +565,25 @@ test('Fix5 item 5: state.run is running (reason and pausedAt cleared) while agen
   for (const s of seen) assert.deepEqual(s.run, { status: 'running' }, `run state during ${s.phase}`);
   assert.deepEqual((await loadState(root))!.run, { status: 'done' });
 });
+
+test('Fix5 round 2: a throw escaping finalize leaves the run paused with reason crash, not running', async () => {
+  const root = await setupProject('agy');
+  const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
+  const deps: RunDeps = {
+    devServer: async () => ({ url: 'http://127.0.0.1:1', pid: process.pid, stop: async () => {} }),
+    check: async () => ({ taskId: 'sec-home-hero', mode: 'full', pass: true, limitReached: false, widths: [], dom: [], code: [], motion: [], errors: [] }),
+    finalize: async () => {
+      throw new Error('boom');
+    },
+    detectAgents: async () => ['agy'],
+    spawn: () => ({
+      pid: process.pid,
+      done: Promise.resolve({ exitCode: 0, timedOut: false, killed: false, quota: null }),
+      kill: async () => {},
+    }),
+  };
+  await assert.rejects(runAgents(root, io, deps), /boom/);
+  const run = (await loadState(root))!.run;
+  assert.equal(run.status, 'paused');
+  assert.equal(run.reason, 'crash');
+});

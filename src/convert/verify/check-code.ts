@@ -96,3 +96,29 @@ export async function readTargetSources(
   }
   return sources;
 }
+
+/**
+ * A shell task must consolidate: no per-page copy may remain, and no view may still import one.
+ * Driven by the manifest's shell copies.
+ */
+export async function shellCopyViolations(
+  root: string,
+  copies: Array<{ file: string; view: string }>
+): Promise<string[]> {
+  const out: string[] = [];
+  const viewText = new Map<string, string>();
+  for (const c of copies) {
+    if (!viewText.has(c.view)) {
+      viewText.set(c.view, await readFile(path.resolve(root, c.view), 'utf8').catch(() => ''));
+    }
+    const mod = c.file.replace(/^src\//, '').replace(/\.tsx$/, '');
+    const text = viewText.get(c.view)!;
+    const imports = text.includes(`${mod}'`) || text.includes(`${mod}"`);
+    if (imports) {
+      out.push(`${c.view} still imports ${c.file}; switch it to the shell component and delete the copy`);
+    } else if (await readFile(path.resolve(root, c.file)).then(() => true, () => false)) {
+      out.push(`${c.file} still exists; delete the per-page copy`);
+    }
+  }
+  return out;
+}

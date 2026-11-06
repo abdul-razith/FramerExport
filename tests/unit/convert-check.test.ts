@@ -372,3 +372,28 @@ test('Fix5 item 4: the shell code check reads only the shell component, not the 
   const sec = { id: 'sec-home-hero', kind: 'section', section: 'Hero', route: '/', file: '', targets: ['a.tsx'], dependsOn: [], status: 'pending', attempts: 0 } as TaskRecord;
   assert.deepEqual(codeTargetsFor(sec, m), ['a.tsx']);
 });
+
+test('Fix5 round 2: shell check fails while a view still imports a copy or a copy exists; passes once consolidated', async () => {
+  const { shellCopyViolations } = await import('../../src/convert/verify/check-code.js');
+  const { mkdir } = await import('node:fs/promises');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'convert shellcopy '));
+  tmps.push(root);
+  const put = async (rel: string, text: string) => {
+    await mkdir(path.dirname(path.join(root, rel)), { recursive: true });
+    await writeFile(path.join(root, rel), text);
+  };
+  const copies = [{ file: 'src/sections/blog/HeaderLine.tsx', view: 'src/views/blog.tsx' }];
+  // shell is clean, but the view still imports its copy
+  await put('src/components/shell/HeaderLine.tsx', 'export default function H(){return <nav/>}');
+  await put('src/sections/blog/HeaderLine.tsx', 'copy');
+  await put('src/views/blog.tsx', "import HeaderLine from '@/sections/blog/HeaderLine';\n");
+  assert.deepEqual(await shellCopyViolations(root, copies), [
+    'src/views/blog.tsx still imports src/sections/blog/HeaderLine.tsx; switch it to the shell component and delete the copy',
+  ]);
+  // view switched, copy still there
+  await put('src/views/blog.tsx', "import HeaderLine from '@/components/shell/HeaderLine';\n");
+  assert.deepEqual(await shellCopyViolations(root, copies), ['src/sections/blog/HeaderLine.tsx still exists; delete the per-page copy']);
+  // consolidated
+  await rm(path.join(root, 'src/sections/blog/HeaderLine.tsx'));
+  assert.deepEqual(await shellCopyViolations(root, copies), []);
+});

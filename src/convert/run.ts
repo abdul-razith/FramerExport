@@ -140,6 +140,7 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
 
   let devServer: DevServer | undefined;
   let installedInterruptHandler = false;
+  let runState: Awaited<ReturnType<typeof loadState>> | undefined;
 
   try {
     const { lock, stale } = await acquireRunLock(resolvedRoot);
@@ -148,6 +149,7 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
     if (!state) {
       throw new Error(`No convert state found at ${resolvedRoot}`);
     }
+    runState = state;
 
     if (state.legacyTasks) {
       throw new Error(
@@ -317,6 +319,11 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
       };
     }
   } finally {
+    // An exception must not leave the run recorded as running.
+    if (runState?.run.status === 'running') {
+      runState.run = { status: 'paused', reason: 'crash', pausedAt: new Date().toISOString() };
+      await saveState(runState).catch(() => {});
+    }
     if (installedInterruptHandler) setInterruptHandler(null);
     if (devServer) {
       await acquiredLock?.setDevServer(null).catch(() => {});
