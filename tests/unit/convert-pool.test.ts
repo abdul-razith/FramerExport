@@ -907,3 +907,60 @@ test('runQueue: pageMode pause does not stop after the last page (finalize comes
   assert.equal(res.stoppedFor, 'done');
   assert.equal(state.tasks['page-home']!.status, 'done');
 });
+
+test('runQueue: with precheck a task whose generated output already passes is done without starting an agent', async () => {
+  const { ctx, state } = await twoPageQueue('auto');
+  const spawned: string[] = [];
+  const events: PoolEvent[] = [];
+  const res = await runQueue(
+    ctx,
+    {
+      lock: fakeLock(),
+      precheck: true,
+      spawn: (task) => {
+        spawned.push(task.id);
+        return createFakeHandle({ delayMs: 5 });
+      },
+      check: async (id) => (id === 'sec-about-hero' ? makeFailResult(id) : makePassResult(id)),
+      onEvent: (e) => events.push(e),
+    },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'done');
+  // Only the section whose pre-check failed needed an agent (and then its fix task: the check still fails for it).
+  assert.ok(spawned.includes('sec-about-hero'));
+  assert.ok(!spawned.includes('sec-home-hero'));
+  assert.ok(!spawned.includes('page-home'));
+  assert.equal(state.tasks['sec-home-hero']!.status, 'done');
+  assert.equal(state.tasks['page-home']!.status, 'done');
+  assert.ok(events.some((e) => e.type === 'end' && e.taskId === 'sec-home-hero' && e.outcome === 'done'));
+});
+
+test('runQueue: without precheck every task still goes to an agent first', async () => {
+  const { ctx } = await twoPageQueue('auto');
+  const spawned: string[] = [];
+  await runQueue(
+    ctx,
+    {
+      lock: fakeLock(),
+      spawn: (task) => {
+        spawned.push(task.id);
+        return createFakeHandle({ delayMs: 5 });
+      },
+      check: async (id) => makePassResult(id),
+    },
+    createPauseController()
+  );
+  assert.deepEqual(spawned, ['sec-home-hero', 'page-home', 'sec-about-hero', 'page-about']);
+});
+
+test('runQueue: a pre-checked page still pauses for review in pause mode', async () => {
+  const { ctx } = await twoPageQueue('pause');
+  const res = await runQueue(
+    ctx,
+    { lock: fakeLock(), precheck: true, spawn: () => createFakeHandle({ delayMs: 5 }), check: async (id) => makePassResult(id) },
+    createPauseController()
+  );
+  assert.equal(res.stoppedFor, 'page-review');
+  assert.deepEqual(res.page, { route: '/', taskId: 'page-home' });
+});

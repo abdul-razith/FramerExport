@@ -8,6 +8,7 @@ import {
   SHARED_RULES,
   TEMPLATES,
   checkCommand,
+  doneWhenText,
   type TemplateName,
 } from '../tasks/templates/index.js';
 import {
@@ -286,7 +287,7 @@ ${bullets(
       inputs: bullets([`Generated shell component: ${code(sh.file)}`]),
       requirements: reqLines.join('\n'),
       rules: SHARED_RULES,
-      doneWhen: `Run \`${checkCommand(id, testing)}\` and stop when it passes or reports the limit.`,
+      doneWhen: doneWhenText(id, testing),
     });
 
     await writeFile(path.join(ctx.nextDir, `.convert/tasks/${id}.md`), content, 'utf8');
@@ -315,7 +316,7 @@ ${bullets(
             inputs: bullets([`Generated part component: ${code(part.file)}`]),
             requirements: reqLines.join('\n'),
             rules: SHARED_RULES,
-            doneWhen: `Run \`${checkCommand(id, testing)}\` and stop when it passes or reports the limit.`,
+            doneWhen: doneWhenText(id, testing),
           });
 
           await writeFile(path.join(ctx.nextDir, `.convert/tasks/${id}.md`), content, 'utf8');
@@ -334,7 +335,7 @@ ${bullets(
           inputs: bullets([`Generated section JSX: ${code(sec.file)}`]),
           requirements: reqLines.join('\n'),
           rules: SHARED_RULES,
-          doneWhen: `Run \`${checkCommand(id, testing)}\` and stop when it passes or reports the limit.`,
+          doneWhen: doneWhenText(id, testing),
         });
 
         await writeFile(path.join(ctx.nextDir, `.convert/tasks/${id}.md`), content, 'utf8');
@@ -393,7 +394,7 @@ ${bullets(pageSd.map(formatScriptDrawnLine), '  ')}`);
       inputs: bullets([`View file: ${code(page.view)}`]),
       requirements: pageReqLines.join('\n'),
       rules: SHARED_RULES,
-      doneWhen: `Run \`${checkCommand(pageId, testing)}\` and stop when it passes or reports the limit.`,
+      doneWhen: doneWhenText(pageId, testing),
     });
 
     await writeFile(path.join(ctx.nextDir, `.convert/tasks/${pageId}.md`), pageContent, 'utf8');

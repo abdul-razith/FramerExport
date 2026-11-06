@@ -98,6 +98,7 @@ test('quota + switch -> second queue run uses the other agent', async () => {
   };
 
   const deps: RunDeps = {
+    precheck: false,
     devServer: async () => ({
       url: 'http://127.0.0.1:1',
       pid: process.pid,
@@ -161,6 +162,7 @@ test('quota + stay -> state.run { status: "paused", reason: "quota", quotaResetH
   };
 
   const deps: RunDeps = {
+    precheck: false,
     devServer: async () => ({
       url: 'http://127.0.0.1:1',
       pid: process.pid,
@@ -225,6 +227,7 @@ test('second runAgents while the first holds the lock rejects with RunActiveErro
 
   let firstRunning = false;
   const depsFirst: RunDeps = {
+    precheck: false,
     devServer: async () => ({
       url: 'http://127.0.0.1:1',
       pid: process.pid,
@@ -282,6 +285,7 @@ test('lock released after an exception', async () => {
   };
 
   const deps: RunDeps = {
+    precheck: false,
     devServer: async () => {
       throw new Error('dev server failure exploded');
     },
@@ -313,6 +317,7 @@ test('B-I4: the pool default check does not count check calls (counted from the 
 
 function i2Deps(over: Partial<RunDeps>): RunDeps {
   return {
+    precheck: false,
     devServer: async () => ({ url: 'http://127.0.0.1:1', pid: process.pid, stop: async () => {} }),
     check: async () => ({
       taskId: 'sec-home-hero',
@@ -532,6 +537,7 @@ test('Fix5 item 5: state.run is running (reason and pausedAt cleared) while agen
   const seen: Array<{ phase: string; run: unknown }> = [];
   const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
   const deps: RunDeps = {
+    precheck: false,
     devServer: async () => ({ url: 'http://127.0.0.1:1', pid: process.pid, stop: async () => {} }),
     check: async () => ({
       taskId: 'sec-home-hero',
@@ -570,6 +576,7 @@ test('Fix5 round 2: a throw escaping finalize leaves the run paused with reason 
   const root = await setupProject('agy');
   const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
   const deps: RunDeps = {
+    precheck: false,
     devServer: async () => ({ url: 'http://127.0.0.1:1', pid: process.pid, stop: async () => {} }),
     check: async () => ({ taskId: 'sec-home-hero', mode: 'full', pass: true, limitReached: false, widths: [], dom: [], code: [], motion: [], errors: [] }),
     finalize: async () => {
@@ -680,4 +687,92 @@ test('page review: stop from the handler pauses with page-review', async () => {
   );
   assert.equal(outcome.status, 'paused');
   assert.equal((await loadState(root))?.run.reason, 'page-review');
+});
+
+import { existsSync as exists } from 'node:fs';
+
+async function projectWithExport(testing: boolean, baseline: 'pending' | 'skipped' | 'done'): Promise<string> {
+  const root = await twoPageProject();
+  const state = (await loadState(root))!;
+  state.options = { ...state.options!, testing, pageMode: 'auto' };
+  state.stages.baseline = baseline;
+  // an export folder that exists, so a baseline can be captured from it
+  state.exportDir = path.join(root, 'export');
+  await mkdir(state.exportDir, { recursive: true });
+  await saveState(state);
+  return root;
+}
+
+test('baseline: testing on and no baseline yet -> it is captured once, before any task runs', async () => {
+  const root = await projectWithExport(true, 'skipped');
+  const order: string[] = [];
+  const deps = pageReviewDeps([]);
+  const baseDeps = { ...deps, baseline: async (_ctx: unknown, url: string) => { order.push('baseline ' + url); } } as RunDeps;
+  const origCheck = deps.check!;
+  baseDeps.check = async (id, smoke) => { order.push('check ' + id); return origCheck(id, smoke); };
+  await runAgents(root, { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' }, baseDeps);
+  assert.equal(order[0], 'baseline http://127.0.0.1:4321');
+  assert.equal(order.filter((o) => o.startsWith('baseline')).length, 1);
+});
+
+test('baseline: not captured with testing off, when already done, or when the export folder is missing', async () => {
+  for (const [testing, stage] of [[false, 'skipped'], [true, 'done']] as const) {
+    const root = await projectWithExport(testing, stage);
+    let calls = 0;
+    await runAgents(
+      root,
+      { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' },
+      { ...pageReviewDeps([]), baseline: async () => { calls++; } } as RunDeps
+    );
+    assert.equal(calls, 0, `testing=${testing} baseline=${stage}`);
+  }
+  const root = await twoPageProject(); // its export folder does not exist
+  let calls = 0;
+  await runAgents(
+    root,
+    { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay', onPageReview: async () => 'continue' },
+    { ...pageReviewDeps([]), baseline: async () => { calls++; } } as RunDeps
+  );
+  assert.equal(calls, 0);
+  assert.ok(exists(root));
+});
+
+import { DEV_SERVER_DOWN } from '../../src/convert/verify/check.js';
+
+test('dev server down: the runner restarts it and retries the check once instead of failing every task', async () => {
+  const root = await twoPageProject();
+  const finalized: string[] = [];
+  const deps = pageReviewDeps(finalized);
+  let starts = 0;
+  deps.devServer = async () => {
+    starts++;
+    return { url: 'http://127.0.0.1:' + (4321 + starts), pid: process.pid, stop: async () => {} };
+  };
+  const seenUrls: string[] = [];
+  let first = true;
+  const okCheck = deps.check!;
+  deps.check = async (taskId, smoke) => {
+    if (first) {
+      first = false;
+      return { ...(await okCheck(taskId, smoke)), pass: false, errors: [DEV_SERVER_DOWN + ' at http://127.0.0.1:4322.'] };
+    }
+    return okCheck(taskId, smoke);
+  };
+  const outcome = await runAgents(
+    root,
+    {
+      onEvent() {},
+      pause: createPauseController(),
+      onQuota: async () => 'stay',
+      onPageReview: async (info) => {
+        seenUrls.push(info.url);
+        return 'continue';
+      },
+    },
+    deps
+  );
+  assert.equal(outcome.status, 'done');
+  assert.equal(starts, 2, 'started once, restarted once');
+  assert.equal((await loadState(root))?.tasks['sec-home-hero']?.status, 'done');
+  assert.deepEqual(seenUrls.map((u) => u.replace(/:\d+/, ':PORT')), ['http://127.0.0.1:PORT/']);
 });

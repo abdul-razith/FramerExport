@@ -11,5 +11,5 @@ export function buildAgentPrompt(task: TaskRecord | string): string {
   if (!SAFE_PROMPT_PATH.test(file)) {
     throw new Error(`Unsafe task file path for the agent prompt: ${file}`);
   }
-  return `Read AGENTS.md and ${file}, then complete that task. Edit only the files listed under Edit only. When finished, run the check command in its Done when section and stop when it passes or reports the limit.`;
+  return `Read AGENTS.md and ${file}, then complete that task. Edit only the files listed under Edit only. Do not run the check, the dev server or the build: the runner verifies your work as soon as you stop. Stop when your edits are finished.`;
 }

@@ -74,6 +74,8 @@ export interface PoolDeps {
   lock: RunLock;
   onEvent?: (e: PoolEvent) => void;
   now?: () => number;
+  /** Check each fresh task before starting an agent; a task that already passes is done without one. */
+  precheck?: boolean;
 }
 
 /**
@@ -149,6 +151,20 @@ export async function runQueue(
   ): Promise<void> {
     const startMs = getTime();
     deps.onEvent?.({ type: 'start', worker, task });
+
+    // 0. The generated output may already be right: check first, and only call an agent when it is not.
+    if (deps.precheck && task.kind !== 'fix' && !task.attempts) {
+      const pre = await deps.check(task.id, ctx.state.options?.testing === false);
+      if (pre.pass && pause.mode !== 'now') {
+        task.status = 'done';
+        const ms = Math.max(0, getTime() - startMs);
+        addTime(ctx.state, task.id, ms);
+        await safeSaveState();
+        deps.onEvent?.({ type: 'end', worker, taskId: task.id, outcome: 'done', ms });
+        notePageFinished(task);
+        return;
+      }
+    }
 
     // 1. in-progress & saveState
     task.status = 'in-progress';
@@ -301,8 +317,11 @@ export async function runQueue(
     await safeSaveState();
 
     deps.onEvent?.({ type: 'end', worker, taskId: task.id, outcome, ms: elapsedMs });
+    notePageFinished(task);
+  }
 
-    // A page is finished when its page task (or the fix task for it) ends done or needs-review.
+  /** A page is finished when its page task (or the fix task for it) ends done or needs-review. */
+  function notePageFinished(task: TaskRecord): void {
     const pageTask = task.kind === 'page' ? task : task.fixOf ? ctx.state.tasks[task.fixOf] : undefined;
     if (pageTask?.kind === 'page' && (pageTask.status === 'done' || pageTask.status === 'needs-review')) {
       const route = pageTask.route ?? '/';
