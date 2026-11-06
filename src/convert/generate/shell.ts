@@ -14,7 +14,7 @@ export interface ShellCandidate {
 }
 
 export interface Slot {
-  type: 'text' | 'href' | 'src' | 'alt';
+  type: 'text' | 'href' | 'src' | 'alt' | 'srcset' | 'sizes';
   value: string;
 }
 
@@ -25,7 +25,7 @@ export interface MaskResult {
   noise: ElementNoise[];
 }
 
-const TARGET_ATTRS = new Set(['href', 'src', 'alt']);
+const TARGET_ATTRS = new Set(['href', 'src', 'srcset', 'sizes', 'alt']);
 
 /** Per-page annotations (unique ids per page); ignored when comparing instances of a shared section. */
 const ANNOTATION_ATTRS = new Set(['data-motion', 'data-script-drawn', 'data-cms']);
@@ -304,7 +304,8 @@ function parseAndMaskAttrs(
       items.push({
         name: lower,
         templateStr: `${attrName}="__SHELL_ATTR__"`,
-        slot: { type: lower as 'href' | 'src' | 'alt', value: maskIdRefs(innerVal, ids) },
+        // export-relative asset paths differ by page depth (`../assets/` on subpages); they are the same asset
+        slot: { type: lower as Slot['type'], value: maskIdRefs(innerVal, ids).replace(/(?:\.{1,2}\/)+assets\//g, 'assets/') },
       });
     } else if (lower.startsWith('aria-') || lower === 'htmlfor') {
       items.push({ name: lower, templateStr: `${attrName}=${maskIdTokens(rawVal, ids)}` });

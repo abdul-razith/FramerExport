@@ -402,3 +402,24 @@ test('Fix5 item 2: unrelated sections at the same index never merge; page never 
     0,
   );
 });
+
+test('Fix5 item 1: srcSet values (export-relative asset paths differ per page depth) are masked like src', () => {
+  const img = (prefix: string): string =>
+    `<div><img src="${prefix}assets/images/a.avif" srcSet="${prefix}assets/images/a.avif 512w,${prefix}assets/images/b.avif 870w" alt="x" /></div>`;
+  const c = findShellSections([
+    { route: '/', sections: [{ name: 'CTA', jsx: img('') }] },
+    { route: '/about', sections: [{ name: 'CTA', jsx: img('../') }] },
+  ]);
+  assert.equal(c.length, 1);
+  assert.deepEqual(c[0]!.differences, []);
+});
+
+test('Fix5 item 1: img sizes (Framer computes it per page) is a per-page value like srcSet, not structure', () => {
+  const img = (sizes: string): string => `<header><img sizes="${sizes}" src="/a.png" alt="x" /></header>`;
+  const c = findShellSections([
+    { route: '/', sections: [{ name: 'Header + Line', jsx: img('(min-width: 1200px) max(32px, 48px)') }] },
+    { route: '/contact', sections: [{ name: 'Header + Line', jsx: img('(min-width: 1200px) 32px') }] },
+  ]);
+  assert.equal(c.length, 1);
+  assert.deepEqual(c[0]!.differences, ['/contact: (min-width: 1200px) 32px']);
+});
