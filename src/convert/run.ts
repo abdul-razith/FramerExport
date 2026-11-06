@@ -192,6 +192,10 @@ export async function runAgents(root: string, io: RunIo, deps?: RunDeps): Promis
       installedInterruptHandler = true;
     }
 
+    // Visible to `status` / the UI while agents work; every exit below sets paused or done.
+    state.run = { status: 'running' };
+    await saveState(state);
+
     let finalizeRounds = 0;
     while (true) {
       const detect = deps?.detectAgents ?? detectAgents;

@@ -522,3 +522,46 @@ test('I7: runAgents refuses a legacy project', async () => {
   const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
   await assert.rejects(runAgents(root, io, i2Deps({})), /old task model/);
 });
+
+test('Fix5 item 5: state.run is running (reason and pausedAt cleared) while agents execute, then done', async () => {
+  const root = await setupProject('agy');
+  const stale = await loadState(root);
+  stale!.run = { status: 'paused', reason: 'quota', pausedAt: '2026-01-01T00:00:00.000Z', quotaResetHint: '1h' };
+  await saveState(stale!);
+
+  const seen: Array<{ phase: string; run: unknown }> = [];
+  const io: RunIo = { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' };
+  const deps: RunDeps = {
+    devServer: async () => ({ url: 'http://127.0.0.1:1', pid: process.pid, stop: async () => {} }),
+    check: async () => ({
+      taskId: 'sec-home-hero',
+      mode: 'full',
+      pass: true,
+      limitReached: false,
+      widths: [],
+      dom: [],
+      code: [],
+      motion: [],
+      errors: [],
+    }),
+    finalize: async () => {
+      seen.push({ phase: 'finalize', run: (await loadState(root))!.run });
+      return { buildOk: true };
+    },
+    detectAgents: async () => ['agy'],
+    spawn: () => ({
+      pid: process.pid,
+      done: (async () => {
+        seen.push({ phase: 'agent', run: (await loadState(root))!.run });
+        return { exitCode: 0, timedOut: false, killed: false, quota: null };
+      })(),
+      kill: async () => {},
+    }),
+  };
+
+  const outcome = await runAgents(root, io, deps);
+  assert.equal(outcome.status, 'done');
+  assert.ok(seen.some((s) => s.phase === 'agent'), 'agent ran');
+  for (const s of seen) assert.deepEqual(s.run, { status: 'running' }, `run state during ${s.phase}`);
+  assert.deepEqual((await loadState(root))!.run, { status: 'done' });
+});
