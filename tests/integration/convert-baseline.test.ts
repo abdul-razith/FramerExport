@@ -321,7 +321,8 @@ test('runBaseline captures baseline PNGs and DOM JSONs for shell and section tas
     [footerTask, expectedHeights.footer],
     [contactShellTask, expectedHeights['contact-banner']]
   ] as const) {
-    const dir = baselineDir(nextDir, task);
+    // a shell is baselined once per page it appears on
+    const dir = baselineDir(nextDir, task, task.kind === 'shell' ? (task === footerTask ? '/' : '/contact') : undefined);
 
     for (const width of BASELINE_WIDTHS) {
       const pngPath = path.join(dir, `${width}.png`);

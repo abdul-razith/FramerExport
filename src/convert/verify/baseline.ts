@@ -15,13 +15,15 @@ export const BASELINE_WIDTHS = [1440, 1000, 390] as const;
 /**
  * Returns the baseline artifact directory for a shell or section task:
  * - Section task: `.convert/baseline/<slug>/<kebab>`
- * - Shell task: `.convert/baseline/shell/<kebab>`
+ * - Shell task: `.convert/baseline/shell/<kebab>`; with `route`, the baseline of the shell on that page,
+ *   `.convert/baseline/shell/<kebab>/<route slug>` (a shell appears on several pages, each judged on its own)
  */
-export function baselineDir(nextDir: string, task: TaskRecord): string {
+export function baselineDir(nextDir: string, task: TaskRecord, route?: string): string {
   if (task.kind === 'shell') {
     const rawName = task.section || task.id.replace(/^shell-/, '');
     const kebab = kebabName(rawName);
-    return path.join(nextDir, '.convert', 'baseline', 'shell', kebab);
+    const base = path.join(nextDir, '.convert', 'baseline', 'shell', kebab);
+    return route === undefined ? base : path.join(base, routeSlug(route));
   }
 
   let slug = task.route ? routeSlug(task.route) : '';
@@ -58,7 +60,8 @@ export function baselineDir(nextDir: string, task: TaskRecord): string {
   return path.join(nextDir, '.convert', 'baseline', slug, kebab);
 }
 
-function determineTaskRoute(task: TaskRecord, manifest: GeneratedManifest | null): string {
+/** Every route a task is captured on: all pages of a shell section, the task's own route otherwise. */
+export function taskRoutes(task: TaskRecord, manifest: GeneratedManifest | null): string[] {
   if (task.kind === 'shell') {
     if (manifest?.shell) {
       const sh = manifest.shell.find(
@@ -68,12 +71,12 @@ function determineTaskRoute(task: TaskRecord, manifest: GeneratedManifest | null
           task.id.endsWith(kebabName(s.name))
       );
       if (sh?.pages && sh.pages.length > 0) {
-        return sh.pages[0];
+        return sh.pages;
       }
     }
-    return task.route || '/';
+    return [task.route || '/'];
   }
-  return task.route || '/';
+  return [task.route || '/'];
 }
 
 function routeToPath(route: string, manifest: GeneratedManifest | null): string {
@@ -119,12 +122,13 @@ export async function runBaseline(
 
   const tasksByRoute = new Map<string, TaskRecord[]>();
   for (const task of tasks) {
-    const route = determineTaskRoute(task, manifest);
-    const existing = tasksByRoute.get(route);
-    if (existing) {
-      existing.push(task);
-    } else {
-      tasksByRoute.set(route, [task]);
+    for (const route of taskRoutes(task, manifest)) {
+      const existing = tasksByRoute.get(route);
+      if (existing) {
+        existing.push(task);
+      } else {
+        tasksByRoute.set(route, [task]);
+      }
     }
   }
 
@@ -157,7 +161,7 @@ export async function runBaseline(
               continue;
             }
 
-            const dir = baselineDir(ctx.nextDir, task);
+            const dir = baselineDir(ctx.nextDir, task, task.kind === 'shell' ? route : undefined);
             await mkdir(dir, { recursive: true });
             await writeFileAtomic(path.join(dir, `${width}.png`), PNG.sync.write(data.png));
             await writeFileAtomic(path.join(dir, `${width}.json`), JSON.stringify(data.dom, null, 2) + '\n');

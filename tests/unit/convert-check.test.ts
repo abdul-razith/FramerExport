@@ -337,3 +337,38 @@ test('part task requires its own motion ids and not the sibling part or the sect
   assert.deepEqual(requiredMotionIds(m, mk('Hero/Left')), ['m3']);
   assert.deepEqual(requiredMotionIds(m, mk('Hero/Right')), []);
 });
+
+// ---- Fix 5 item 4: shell check ----
+
+test('Fix5 item 4: baselineDir of a shell task on a page is its own directory per route', async () => {
+  const { baselineDir } = await import('../../src/convert/verify/baseline.js');
+  const task = { id: 'shell-nav', kind: 'shell', section: 'Nav', file: '', targets: [], dependsOn: [], status: 'pending', attempts: 0 } as TaskRecord;
+  const posix = (p: string): string => p.split(path.sep).join('/');
+  assert.equal(posix(baselineDir('/p', task)), posix(path.join('/p', '.convert/baseline/shell/nav')));
+  assert.equal(posix(baselineDir('/p', task, '/')), posix(path.join('/p', '.convert/baseline/shell/nav/home')));
+  assert.equal(posix(baselineDir('/p', task, '/blog/[slug]')), posix(path.join('/p', '.convert/baseline/shell/nav/blog-slug')));
+  const sec = { id: 'sec-home-hero', kind: 'section', section: 'Hero', route: '/', file: '', targets: [], dependsOn: [], status: 'pending', attempts: 0 } as TaskRecord;
+  assert.equal(posix(baselineDir('/p', sec, '/about')), posix(path.join('/p', '.convert/baseline/home/hero')), 'route only matters for shell tasks');
+});
+
+test('Fix5 item 4: the shell code check reads only the shell component, not the per-page copies or views', async () => {
+  const { codeTargetsFor } = await import('../../src/convert/verify/check.js');
+  const m = shellMotionManifest();
+  m.shell[0]!.copies = [
+    { route: '/', component: 'Navigation', file: 'src/sections/home/Navigation.tsx', view: 'src/views/home.tsx' },
+    { route: '/about', component: 'Navigation', file: 'src/sections/about/Navigation.tsx', view: 'src/views/about.tsx' },
+  ];
+  const task = {
+    id: 'shell-navigation',
+    kind: 'shell',
+    section: 'Navigation',
+    file: '',
+    targets: ['src/components/shell/Navigation.tsx', 'src/components/shell/Navigation/', 'src/sections/home/Navigation.tsx', 'src/views/home.tsx'],
+    dependsOn: [],
+    status: 'pending',
+    attempts: 0,
+  } as TaskRecord;
+  assert.deepEqual(codeTargetsFor(task, m), ['src/components/shell/Navigation.tsx', 'src/components/shell/Navigation/']);
+  const sec = { id: 'sec-home-hero', kind: 'section', section: 'Hero', route: '/', file: '', targets: ['a.tsx'], dependsOn: [], status: 'pending', attempts: 0 } as TaskRecord;
+  assert.deepEqual(codeTargetsFor(sec, m), ['a.tsx']);
+});

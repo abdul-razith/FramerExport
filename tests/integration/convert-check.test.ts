@@ -23,6 +23,7 @@ let browser: Browser | undefined;
 let server: http.Server;
 let serverUrl: string;
 let heroBg = '#ff0000';
+let shellBBg = '#ff0000';
 
 async function tmp(prefix = 'convert check int '): Promise<string> {
   const d = await mkdtemp(path.join(os.tmpdir(), prefix));
@@ -37,6 +38,12 @@ before(async () => {
     if (url.pathname === '/error500') {
       res.writeHead(500, { 'content-type': 'text/plain' });
       res.end('Internal Server Error');
+      return;
+    }
+
+    if (url.pathname === '/shellb') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<!doctype html><html><head><style>* { margin: 0; padding: 0; } .hero { height: 300px; width: 100%; background: ' + shellBBg + '; }</style></head><body><div data-section="hero" class="hero"><h1>Hero Headline</h1></div></body></html>');
       return;
     }
 
@@ -409,4 +416,41 @@ http.createServer((q, r) => {
   } finally {
     await stopDevServer(root);
   }
+});
+
+test('Fix5 item 4: a shell task is judged on every page it appears on against that page baseline', async () => {
+  heroBg = '#ff0000';
+  shellBBg = '#ff0000';
+  const root = await tmp('convert check shellpages ');
+  const state = stateWith(root, [
+    { id: 'shell-hero', kind: 'shell', section: 'hero', file: '', targets: [], status: 'done', attempts: 0 }
+  ]);
+  await saveState(state);
+  await mkdir(path.join(root, '.convert', 'analysis'), { recursive: true });
+  await writeFile(
+    path.join(root, '.convert', 'analysis', 'generated.json'),
+    JSON.stringify({
+      version: 1,
+      pages: [],
+      shell: [{ name: 'hero', component: 'Hero', file: 'src/components/shell/Hero.tsx', pages: ['/', '/shellb'], differences: [] }],
+      motion: [],
+      scriptDrawn: [],
+      stubs: [],
+      warnings: []
+    })
+  );
+  await runBaseline(ctxFor(root, state), serverUrl);
+  assert.ok(existsSync(path.join(root, '.convert', 'baseline', 'shell', 'hero', 'home', '1440.png')), 'baseline for the first page');
+  assert.ok(existsSync(path.join(root, '.convert', 'baseline', 'shell', 'hero', 'shellb', '1440.png')), 'baseline for the second page');
+
+  const same = await runCheck(root, 'shell-hero', { devUrl: serverUrl, countCall: false });
+  assert.deepEqual(same.errors, []);
+  assert.equal(same.pass, true);
+
+  // The shell now renders differently on its second page only: the first page alone would still pass.
+  shellBBg = '#0000ff';
+  const changed = await runCheck(root, 'shell-hero', { devUrl: serverUrl, countCall: false });
+  assert.equal(changed.pass, false, 'a difference on the second page must fail the shell check');
+  assert.ok(changed.widths.some((w) => !w.pass));
+  shellBBg = '#ff0000';
 });

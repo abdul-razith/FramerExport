@@ -9,7 +9,7 @@ import { kebabName } from '../generate/names.js';
 import { routeSlug } from '../stages/tasks.js';
 import { loadState, writeFileAtomic } from '../state.js';
 import type { Box, TaskRecord } from '../types.js';
-import { baselineDir, BASELINE_WIDTHS } from './baseline.js';
+import { baselineDir, BASELINE_WIDTHS, taskRoutes } from './baseline.js';
 import { capturePageSections } from './capture-sections.js';
 import { diffClusters } from './clusters.js';
 import { codeViolations, readTargetSources } from './check-code.js';
@@ -165,22 +165,21 @@ export function formatCheck(r: CheckResult): string {
   return lines.join('\n');
 }
 
-function determineTaskRoute(task: TaskRecord, manifest: GeneratedManifest | null): string {
-  if (task.kind === 'shell') {
-    if (manifest?.shell) {
-      const sh = manifest.shell.find(
-        (s) =>
-          s.name === task.section ||
-          kebabName(s.name) === kebabName(task.section || '') ||
-          task.id.endsWith(kebabName(s.name))
-      );
-      if (sh?.pages && sh.pages.length > 0) {
-        return sh.pages[0];
-      }
-    }
-    return task.route || '/';
+/**
+ * Files whose code is inspected for a task. A shell task is judged on the shell component only: its other
+ * targets (per-page copies, views) are edited to consolidate but are cleaned up by their own tasks.
+ */
+export function codeTargetsFor(task: TaskRecord, manifest: GeneratedManifest | null): string[] {
+  if (task.kind === 'shell' && manifest?.shell) {
+    const sh = manifest.shell.find(
+      (s) =>
+        s.name === task.section ||
+        kebabName(s.name) === kebabName(task.section || '') ||
+        task.id.endsWith(kebabName(s.name))
+    );
+    if (sh?.copies && sh.copies.length > 0) return [sh.file, sh.file.replace(/\.tsx$/, '') + '/'];
   }
-  return task.route || '/';
+  return task.targets && task.targets.length > 0 ? task.targets : task.file ? [task.file] : [];
 }
 
 function routeToPath(route: string, manifest: GeneratedManifest | null): string {
@@ -205,6 +204,20 @@ function pad(src: PNG, w: number, h: number): PNG {
   out.data.fill(255);
   PNG.bitblt(src, out, 0, 0, Math.min(src.width, w), Math.min(src.height, h), 0, 0);
   return out;
+}
+
+/** One result per width from the per-page results of a shell: passes only when every page passes. */
+function mergeWidths(width: number, results: WidthResult[]): WidthResult {
+  const failed = results.find((r) => !r.pass);
+  const worst = results.reduce((a, b) => (Math.abs(b.heightDelta) > Math.abs(a.heightDelta) ? b : a));
+  return {
+    width,
+    ratio: Math.max(...results.map((r) => r.ratio)),
+    heightDelta: worst.heightDelta,
+    pass: !failed,
+    clusters: failed?.clusters ?? [],
+    ...(failed?.images ? { images: failed.images } : {})
+  };
 }
 
 async function getSectionBox(page: Page, name: string): Promise<Box | null> {
@@ -312,14 +325,15 @@ export async function runCheck(
   }
 
   const manifest = await readManifest(root).catch(() => null);
-  const route = determineTaskRoute(task, manifest);
+  // A shell section appears on several pages: it is judged on each of them (the first page's URL is `targetUrl`).
+  const routes = taskRoutes(task, manifest);
+  const route = routes[0]!;
   const concretePath = routeToPath(route, manifest);
   const targetUrl = buildUrl(devUrl, concretePath);
+  const sectionTargets = routes.map((r) => ({ route: r, url: buildUrl(devUrl, routeToPath(r, manifest)) }));
 
   // Read sources for code violations (directory targets expand recursively)
-  const targetFiles =
-    task.targets && task.targets.length > 0 ? task.targets : task.file ? [task.file] : [];
-  const sources = await readTargetSources(root, targetFiles);
+  const sources = await readTargetSources(root, codeTargetsFor(task, manifest));
 
   const requiredMotion = requiredMotionIds(manifest, task);
 
@@ -409,30 +423,15 @@ export async function runCheck(
     const pixelTolerance = state.options?.pixelTolerance ?? 0.01;
 
     for (const width of BASELINE_WIDTHS) {
-      let sectionCaptures: Map<string, any>;
-      try {
-        sectionCaptures = await capturePageSections(page, targetUrl, width, sectionNames);
-      } catch (err: any) {
-        errors.push(`Capture failed at ${width}px: ${err.message || String(err)}`);
-        widths.push({
-          width,
-          ratio: 1,
-          heightDelta: 0,
-          pass: false,
-          clusters: []
-        });
-        continue;
-      }
-
-      if (task.kind !== 'page') {
-        const secName = task.section || task.id;
-        const capture =
-          sectionCaptures.get(secName) ??
-          (secName.includes('/') ? sectionCaptures.get(secName.split('/')[0]) : undefined);
-
-        if (!capture) {
-          errors.push(`Section "${secName}" not found on ${targetUrl} at ${width}px`);
-          widths.push({
+      const perRoute: WidthResult[] = [];
+      const out: WidthResult[] = task.kind === 'page' ? widths : perRoute;
+      for (const tgt of task.kind === 'page' ? [{ route, url: targetUrl }] : sectionTargets) {
+        let sectionCaptures: Map<string, any>;
+        try {
+          sectionCaptures = await capturePageSections(page, tgt.url, width, sectionNames);
+        } catch (err: any) {
+          errors.push(`Capture failed at ${width}px: ${err.message || String(err)}`);
+          out.push({
             width,
             ratio: 1,
             heightDelta: 0,
@@ -442,130 +441,42 @@ export async function runCheck(
           continue;
         }
 
-        const bDir = baselineDir(root, task);
-        const expPngPath = path.join(bDir, `${width}.png`);
-        const expJsonPath = path.join(bDir, `${width}.json`);
-
-        if (!existsSync(expPngPath) || !existsSync(expJsonPath)) {
-          errors.push(`Missing baseline at ${width}px for ${task.id}: ${bDir}`);
-          widths.push({
-            width,
-            ratio: 1,
-            heightDelta: 0,
-            pass: false,
-            clusters: []
-          });
-          continue;
-        }
-
-        const expPng = PNG.sync.read(await readFile(expPngPath));
-        const expDom = JSON.parse(await readFile(expJsonPath, 'utf8')) as SectionDom;
-
-        const heightDelta = capture.png.height - expPng.height;
-        const w = Math.max(expPng.width, capture.png.width);
-        const h = Math.max(expPng.height, capture.png.height);
-        const ep = pad(expPng, w, h);
-        const ap = pad(capture.png, w, h);
-        const diff = new PNG({ width: w, height: h });
-        const mismatched = pixelmatch(ep.data, ap.data, diff.data, w, h, {
-          threshold: 0.1,
-          includeAA: false
-        });
-        const ratio = mismatched / (w * h);
-        const pass = ratio <= pixelTolerance && Math.abs(heightDelta) <= 4;
-        const clusters = pass ? [] : diffClusters(diff, 3);
-
-        let images: WidthResult['images'];
-        if (!pass) {
-          const checksDir = path.join(root, '.convert', 'checks', taskId);
-          await mkdir(checksDir, { recursive: true });
-          const expImg = path.join(checksDir, `${width}-expected.png`);
-          const actImg = path.join(checksDir, `${width}-actual.png`);
-          const diffImg = path.join(checksDir, `${width}-diff.png`);
-          await writeFileAtomic(expImg, PNG.sync.write(ep));
-          await writeFileAtomic(actImg, PNG.sync.write(ap));
-          await writeFileAtomic(diffImg, PNG.sync.write(diff));
-          images = {
-            expected: expImg,
-            actual: actImg,
-            diff: diffImg
-          };
-        }
-
-        widths.push({
-          width,
-          ratio,
-          heightDelta,
-          pass,
-          clusters,
-          images
-        });
-
-        // DOM check
-        const domMismatches = compareDom([expDom], [capture.dom], { routes: {}, images: {} });
-        for (const m of domMismatches) {
-          if (
-            !dom.some(
-              (d) =>
-                d.section === m.section &&
-                d.kind === m.kind &&
-                d.expected === m.expected &&
-                d.actual === m.actual
-            )
-          ) {
-            dom.push(m);
-          }
-        }
-      } else {
-        // Page task: compare every section on the page
-        let pagePass = true;
-        let maxRatio = 0;
-        let maxHeightDelta = 0;
-        const pageClusters: Box[] = [];
-        let firstImages: WidthResult['images'];
-
-        for (const secName of sectionNames) {
+        if (task.kind !== 'page') {
+          const secName = task.section || task.id;
           const capture =
             sectionCaptures.get(secName) ??
             (secName.includes('/') ? sectionCaptures.get(secName.split('/')[0]) : undefined);
 
           if (!capture) {
-            errors.push(`Section "${secName}" not found on ${targetUrl} at ${width}px`);
-            pagePass = false;
+            errors.push(`Section "${secName}" not found on ${tgt.url} at ${width}px`);
+            out.push({
+              width,
+              ratio: 1,
+              heightDelta: 0,
+              pass: false,
+              clusters: []
+            });
             continue;
           }
 
-          const secTask: TaskRecord = Object.values(state.tasks).find(
-            (t) =>
-              (t.route === task.route || !t.route) &&
-              (t.section === secName || t.id.endsWith(kebabName(secName)))
-          ) ?? {
-            id: `sec-${routeSlug(task.route || '/')}-${kebabName(secName)}`,
-            kind: 'section',
-            route: task.route,
-            section: secName,
-            file: '',
-            targets: [],
-            status: 'pending',
-            attempts: 0
-          };
-
-          const bDir = baselineDir(root, secTask);
+          let bDir = baselineDir(root, task, task.kind === 'shell' ? tgt.route : undefined);
+          if (task.kind === 'shell' && !existsSync(path.join(bDir, width + '.png')) && tgt.route === route) {
+            // projects baselined before shells were captured per page keep the first page's baseline here
+            const legacy = baselineDir(root, task);
+            if (existsSync(path.join(legacy, width + '.png'))) bDir = legacy;
+          }
           const expPngPath = path.join(bDir, `${width}.png`);
           const expJsonPath = path.join(bDir, `${width}.json`);
 
           if (!existsSync(expPngPath) || !existsSync(expJsonPath)) {
-            // A root split into parts has no baseline of its own unless one was captured: its parts are
-            // judged by their own tasks.
-            const hasParts = Object.values(state.tasks).some(
-              (t) =>
-                t.kind === 'section' &&
-                (t.route === task.route || !t.route) &&
-                (t.section ?? '').startsWith(`${secName}/`)
-            );
-            if (hasParts) continue;
-            errors.push(`Missing baseline at ${width}px for section ${secName}: ${bDir}`);
-            pagePass = false;
+            errors.push(`Missing baseline at ${width}px for ${task.id}: ${bDir}`);
+            out.push({
+              width,
+              ratio: 1,
+              heightDelta: 0,
+              pass: false,
+              clusters: []
+            });
             continue;
           }
 
@@ -583,35 +494,37 @@ export async function runCheck(
             includeAA: false
           });
           const ratio = mismatched / (w * h);
-          const secPass = ratio <= pixelTolerance && Math.abs(heightDelta) <= 4;
+          const pass = ratio <= pixelTolerance && Math.abs(heightDelta) <= 4;
+          const clusters = pass ? [] : diffClusters(diff, 3);
 
-          maxRatio = Math.max(maxRatio, ratio);
-          if (Math.abs(heightDelta) > Math.abs(maxHeightDelta)) {
-            maxHeightDelta = heightDelta;
+          let images: WidthResult['images'];
+          if (!pass) {
+            const checksDir = path.join(root, '.convert', 'checks', taskId);
+            await mkdir(checksDir, { recursive: true });
+            const tag = sectionTargets.length > 1 ? routeSlug(tgt.route) + '-' : '';
+            const expImg = path.join(checksDir, `${tag}${width}-expected.png`);
+            const actImg = path.join(checksDir, `${tag}${width}-actual.png`);
+            const diffImg = path.join(checksDir, `${tag}${width}-diff.png`);
+            await writeFileAtomic(expImg, PNG.sync.write(ep));
+            await writeFileAtomic(actImg, PNG.sync.write(ap));
+            await writeFileAtomic(diffImg, PNG.sync.write(diff));
+            images = {
+              expected: expImg,
+              actual: actImg,
+              diff: diffImg
+            };
           }
 
-          if (!secPass) {
-            pagePass = false;
-            const secClusters = diffClusters(diff, 3);
-            pageClusters.push(...secClusters);
+          out.push({
+            width,
+            ratio,
+            heightDelta,
+            pass,
+            clusters,
+            images
+          });
 
-            if (!firstImages) {
-              const checksDir = path.join(root, '.convert', 'checks', taskId);
-              await mkdir(checksDir, { recursive: true });
-              const expImg = path.join(checksDir, `${width}-expected.png`);
-              const actImg = path.join(checksDir, `${width}-actual.png`);
-              const diffImg = path.join(checksDir, `${width}-diff.png`);
-              await writeFileAtomic(expImg, PNG.sync.write(ep));
-              await writeFileAtomic(actImg, PNG.sync.write(ap));
-              await writeFileAtomic(diffImg, PNG.sync.write(diff));
-              firstImages = {
-                expected: expImg,
-                actual: actImg,
-                diff: diffImg
-              };
-            }
-          }
-
+          // DOM check
           const domMismatches = compareDom([expDom], [capture.dom], { routes: {}, images: {} });
           for (const m of domMismatches) {
             if (
@@ -626,19 +539,130 @@ export async function runCheck(
               dom.push(m);
             }
           }
+        } else {
+          // Page task: compare every section on the page
+          let pagePass = true;
+          let maxRatio = 0;
+          let maxHeightDelta = 0;
+          const pageClusters: Box[] = [];
+          let firstImages: WidthResult['images'];
+
+          for (const secName of sectionNames) {
+            const capture =
+              sectionCaptures.get(secName) ??
+              (secName.includes('/') ? sectionCaptures.get(secName.split('/')[0]) : undefined);
+
+            if (!capture) {
+              errors.push(`Section "${secName}" not found on ${tgt.url} at ${width}px`);
+              pagePass = false;
+              continue;
+            }
+
+            const secTask: TaskRecord = Object.values(state.tasks).find(
+              (t) =>
+                (t.route === task.route || !t.route) &&
+                (t.section === secName || t.id.endsWith(kebabName(secName)))
+            ) ?? {
+              id: `sec-${routeSlug(task.route || '/')}-${kebabName(secName)}`,
+              kind: 'section',
+              route: task.route,
+              section: secName,
+              file: '',
+              targets: [],
+              status: 'pending',
+              attempts: 0
+            };
+
+            const bDir = baselineDir(root, secTask);
+            const expPngPath = path.join(bDir, `${width}.png`);
+            const expJsonPath = path.join(bDir, `${width}.json`);
+
+            if (!existsSync(expPngPath) || !existsSync(expJsonPath)) {
+              // A root split into parts has no baseline of its own unless one was captured: its parts are
+              // judged by their own tasks.
+              const hasParts = Object.values(state.tasks).some(
+                (t) =>
+                  t.kind === 'section' &&
+                  (t.route === task.route || !t.route) &&
+                  (t.section ?? '').startsWith(`${secName}/`)
+              );
+              if (hasParts) continue;
+              errors.push(`Missing baseline at ${width}px for section ${secName}: ${bDir}`);
+              pagePass = false;
+              continue;
+            }
+
+            const expPng = PNG.sync.read(await readFile(expPngPath));
+            const expDom = JSON.parse(await readFile(expJsonPath, 'utf8')) as SectionDom;
+
+            const heightDelta = capture.png.height - expPng.height;
+            const w = Math.max(expPng.width, capture.png.width);
+            const h = Math.max(expPng.height, capture.png.height);
+            const ep = pad(expPng, w, h);
+            const ap = pad(capture.png, w, h);
+            const diff = new PNG({ width: w, height: h });
+            const mismatched = pixelmatch(ep.data, ap.data, diff.data, w, h, {
+              threshold: 0.1,
+              includeAA: false
+            });
+            const ratio = mismatched / (w * h);
+            const secPass = ratio <= pixelTolerance && Math.abs(heightDelta) <= 4;
+
+            maxRatio = Math.max(maxRatio, ratio);
+            if (Math.abs(heightDelta) > Math.abs(maxHeightDelta)) {
+              maxHeightDelta = heightDelta;
+            }
+
+            if (!secPass) {
+              pagePass = false;
+              const secClusters = diffClusters(diff, 3);
+              pageClusters.push(...secClusters);
+
+              if (!firstImages) {
+                const checksDir = path.join(root, '.convert', 'checks', taskId);
+                await mkdir(checksDir, { recursive: true });
+                const expImg = path.join(checksDir, `${width}-expected.png`);
+                const actImg = path.join(checksDir, `${width}-actual.png`);
+                const diffImg = path.join(checksDir, `${width}-diff.png`);
+                await writeFileAtomic(expImg, PNG.sync.write(ep));
+                await writeFileAtomic(actImg, PNG.sync.write(ap));
+                await writeFileAtomic(diffImg, PNG.sync.write(diff));
+                firstImages = {
+                  expected: expImg,
+                  actual: actImg,
+                  diff: diffImg
+                };
+              }
+            }
+
+            const domMismatches = compareDom([expDom], [capture.dom], { routes: {}, images: {} });
+            for (const m of domMismatches) {
+              if (
+                !dom.some(
+                  (d) =>
+                    d.section === m.section &&
+                    d.kind === m.kind &&
+                    d.expected === m.expected &&
+                    d.actual === m.actual
+                )
+              ) {
+                dom.push(m);
+              }
+            }
+          }
+
+          out.push({
+            width,
+            ratio: maxRatio,
+            heightDelta: maxHeightDelta,
+            pass: pagePass,
+            clusters: pageClusters.slice(0, 3),
+            images: firstImages
+          });
         }
-
-        widths.push({
-          width,
-          ratio: maxRatio,
-          heightDelta: maxHeightDelta,
-          pass: pagePass,
-          clusters: pageClusters.slice(0, 3),
-          images: firstImages
-        });
       }
+      if (perRoute.length > 0) widths.push(mergeWidths(width, perRoute));
     }
-
     // Motion presence check in full mode, on a fresh tab (see runMotionOnFreshPage)
     const taskAnchors = taskMotionAnchors(manifest, task, sectionNames, requiredMotion);
     if (taskAnchors.length > 0) {
