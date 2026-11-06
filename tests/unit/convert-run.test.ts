@@ -587,3 +587,97 @@ test('Fix5 round 2: a throw escaping finalize leaves the run paused with reason 
   assert.equal(run.status, 'paused');
   assert.equal(run.reason, 'crash');
 });
+
+async function twoPageProject(): Promise<string> {
+  const root = await makeTmp();
+  const state = initState(path.join(root, 'export'), root);
+  state.options = { ...DEFAULT_OPTIONS, agent: 'agy', pageMode: 'pause' };
+  const t = (id: string, kind: 'section' | 'page', route: string, dependsOn: string[] = []) => {
+    state.tasks[id] = {
+      id,
+      kind,
+      route,
+      dependsOn,
+      file: `.convert/tasks/${id}.md`,
+      status: 'pending',
+      attempts: 0,
+      targets: [`src/${id}.tsx`],
+    };
+  };
+  t('sec-home-hero', 'section', '/');
+  t('page-home', 'page', '/', ['sec-home-hero']);
+  t('sec-about-hero', 'section', '/about');
+  t('page-about', 'page', '/about', ['sec-about-hero']);
+  await saveState(state);
+  await mkdir(path.join(root, '.convert', 'tasks'), { recursive: true });
+  return root;
+}
+
+function pageReviewDeps(finalized: string[]): RunDeps {
+  return {
+    devServer: async () => ({ url: 'http://127.0.0.1:4321', pid: process.pid, stop: async () => {} }),
+    check: async (taskId) => ({
+      taskId, mode: 'full', pass: true, limitReached: false, widths: [], dom: [], code: [], motion: [], errors: [],
+    }),
+    finalize: async () => {
+      finalized.push('x');
+      return { buildOk: true };
+    },
+    detectAgents: async () => ['agy'],
+    spawn: () => ({
+      pid: process.pid,
+      done: Promise.resolve({ exitCode: 0, timedOut: false, killed: false, quota: null }),
+      kill: async () => {},
+    }),
+  };
+}
+
+test('page review: without a handler the run pauses after the first page and records why', async () => {
+  const root = await twoPageProject();
+  const finalized: string[] = [];
+  const outcome = await runAgents(root, { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay' }, pageReviewDeps(finalized));
+  assert.deepEqual(outcome, { status: 'paused', reason: 'page-review', page: { route: '/', url: 'http://127.0.0.1:4321/' } });
+  const after = await loadState(root);
+  assert.equal(after?.run.status, 'paused');
+  assert.equal(after?.run.reason, 'page-review');
+  assert.equal(after?.tasks['page-about']?.status, 'pending');
+  assert.equal(finalized.length, 0);
+});
+
+test('page review: continue from the handler goes on to the next page and finalizes; the dev server is still up while asked', async () => {
+  const root = await twoPageProject();
+  const finalized: string[] = [];
+  const asked: Array<{ route: string; url: string }> = [];
+  let stopped = false;
+  const deps = pageReviewDeps(finalized);
+  deps.devServer = async () => ({ url: 'http://127.0.0.1:4321', pid: process.pid, stop: async () => { stopped = true; } });
+  const outcome = await runAgents(
+    root,
+    {
+      onEvent() {},
+      pause: createPauseController(),
+      onQuota: async () => 'stay',
+      onPageReview: async (info) => {
+        asked.push({ route: info.route, url: info.url });
+        assert.equal(stopped, false);
+        return 'continue';
+      },
+    },
+    deps
+  );
+  assert.equal(outcome.status, 'done');
+  assert.deepEqual(asked, [{ route: '/', url: 'http://127.0.0.1:4321/' }]);
+  assert.equal(finalized.length, 1);
+  assert.equal((await loadState(root))?.tasks['page-about']?.status, 'done');
+});
+
+test('page review: stop from the handler pauses with page-review', async () => {
+  const root = await twoPageProject();
+  const outcome = await runAgents(
+    root,
+    { onEvent() {}, pause: createPauseController(), onQuota: async () => 'stay', onPageReview: async () => 'stop' },
+    pageReviewDeps([])
+  );
+  assert.equal(outcome.status, 'paused');
+  assert.equal((await loadState(root))?.run.reason, 'page-review');
+});

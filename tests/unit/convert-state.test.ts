@@ -34,6 +34,7 @@ test('DEFAULT_OPTIONS', () => {
   assert.deepEqual(DEFAULT_OPTIONS, {
     testing: true,
     concurrency: 1,
+    pageMode: 'pause',
     sectionTimeoutMin: 15,
     pageTimeoutMin: 15,
     pixelTolerance: 0.01,

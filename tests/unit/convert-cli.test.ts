@@ -25,6 +25,7 @@ test('parseConvertArgs handles every command and flag', () => {
     testing: undefined,
     agent: undefined,
     concurrency: undefined,
+    pageMode: undefined,
   });
 
   assert.deepEqual(parseConvertArgs(['convert', './exp', './out', '--yes', '--testing', 'off', '--agent', 'claude', '--concurrency', '2']), {
@@ -35,6 +36,7 @@ test('parseConvertArgs handles every command and flag', () => {
     testing: false,
     agent: 'claude',
     concurrency: 2,
+    pageMode: undefined,
   });
 
   assert.deepEqual(parseConvertArgs(['convert', './exp', '--testing', 'on', '--concurrency', '3']), {
@@ -45,6 +47,7 @@ test('parseConvertArgs handles every command and flag', () => {
     testing: true,
     agent: undefined,
     concurrency: 3,
+    pageMode: undefined,
   });
 
   // status, next, ui

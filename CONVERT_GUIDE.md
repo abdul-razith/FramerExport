@@ -97,7 +97,7 @@ Time is **active working time**: setup, agent runs, checks, and builds. Time you
 
 | Command | Where to run | What it does |
 |---|---|---|
-| `fexport convert <exportDir> [nextDir] [--yes] [--testing on\|off] [--agent agy\|claude] [--concurrency 1\|2\|3]` | anywhere | Runs automated setup stages (`analyze` through `tasks` / `baseline`). `nextDir` defaults to `<exportDir>-next`. |
+| `fexport convert <exportDir> [nextDir] [--yes] [--testing on\|off] [--agent agy\|claude] [--concurrency 1\|2\|3] [--page-mode pause\|auto]` | anywhere | Runs automated setup stages (`analyze` through `tasks` / `baseline`). `nextDir` defaults to `<exportDir>-next`. |
 | `fexport convert status` | inside converted project | Shows pipeline stage status, task backlog, warnings, time summary, and overall progress. |
 | `fexport convert next` | inside converted project | Shows the next pending task for an AI coding agent (fix tasks first, then shell, section, page). |
 | `fexport convert check <taskId> [--smoke]` | inside converted project | Runs validation checks on a completed task against baseline (exit 0: pass, 1: fail, 2: call limit reached). |
@@ -166,6 +166,7 @@ Options can be set at conversion start, changed via the Conversion Dashboard ("R
 | `testing` | `--testing on\|off` | `on` / `off` | `on` | Strict verification mode: baseline capture, visual/DOM/motion checks, fix attempts, and report. |
 | `agent` | `--agent agy\|claude` | `agy` / `claude` | first of agy, claude found on PATH | Which agent CLI executable to spawn. If it cannot be started, the run stops with a message naming the agent. |
 | `concurrency` | `--concurrency 1\|2\|3` | 1, 2, 3 | 1 | Maximum concurrent agent worker processes. |
+| `pageMode` | `--page-mode pause\|auto` | pause, auto | pause | `pause`: after each finished page the run stops so you can open it in the browser, then continues when you choose. `auto`: goes straight on to the next page. Always asked before a run in the interactive UI. |
 | `sectionTimeoutMin` | (options menu) | number | 15 | Hard wall-clock limit in minutes per section task attempt. |
 | `pageTimeoutMin` | (options menu) | number | 15 | Hard wall-clock limit in minutes per page or shell task attempt. |
 | `pixelTolerance` | (options menu) | number | 0.01 (1%) | Maximum pixel difference ratio for task checks. |
@@ -193,7 +194,8 @@ fexport convert out/portfolio out/portfolio-next --testing on --agent claude --c
 
 The headless runner coordinates an autonomous worker pool:
 
-- **Worker pool:** Shell tasks run first with 1 worker; section tasks across all pages run in parallel up to `concurrency` (1–3); page tasks become ready once all sections of that page are completed.
+- **Worker pool:** Shell tasks run first with 1 worker. After that the run goes **page by page** (home first, then the other routes alphabetically): the current page's section tasks run in parallel up to `concurrency` (1–3), then its page task. The next page starts only when the current page is `done` or `needs-review`.
+- **Page review (`pageMode: pause`, the default):** when a page finishes, the run prints the page route, its time and its dev-server URL, and asks "Continue with the next page" or "Stop here". The dev server stays up while it waits. Stopping records the pause (`reason: page-review`); the next run continues with the next page. There is no pause after the last page. In `auto` mode nothing waits for you; a page that ends as `needs-review` is marked and listed in the final report.
 - **Scope enforcement with automatic revert:** Before starting a task, the runner snapshots project files. After the task completes, any edits outside the task's allowed targets are reverted and reported, preventing agent stray modifications.
 - **Wall-clock timeouts:** Tasks that exceed `sectionTimeoutMin` or `pageTimeoutMin` are halted and their process trees cleanly terminated (`taskkill /T /F` on Windows, process groups on POSIX).
 - **Graceful and immediate pause:**

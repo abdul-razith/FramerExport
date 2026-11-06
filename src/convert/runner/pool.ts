@@ -57,6 +57,7 @@ export type PoolEvent =
       ms: number;
     }
   | { type: 'reverted'; taskId: string; files: string[] }
+  | { type: 'page-complete'; route: string; taskId: string; status: 'done' | 'needs-review' }
   | { type: 'quota'; hit: QuotaHit }
   | { type: 'agent-error'; taskId: string; message: string }
   | { type: 'task-error'; taskId: string; message: string };
@@ -83,8 +84,10 @@ export async function runQueue(
   deps: PoolDeps,
   pause: PauseController
 ): Promise<{
-  stoppedFor: 'done' | 'paused' | 'quota' | 'agent-error' | 'task-error';
+  stoppedFor: 'done' | 'paused' | 'quota' | 'agent-error' | 'task-error' | 'page-review';
   quota?: QuotaHit;
+  /** Set with `page-review`: the page that was just finished. */
+  page?: { route: string; taskId: string };
   error?: string;
   ran: string[];
 }> {
@@ -101,6 +104,8 @@ export async function runQueue(
   let nextSeq = 0;
 
   let quotaHit: QuotaHit | undefined;
+  // Set when a page finishes while pageMode is `pause`: nothing new is dispatched after that.
+  let pageReview: { route: string; taskId: string } | undefined;
   let spawnFailure: string | undefined;
   let internalError: string | undefined;
   // Tasks whose execution threw: not re-dispatched in this run (they would fail the same way).
@@ -296,6 +301,18 @@ export async function runQueue(
     await safeSaveState();
 
     deps.onEvent?.({ type: 'end', worker, taskId: task.id, outcome, ms: elapsedMs });
+
+    // A page is finished when its page task (or the fix task for it) ends done or needs-review.
+    const pageTask = task.kind === 'page' ? task : task.fixOf ? ctx.state.tasks[task.fixOf] : undefined;
+    if (pageTask?.kind === 'page' && (pageTask.status === 'done' || pageTask.status === 'needs-review')) {
+      const route = pageTask.route ?? '/';
+      deps.onEvent?.({ type: 'page-complete', route, taskId: pageTask.id, status: pageTask.status });
+      // No pause after the last page: finalize and the report come next.
+      const morePages = Object.values(ctx.state.tasks).some(
+        (t) => t.kind === 'page' && t.id !== pageTask.id && t.status !== 'done' && t.status !== 'needs-review'
+      );
+      if (ctx.state.options?.pageMode === 'pause' && morePages) pageReview ??= { route, taskId: pageTask.id };
+    }
   }
 
   try {
@@ -307,6 +324,11 @@ export async function runQueue(
 
       // 2. If quota hit or the agent cannot start: stop dispatching
       if (quotaHit || spawnFailure || internalError) {
+        break;
+      }
+
+      // 2b. A page finished and pageMode is pause: stop dispatching so the page can be reviewed
+      if (pageReview) {
         break;
       }
 
@@ -387,6 +409,9 @@ export async function runQueue(
   }
   if (quotaHit) {
     return { stoppedFor: 'quota', quota: quotaHit, ran };
+  }
+  if (pageReview) {
+    return { stoppedFor: 'page-review', page: pageReview, ran };
   }
   if (pause.mode !== 'none') {
     return { stoppedFor: 'paused', ran };

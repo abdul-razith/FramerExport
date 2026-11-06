@@ -34,10 +34,11 @@ export interface ConvertArgs {
   testing?: boolean;
   agent?: AgentId;
   concurrency?: 1 | 2 | 3;
+  pageMode?: 'pause' | 'auto';
 }
 
 export const CONVERT_USAGE = `Usage:
-  fexport convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent agy|claude] [--concurrency 1|2|3]
+  fexport convert <exportDir> [nextDir] [--yes] [--testing on|off] [--agent agy|claude] [--concurrency 1|2|3] [--page-mode pause|auto]
   fexport convert status                          show stages, tasks, warnings and progress
   fexport convert next                            show the next task to give to your AI coding agent
   fexport convert check <taskId> [--smoke]        run checks on a completed task (exit 0/1/2)
@@ -72,6 +73,7 @@ function parseConvertArgsInner(argv: string[], sink: { error?: string }): Conver
   let testing: boolean | undefined;
   let agent: AgentId | undefined;
   let concurrency: (1 | 2 | 3) | undefined;
+  let pageMode: ('pause' | 'auto') | undefined;
 
   const positional: string[] = [];
   for (let i = 0; i < raw.length; i++) {
@@ -107,6 +109,12 @@ function parseConvertArgsInner(argv: string[], sink: { error?: string }): Conver
       if (!inline) i++;
       if (val !== undefined && ['1', '2', '3'].includes(val)) concurrency = parseInt(val, 10) as 1 | 2 | 3;
       else sink.error ??= badValue('--concurrency', val, '1|2|3');
+    } else if (a === '--page-mode' || a.startsWith('--page-mode=')) {
+      const inline = a.startsWith('--page-mode=');
+      const val = inline ? a.slice('--page-mode='.length) : raw[i + 1];
+      if (!inline) i++;
+      if (val === 'pause' || val === 'auto') pageMode = val;
+      else sink.error ??= badValue('--page-mode', val, 'pause|auto');
     } else {
       positional.push(a);
     }
@@ -140,6 +148,7 @@ function parseConvertArgsInner(argv: string[], sink: { error?: string }): Conver
       testing,
       agent,
       concurrency,
+      pageMode,
     };
   }
   return {
@@ -150,6 +159,7 @@ function parseConvertArgsInner(argv: string[], sink: { error?: string }): Conver
     testing,
     agent,
     concurrency,
+    pageMode,
   };
 }
 
@@ -233,6 +243,7 @@ export async function runConvertCommand(
     if (args.testing !== undefined) cliOptions.testing = args.testing;
     if (args.agent) cliOptions.agent = args.agent;
     if (args.concurrency) cliOptions.concurrency = args.concurrency;
+    if (args.pageMode) cliOptions.pageMode = args.pageMode;
 
     if (isInteractiveTerminal() && !args.yes) {
       try {
@@ -294,7 +305,7 @@ export async function runConvertCommand(
     const { runAgents } = await import('./run.js');
     const { createPauseController } = await import('./runner/pool.js');
     const { createPauseInput } = await import('./runner/pause-input.js');
-    const { formatWorkerLine } = await import('./progress.js');
+    const { formatPageReviewMessage, formatWorkerLine } = await import('./progress.js');
     const { setInterruptHandler } = await import('./verify/proc.js');
     const defaultAgentName = await defaultAgent();
     const pause = createPauseController();
@@ -353,7 +364,25 @@ export async function runConvertCommand(
           }
           return 'stay';
         },
+        // Only on a terminal: without one the run pauses after the page and a later `run` continues.
+        ...(isInteractiveTerminal()
+          ? {
+              async onPageReview(info: { route: string; url: string; taskId: string }) {
+                const { uiSelect } = await import('../cli-v2/ui/prompts.js');
+                const current = await loadState(root);
+                console.log(current ? formatPageReviewMessage(current, info) : `Page ${info.route}: ${info.url}`);
+                return uiSelect<'continue' | 'stop'>('What next?', [
+                  { label: 'Continue with the next page', value: 'continue' },
+                  { label: 'Stop here', value: 'stop' },
+                ]);
+              },
+            }
+          : {}),
       });
+      if (outcome.status === 'paused' && outcome.reason === 'page-review') {
+        console.log(`Paused after page ${outcome.page.route} (${outcome.page.url}). Run "convert run" again to continue with the next page.`);
+        return 0;
+      }
       return outcome.status === 'done' ? 0 : 1;
     } catch (error) {
       console.error((error as Error).message);

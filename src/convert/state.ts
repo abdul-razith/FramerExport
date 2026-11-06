@@ -18,6 +18,7 @@ export const STAGES: StageName[] = [
 export const DEFAULT_OPTIONS: Omit<RunOptions, 'agent'> = {
   testing: true,
   concurrency: 1,
+  pageMode: 'pause',
   sectionTimeoutMin: 15,
   pageTimeoutMin: 15,
   pixelTolerance: 0.01,
