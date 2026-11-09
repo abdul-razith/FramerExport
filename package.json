@@ -23,6 +23,7 @@
     "build": "tsup",
     "test": "node --import tsx --test tests/unit/*.test.ts",
     "test:browser": "node --import tsx --test --test-concurrency=1 tests/integration/*.test.ts",
+    "test:nextjs": "node --import tsx --test --test-concurrency=1 tests/integration-nextjs/*.test.ts",
     "test:platform": "node --import tsx scripts/validate-platform.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test && npm run test:browser",
@@ -69,12 +70,18 @@
   },
   "dependencies": {
     "chalk": "^5.3.0",
+    "parse5": "^8.1.1",
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.2.0",
     "puppeteer": "^24.43.1",
-    "string-width": "^7.2.0"
+    "string-width": "^7.2.0",
+    "turndown": "^7.2.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/turndown": "^5.0.6",
     "@xterm/addon-image": "^0.9.0",
     "@xterm/headless": "^6.0.0",
     "@xterm/xterm": "^6.0.0",

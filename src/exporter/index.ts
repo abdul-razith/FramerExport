@@ -69,6 +69,7 @@ export class FramerExporter implements ExporterContext {
   cooking?: CookingSpinner;
   deviceScaleFactor?: number;
   subpages: Map<string, string> = new Map();
+  nextjs?: import('../nextjs/options.js').NextjsOptions;
   constructor(
     siteUrl: string,
     outDir: string,
@@ -186,6 +187,10 @@ export class FramerExporter implements ExporterContext {
     if (this.terminalPresentation) console.log('');
     success('Export complete!');
     await this.writeExportLog();
+    if (this.nextjs) {
+      const { runNextConversion } = await import('../nextjs/index.js');
+      await runNextConversion(this, this.nextjs);
+    }
     if (this.terminalPresentation) await printSummary(this);
     if (this.interactive && this.terminalPresentation) {
       await runAiPromptAssistant(this);

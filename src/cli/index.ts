@@ -191,6 +191,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === 'to-nextjs') {
+    const exportDir = args[1];
+    if (!exportDir || exportDir.startsWith('--')) {
+      console.log(
+        `  ${ui.error('✗')} ${ui.error.bold('Missing export folder:')} ${ui.muted('framer-export to-nextjs <export-dir>')}\n`
+      );
+      process.exit(1);
+    }
+    const { parseNextjsFlags } = await import('../nextjs/options.js');
+    const { runToNextjs } = await import('../nextjs/index.js');
+    const { options } = parseNextjsFlags(args.slice(2));
+    process.exit(await runToNextjs(path.resolve(exportDir), options));
+  }
+
   const preferences = readPreferences();
   if (!hasFlag(args, '--no-update')) await showUpdateNotice(preferences);
   const fresh = hasFlag(args, '--fresh');
@@ -213,6 +227,12 @@ async function main(): Promise<void> {
   const hasDprFlag = args.includes('--dpr');
   const dprValue = extractFlag(args, '--dpr');
   const includeSubpages = hasFlag(args, '--subpages') || preferences.includeSubpages;
+  let nextjsOptions: import('../nextjs/options.js').NextjsOptions | undefined;
+  if (args.some((a) => a === '--nextjs' || a === '--no-verify' || a.startsWith('--ai-'))) {
+    const { parseNextjsFlags } = await import('../nextjs/options.js');
+    const parsed = parseNextjsFlags(args);
+    if (parsed.enabled) nextjsOptions = parsed.options;
+  }
 
   const deviceScaleFactor = dprValue === null ? 1 : Number(dprValue);
   if (
@@ -263,6 +283,7 @@ async function main(): Promise<void> {
       deviceScaleFactor
     );
     exporter.prettyPrint = preferences.prettyPrint;
+    exporter.nextjs = nextjsOptions;
     await exporter.run(includeSubpages);
   } catch (e) {
     const { AntiBotError, formatAntiBotError } = await import('../exporter/anti-bot.js');
