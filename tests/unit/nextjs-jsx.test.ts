@@ -163,3 +163,13 @@ test('a component instance without content binding renders inline instead of a p
   c.components.set(inner.id, 'Badge');
   assert.equal(renderNode(n('section', {}, [inner]), c), '<section><div><span>x</span></div></section>');
 });
+
+test('block elements inside text elements become spans so the HTML stays valid', () => {
+  const inner = n('div', {}, [n('div', { text: 'x', styles: { base: { display: 'flex' } } })]);
+  const out = renderNode(n('p', {}, [inner]), ctx());
+  assert.equal(out, '<p><span className="block"><span className="flex">x</span></span></p>');
+});
+
+test('divs outside text elements stay divs', () => {
+  assert.equal(renderNode(n('section', {}, [n('div', { text: 'x' })]), ctx()), '<section><div>x</div></section>');
+});

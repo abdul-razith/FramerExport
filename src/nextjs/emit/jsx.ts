@@ -134,7 +134,7 @@ interface RenderState {
   arrayCounts: Map<string, number>;
 }
 
-function renderChildren(node: Node, ctx: JsxContext, state: RenderState): string {
+function renderChildren(node: Node, ctx: JsxContext, state: RenderState, inText: boolean): string {
   const out: string[] = [];
   const kids = node.children;
   for (let i = 0; i < kids.length; i++) {
@@ -165,12 +165,23 @@ function renderChildren(node: Node, ctx: JsxContext, state: RenderState): string
       continue;
     }
     // An instance without content (e.g. nested in another component's template) renders inline.
-    out.push(render(child, ctx, state));
+    out.push(render(child, ctx, state, inText));
   }
   return out.join('');
 }
 
-function render(node: Node, ctx: JsxContext, state: RenderState): string {
+/** Elements whose content must be phrasing content in HTML. */
+const TEXT_TAGS = new Set(['p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'button', 'label', 'strong', 'em', 'small']);
+/** Block elements that are invalid inside TEXT_TAGS; rendered as display:block spans there. */
+const BLOCK_TAGS = new Set(['div', 'section', 'article', 'header', 'footer', 'nav', 'aside', 'main', 'figure']);
+
+function render(original: Node, ctx: JsxContext, state: RenderState, inText = false): string {
+  // HTML parsers close a <p> at the first <div>, so React hydration would fail; a block span renders the same.
+  const node: Node =
+    inText && BLOCK_TAGS.has(original.tag)
+      ? { ...original, tag: 'span', styles: { ...original.styles, base: { display: 'block', ...original.styles.base } } }
+      : original;
+  const childInText = inText || TEXT_TAGS.has(node.tag);
   const kind = node.motion?.kind;
   // Behaviour markers live in layout.tsx; keep an empty element so stack gaps stay identical.
   if (kind === 'smooth-scroll' || kind === 'loader') return `<div aria-hidden="true"${classNameAttr(node, ctx)} />`;
@@ -222,7 +233,7 @@ function render(node: Node, ctx: JsxContext, state: RenderState): string {
     const childrenOverride = ctx.overrides?.get(node.id)?.children;
     const inner = childrenOverride
       ? `{${childrenOverride}}`
-      : (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state);
+      : (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state, childInText);
     element = VOID.has(node.tag) || !inner ? `${open} />` : `${open}>${inner}</${tag}>`;
   }
 
