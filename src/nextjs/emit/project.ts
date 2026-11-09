@@ -99,6 +99,7 @@ function renderWith(node: Node, model: ProjectModel, extra: Partial<JsxContext>,
     imports: new Set(),
     siteOrigin: model.siteOrigin,
     cssModule: mod,
+    localImage: (src, alt) => model.images.publicPath(src, alt),
     ...extra,
   };
   const jsx = renderNode(node, ctx);
@@ -456,6 +457,7 @@ export async function get${Name}() {
       siteOrigin: model.siteOrigin,
       cssModule: mod,
       overrides,
+      localImage: (src, alt) => model.images.publicPath(src, alt),
     };
     const jsx = sections.map((s) => renderNode(s, ctx)).join('\n');
     const extra = [

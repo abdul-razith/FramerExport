@@ -19,6 +19,8 @@ export interface JsxContext {
   siteOrigin: string;
   /** Collection templates: replace a node's text, image source or whole content with an expression. */
   overrides?: Map<string, { text?: string; image?: string; alt?: string; children?: string }>;
+  /** Maps an image without a content binding to its local /images path (never ship remote Framer URLs). */
+  localImage?: (src: string, alt: string) => string;
   /** Component arrays rendered from an `items` prop (collection listings) instead of content. */
   listingArrays?: Set<string>;
 }
@@ -127,7 +129,8 @@ function renderImage(node: Node, ctx: JsxContext, motionAttrs: string): string {
     return `<${tag}${lead} src={${base}.src} alt={${base}.alt} width={${base}.width} height={${base}.height}${cls} />`;
   }
   const a = node.asset!;
-  return `<${tag}${lead} src=${attrValue(a.src)} alt=${attrValue(node.attrs.alt ?? '')} width={${a.width}} height={${a.height}}${cls} />`;
+  const src = ctx.localImage ? ctx.localImage(a.src, node.attrs.alt || 'image') : a.src;
+  return `<${tag}${lead} src=${attrValue(src)} alt=${attrValue(node.attrs.alt ?? '')} width={${a.width}} height={${a.height}}${cls} />`;
 }
 
 interface RenderState {

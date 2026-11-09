@@ -27,6 +27,7 @@ const card = (t: string) =>
   n('div', { framerName: 'Card', styles: { base: { display: 'flex', 'background-color': 'rgb(255, 255, 255)' } } }, [
     image(`https://cdn.test/${t}/card-1.png`, `Card ${t}`),
     text('h3', 'Title', t),
+    image('https://cdn.test/icon.png', 'Icon'),
   ]);
 const header = () => n('header', { framerName: 'Logo + Menu' }, [text('span', 'Logo', 'Nudge')]);
 const footer = () => n('footer', { framerName: 'Footer' }, [text('p', 'Copyright', '© Nudge')]);
@@ -189,4 +190,10 @@ test('MDX paragraphs that only hold an image are not wrapped in <p>', async () =
   const mdx = await read('components/mdx/BlogMdx.tsx');
   assert.match(mdx, /function onlyImage/);
   assert.match(mdx, /p: \(\{ children, \.\.\.props \}\) =>\s*onlyImage\(children\)/);
+});
+
+test('no generated file references remote Framer image URLs', async () => {
+  for (const f of await list(dir)) {
+    if (/\.(tsx?|mdx)$/.test(f)) assert.doesNotMatch(await read(f), /https:\/\/cdn\.test\/[^"']*\.png/, f);
+  }
 });

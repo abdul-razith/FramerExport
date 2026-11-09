@@ -173,3 +173,9 @@ test('block elements inside text elements become spans so the HTML stays valid',
 test('divs outside text elements stay divs', () => {
   assert.equal(renderNode(n('section', {}, [n('div', { text: 'x' })]), ctx()), '<section><div>x</div></section>');
 });
+
+test('images without a content binding use a local path, never the remote Framer URL', () => {
+  const img = n('img', { asset: { kind: 'image', src: 'https://framerusercontent.com/images/a.png?w=2', width: 4, height: 2 }, attrs: { alt: 'Logo' } });
+  const c = ctx({ bindings: undefined, localImage: (src, alt) => (src.includes('a.png') ? `/images/${alt.toLowerCase()}.png` : '') });
+  assert.equal(renderNode(img, c), '<Image src="/images/logo.png" alt="Logo" width={4} height={2} />');
+});
