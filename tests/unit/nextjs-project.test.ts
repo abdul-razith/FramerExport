@@ -55,16 +55,32 @@ before(async () => {
       footer(),
     ]),
     page('/about', [header(), n('section', { framerName: 'About Hero' }, [text('h1', 'Heading', 'About')]), footer()]),
-    page('/blog', [header(), n('section', { framerName: 'Blog Hero' }, [text('h1', 'Heading', 'Blog')]), footer()]),
+    page('/blog', [
+      header(),
+      n('section', { framerName: 'Blog Hero' }, [text('h1', 'Heading', 'Blog')]),
+      n('section', { framerName: 'Posts' }, ['post-a', 'post-b'].map((slug) =>
+        n('a', { framerName: 'Post Card', attrs: { href: 'https://nudge.test/blog/' + slug } }, [
+          image('https://cdn.test/covers/' + slug + '.png?scale-down-to=512', slug),
+          text('h3', 'Title', slug),
+        ])
+      )),
+      footer(),
+    ]),
   ];
   const itemPage = (slug: string) =>
     page('/blog/' + slug, [
       header(),
-      n('section', { framerName: 'Post Header' }, [text('h1', 'Title', slug), text('p', 'Date', '12 March 2025')]),
+      n('section', { framerName: 'Post Header' }, [text('h1', 'Title', slug), text('p', 'Date', '12 March 2025'), image('https://cdn.test/covers/' + slug + '.png', slug)]),
       n('section', { framerName: 'Post Body' }, [text('p', 'P', 'a'), text('h2', 'H', 'b'), text('p', 'P', 'c')]),
       footer(),
     ]);
+  // Real captures key nodes by position, so the same element has the same key on every item page.
+  const rekey = (node: Node, key: string) => {
+    node.key = key;
+    node.children.forEach((c, i) => rekey(c, key + '/' + c.tag + ':' + i));
+  };
   const items = [itemPage('post-a'), itemPage('post-b')];
+  items.forEach((p) => rekey(p.root, 'body:0'));
   pages.forEach((p) => attachMotion(p.root));
   const report = emptyReport();
   const images = new ImageNamer();
@@ -85,8 +101,8 @@ before(async () => {
         c: blog,
         itemPage: items[0],
         items: [
-          { slug: 'post-a', file: 'blog/post-a.mdx', metadata: { title: 'post-a', date: '2025-03-12' }, body: 'a\n\n## b\n\nc' },
-          { slug: 'post-b', file: 'blog/post-b.mdx', metadata: { title: 'post-b', date: '2025-03-12' }, body: 'a' },
+          { slug: 'post-a', file: 'blog/post-a.mdx', metadata: { title: 'post-a', date: '2025-03-12', image: images.publicPath('https://cdn.test/covers/post-a.png', 'post-a') }, body: 'a\n\n## b\n\nc' },
+          { slug: 'post-b', file: 'blog/post-b.mdx', metadata: { title: 'post-b', date: '2025-03-12', image: images.publicPath('https://cdn.test/covers/post-b.png', 'post-b') }, body: 'a' },
         ],
       },
     ],
@@ -197,4 +213,10 @@ test('no generated file references remote Framer image URLs', async () => {
   for (const f of await list(dir)) {
     if (/\.(tsx?|mdx|css)$/.test(f)) assert.doesNotMatch(await read(f), /https:\/\/cdn\.test\/[^"']*\.png/, f);
   }
+});
+
+test('collection listings read cards from MDX metadata, including resized cover images', async () => {
+  const blogPage = await read('app/blog/page.tsx');
+  assert.match(blogPage, /e.metadata.image/);
+  assert.match(blogPage, /e.metadata.title/);
 });

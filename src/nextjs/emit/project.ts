@@ -183,7 +183,10 @@ function detectListings(model: ProjectModel): Listing[] {
           const ok = insts.every((inst) => {
             const meta = itemFor(inst)!.metadata[f.key];
             const v = inst.values[p.name];
-            if (p.kind === 'image') return (v as { src: string }).src === meta;
+            if (p.kind === 'image') {
+              const img = v as { src: string; alt: string };
+              return model.images.publicPath(img.src, img.alt || 'image') === meta;
+            }
             if (f.kind === 'date') return toIsoDate(String(v)) === meta;
             return v === meta;
           });
@@ -198,7 +201,12 @@ function detectListings(model: ProjectModel): Listing[] {
           }
           return `${p.name}: e.metadata.${f.key}`;
         }
-        return `${p.name}: ${JSON.stringify(insts[0].values[p.name])}`;
+        const constant = insts[0].values[p.name];
+        if (p.kind === 'image') {
+          const img = constant as { src: string; alt: string };
+          return `${p.name}: ${JSON.stringify({ ...img, src: model.images.publicPath(img.src, img.alt || 'image') })}`;
+        }
+        return `${p.name}: ${JSON.stringify(constant)}`;
       });
       const section = page.sections.find((s) => contains(s.node, insts[0].node))!;
       const array = model.bindings.instance.get(insts[0].node.id)?.array;

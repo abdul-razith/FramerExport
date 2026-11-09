@@ -33,7 +33,13 @@ export class ImageNamer {
   private bySource = new Map<string, string>();
   private names = new Set<string>();
 
+  /** Same image, different resize query (?scale-down-to=…) → one key. */
+  static canonical(src: string): string {
+    return /^https?:\/\//.test(src) ? src.replace(/[?#].*$/, '') : src;
+  }
+
   publicPath(src: string, hint: string): string {
+    src = ImageNamer.canonical(src);
     const existing = this.bySource.get(src);
     if (existing) return existing;
     let ext = '.png';
