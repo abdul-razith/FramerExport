@@ -139,3 +139,14 @@ test('flex items do not report the blockified display value', () => {
   const logo = find(home.trees.base, (n) => n.framerName === 'Logo')!;
   assert.equal(logo.styles.display, undefined);
 });
+
+test('zero insets on relatively positioned elements are not recorded', () => {
+  const home = captured.find((p) => p.route === '/')!;
+  const withZeroInset: string[] = [];
+  const walk = (n: RawNode) => {
+    if (n.styles.position === 'relative' && ['top', 'right', 'bottom', 'left'].some((k) => n.styles[k] === '0px')) withZeroInset.push(n.key);
+    n.children.forEach(walk);
+  };
+  walk(home.trees.base);
+  assert.deepEqual(withZeroInset, []);
+});

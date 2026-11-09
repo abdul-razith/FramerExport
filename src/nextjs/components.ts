@@ -204,10 +204,19 @@ export function planComponents(pages: PageModel[], report: ConversionReport): Co
   };
   for (const { node, sectionName } of scanRoots) node.children.forEach((c) => collect(c, sectionName));
 
+  const parentOf = new Map<Node, Node>();
+  const index = (n: Node) => n.children.forEach((c) => (parentOf.set(c, n), index(c)));
+  scanRoots.forEach((r) => index(r.node));
+  /** A repeat is worth a component when its layer has a real name, or when copies sit side by side (a list). */
+  const meaningful = (nodes: Node[]) => {
+    if (!isGenericName(nodes[0].framerName)) return true;
+    const parents = nodes.map((x) => parentOf.get(x));
+    return parents.some((p, i) => p && parents.indexOf(p) !== i);
+  };
   const claimed = new Set<Node>();
   const visit = (node: Node) => {
     const g = groups.get(structuralHash(node));
-    if (g && g.nodes.length >= 2 && !claimed.has(node)) {
+    if (g && g.nodes.length >= 2 && !claimed.has(node) && meaningful(g.nodes)) {
       const { name: base, fallback } = componentName(g.nodes[0], g.sectionName);
       const name = registry.unique(base);
       if (fallback) report.fallbackNames.push({ name, route: '(shared)' });

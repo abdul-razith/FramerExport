@@ -55,3 +55,12 @@ test('NameRegistry adds numeric suffixes', () => {
   assert.equal(reg.unique('Content'), 'Content2');
   assert.equal(reg.unique('Content'), 'Content3');
 });
+
+test('all-caps layer names are normalised and names are unique ignoring case', () => {
+  assert.equal(toPascal('ICON'), 'Icon');
+  assert.equal(toPascal('IMG Wrapper'), 'ImgWrapper');
+  assert.equal(toPascal('CTA'), 'Cta');
+  const reg = new NameRegistry();
+  assert.equal(reg.unique('Icon'), 'Icon');
+  assert.equal(reg.unique('ICON'), 'ICON2');
+});

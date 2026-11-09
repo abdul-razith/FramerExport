@@ -164,11 +164,7 @@ function renderChildren(node: Node, ctx: JsxContext, state: RenderState): string
       i = j - 1;
       continue;
     }
-    if (comp) {
-      ctx.imports.add(`import { ${comp} } from '@/components/ui/${comp}';`);
-      out.push(`<${comp} />`);
-      continue;
-    }
+    // An instance without content (e.g. nested in another component's template) renders inline.
     out.push(render(child, ctx, state));
   }
   return out.join('');
@@ -217,6 +213,7 @@ function render(node: Node, ctx: JsxContext, state: RenderState): string {
     }
     for (const [name, value] of Object.entries(node.attrs)) {
       if (name.startsWith('aria-')) attrs.push(`${name}=${attrValue(value)}`);
+      else if (name === 'tabindex' && /^-?\d+$/.test(value)) attrs.push(`tabIndex={${value}}`);
       else if (KEEP_ATTRS[name] && !(name === 'alt' && node.tag !== 'img')) {
         attrs.push(`${KEEP_ATTRS[name]}=${attrValue(value)}`);
       }

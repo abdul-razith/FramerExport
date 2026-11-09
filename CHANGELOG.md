@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Framer exports can be converted into an editable Next.js project with `--nextjs` or `framer-export to-nextjs <export-dir>`. The project uses Next.js 16, React 19, Tailwind CSS v4, `motion`, GSAP and Lenis, keeps page text in content files and CMS collections in MDX, and is built and screenshot-compared with the original before it replaces any previous `nextjs/` folder. The optional `--ai-refine` pass improves names through Claude Code, the Antigravity CLI, Gemini, Groq, OpenRouter, GitHub Models, Ollama or the Anthropic API, and is discarded when the result renders differently. The normal export is unchanged; the conversion code loads only when requested.
+
 ## 5.0.1
 
 The stable release uses 5.0.1 because npm permanently reserves 5.0.0 from an earlier publication that is no longer available. This changes the release version without changing the validated application behavior.

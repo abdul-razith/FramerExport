@@ -60,3 +60,9 @@ test('two different colours with the same generated name get numbered', () => {
   const tokens = collectTokens([root]);
   assert.deepEqual(Object.keys(tokens.colors), ['green-900', 'green-900-2']);
 });
+
+test('generic font families are not quoted', () => {
+  const tokens = collectTokens([node('body', { 'font-family': 'sans-serif' }, [node('code', { 'font-family': 'monospace' })])]);
+  assert.ok(Object.values(tokens.fonts).includes('sans-serif'));
+  assert.ok(Object.values(tokens.fonts).includes('monospace'));
+});

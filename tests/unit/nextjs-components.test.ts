@@ -98,3 +98,19 @@ test('behaviour marker sections get an Anchor name instead of clashing with moti
   const plan = planComponents([page('/', [header(), n('section', { framerName: 'Hero Section' }, [text('h1', 'Heading', 'x')]), marker, footer()])], emptyReport());
   assert.deepEqual(plan.pages[0].sections.map((s) => s.name), ['Hero', 'SmoothScrollAnchor']);
 });
+
+test('generic repeated fragments that are not siblings stay inline', () => {
+  const frag = () => n('div', { framerName: 'Frame' }, [text('span', 'Text', 'a'), text('span', 'Text', 'b'), text('span', 'Text', 'c')]);
+  const plan = planComponents(
+    [page('/', [header(), n('section', { framerName: 'One' }, [frag(), text('p', 'X', 'x')]), n('section', { framerName: 'Two' }, [text('p', 'Y', 'y'), frag()]), footer()])],
+    emptyReport()
+  );
+  assert.deepEqual(plan.ui.map((u) => u.name), []);
+});
+
+test('generic repeated siblings still become a list component', () => {
+  const item = (t: string) => n('div', { framerName: 'Frame' }, [text('h3', 'Title', t), text('p', 'Body', t)]);
+  const plan = planComponents([page('/', [header(), n('section', { framerName: 'Features' }, [item('a'), item('b'), item('c')]), text('p', 'Z', 'z'), footer()])], emptyReport());
+  assert.equal(plan.ui.length, 1);
+  assert.equal(plan.ui[0].instances.length, 3);
+});

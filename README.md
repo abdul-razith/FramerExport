@@ -194,6 +194,51 @@ Every run writes `export.log` with untruncated messages from its retained log hi
 
 After a direct-command or legacy terminal export you can generate a conversion brief for an AI coding agent. Pick a target stack (React with Vite, Next.js, Vue, SvelteKit or Astro), pick the tool you use (Claude Code, Codex, OpenCode or another agent), pick a goal (clean rebuild, pixel-perfect migration, component system, or performance and SEO), and it writes a detailed prompt file into `ai/` inside the export. The prompt references the real files and counts from your export, so the agent starts from facts instead of guesses. The modern wizard finishes in its log viewer.
 
+## Convert a Framer site to Next.js
+
+For Framer sites, the export can also be turned into a clean, editable Next.js project: named components, Tailwind CSS classes, colours and fonts as theme tokens, page text in content files, and blog or other CMS collections as MDX files. It is opt-in and does not change the normal export.
+
+```bash
+framer-export https://mysite.framer.app --subpages --nextjs     # export, then convert
+framer-export to-nextjs ./framer-mysite-fresh-build-a1b2         # convert an existing export again
+```
+
+The project is written to `nextjs/` inside the export folder. It uses Next.js 16 (App Router, TypeScript), React 19, Tailwind CSS v4, `motion` (framer-motion) for appear and hover animations, GSAP with ScrollTrigger and Lenis for scroll effects, and `@next/mdx`.
+
+| To change | Edit |
+| --- | --- |
+| Page text, links and images | `content/*.ts` (one file per page, `layout.ts` for header and footer) |
+| Blog posts and other collection items | `content/<collection>/*.mdx` |
+| Colours, fonts, radii, shadows | the `@theme` block in `app/globals.css` |
+| Animation timing | `components/motion/config.ts` |
+| Layout of a section | `components/sections/*.tsx` |
+
+After writing the project, the converter runs `npm install` and `npm run build`, screenshots every page at 1440, 1024 and 390 px, and compares them with the original site. Results, approximations and anything left out are listed in `nextjs/CONVERSION-REPORT.md`. Use `--no-verify` to skip this step.
+
+How the conversion works, in brief: every page is opened again at the three widths, Framer's per-breakpoint copies are merged into one element with `tablet:` and `mobile:` classes, computed styles become Tailwind utilities (anything Tailwind cannot express goes to a small CSS module), repeated structures become components, and appear animations are rebuilt from the start states saved in the export. Custom cursors and loaders are replaced by ready-made components; backend features (forms, search, accounts) are not converted.
+
+### Better names with an AI pass (optional)
+
+Framer layer names such as "Frame" or "Content" and colour IDs give the converter little to work with. `--ai-refine` asks a language model to rename components, props, content keys and theme tokens. It may only rename things and remove wrappers that have no styles; the refined project is built and compared with the original again, and it is discarded if anything got worse.
+
+```bash
+framer-export to-nextjs ./my-export --ai-refine                      # first available provider
+framer-export to-nextjs ./my-export --ai-refine --ai-provider agy
+```
+
+| `--ai-provider` | Needs |
+| --- | --- |
+| `claude-code` | Claude Code installed and logged in (a Claude Pro plan works; uses its usage limits) |
+| `agy` | Antigravity CLI installed and logged in. Runs with `--dangerously-skip-permissions` inside an empty temporary folder; turn it off with `--ai-cli-skip-permissions false` |
+| `gemini` | `GEMINI_API_KEY` (Google AI Studio free tier) |
+| `groq` | `GROQ_API_KEY` (free tier) |
+| `openrouter` | `OPENROUTER_API_KEY` and `--ai-model <id>` (free `:free` models) |
+| `github` | `GITHUB_TOKEN` and `--ai-model <id>` (GitHub Models) |
+| `ollama` | A local Ollama with a model pulled |
+| `anthropic` | `ANTHROPIC_API_KEY` (paid API; only when chosen explicitly) |
+
+Without `--ai-provider`, the first available one is used in the order shown (except `anthropic`). Replies are cached in `.nextjs-cache/refine/`, so if a free tier's daily limit is reached, running the same command later continues where it stopped.
+
 ## How it works
 
 The pipeline has six phases. First it fetches the server-rendered HTML over plain HTTP, which is what search engines see and what gives the cleanest markup. Then it launches Puppeteer, blocks the analytics domains the platform handler lists, navigates, waits for the hydration selector, scrolls through the page to trigger lazy loading, and records every network response into an asset map. Sub-page crawling reuses the same browser session when enabled.

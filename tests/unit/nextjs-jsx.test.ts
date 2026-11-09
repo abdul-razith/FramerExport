@@ -152,3 +152,14 @@ test('image overrides can replace alt text', () => {
   const c = ctx({ overrides: new Map([[img.id, { image: 'metadata.cover', alt: 'metadata.title' }]]) });
   assert.equal(renderNode(img, c), '<Image src={metadata.cover} alt={metadata.title} width={4} height={2} />');
 });
+
+test('numeric attributes are emitted as numbers', () => {
+  assert.equal(renderNode(n('div', { attrs: { tabindex: '-1' } }), ctx()), '<div tabIndex={-1} />');
+});
+
+test('a component instance without content binding renders inline instead of a prop-less component', () => {
+  const inner = n('div', {}, [n('span', { text: 'x' })]);
+  const c = ctx({ bindings: undefined, props: new Map() });
+  c.components.set(inner.id, 'Badge');
+  assert.equal(renderNode(n('section', {}, [inner]), c), '<section><div><span>x</span></div></section>');
+});

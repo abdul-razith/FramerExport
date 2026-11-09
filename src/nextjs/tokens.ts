@@ -88,6 +88,8 @@ export function nameColor(hex: string): string {
   return `${family}-${step}${alpha}`;
 }
 
+const GENERIC_FAMILIES = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace']);
+
 function primaryFamily(stack: string): string {
   return stack.split(',')[0].trim().replace(/^["']|["']$/g, '');
 }
@@ -182,7 +184,7 @@ export function collectTokens(roots: Node[]): ThemeTokens {
     [...m].filter(([f]) => !exclude.has(f)).sort((a, b) => b[1] - a[1])[0]?.[0];
   const assign = (family: string, role: string) => {
     if (tokens.fontByFamily.has(family) || tokens.fonts[role]) return;
-    tokens.fonts[role] = `"${family}"`;
+    tokens.fonts[role] = GENERIC_FAMILIES.has(family) ? family : `"${family}"`;
     tokens.fontByFamily.set(family, role);
   };
   for (const fam of families) {

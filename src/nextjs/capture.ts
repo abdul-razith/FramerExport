@@ -247,6 +247,8 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
         if (parentStyle.getPropertyValue(p) === v) continue;
       } else if (defs[p] === v) continue;
       // Flex/grid items are "blockified": display:block there is not an authored value.
+      // Chrome resolves top/right/bottom/left:auto to 0px on relative elements; both render the same.
+      if (v === '0px' && (p === 'top' || p === 'right' || p === 'bottom' || p === 'left') && cs.position === 'relative') continue;
       if (p === 'display' && v === 'block' && /flex|grid/.test(parentDisplay) && defs.display.startsWith('inline')) continue;
       node.styles[p] = v;
     }

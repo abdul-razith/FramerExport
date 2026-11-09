@@ -23,7 +23,7 @@ function words(s: string): string[] {
 
 export function toPascal(s: string): string {
   const out = words(s)
-    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .map((w) => (w.length > 1 && w === w.toUpperCase() && /[A-Z]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w[0].toUpperCase() + w.slice(1)))
     .join('');
   if (!out) return 'X';
   return /^\d/.test(out) ? 'X' + out : out;
@@ -77,14 +77,15 @@ export function componentName(node: Node, sectionName: string): { name: string; 
 export class NameRegistry {
   private used = new Set<string>();
 
+  /** Case-insensitive: names become file names, and Windows/macOS file systems ignore case. */
   has(name: string): boolean {
-    return this.used.has(name);
+    return this.used.has(name.toLowerCase());
   }
 
   unique(name: string): string {
     let candidate = name;
-    for (let n = 2; this.used.has(candidate); n++) candidate = `${name}${n}`;
-    this.used.add(candidate);
+    for (let n = 2; this.has(candidate); n++) candidate = `${name}${n}`;
+    this.used.add(candidate.toLowerCase());
     return candidate;
   }
 }
