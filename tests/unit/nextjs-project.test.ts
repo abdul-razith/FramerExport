@@ -49,6 +49,7 @@ before(async () => {
         text('h1', 'Heading', 'Hello {world}', { 'font-size': '72px', color: 'rgb(19, 51, 36)' }),
         image('https://cdn.test/a/hero.png', 'Hero'),
         image('https://cdn.test/b/hero.png', 'Hero'),
+        n('div', { framerName: 'Mask', styles: { base: { 'mask-image': 'url("https://cdn.test/mask.png")' } } }),
       ]),
       n('section', { framerName: 'Projects' }, [card('A'), card('B'), card('C')]),
       footer(),
@@ -194,6 +195,6 @@ test('MDX paragraphs that only hold an image are not wrapped in <p>', async () =
 
 test('no generated file references remote Framer image URLs', async () => {
   for (const f of await list(dir)) {
-    if (/\.(tsx?|mdx)$/.test(f)) assert.doesNotMatch(await read(f), /https:\/\/cdn\.test\/[^"']*\.png/, f);
+    if (/\.(tsx?|mdx|css)$/.test(f)) assert.doesNotMatch(await read(f), /https:\/\/cdn\.test\/[^"']*\.png/, f);
   }
 });

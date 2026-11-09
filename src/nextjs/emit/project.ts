@@ -56,12 +56,19 @@ function tokenizeColors(value: string, tokens: ThemeTokens): string {
   });
 }
 
-function cssModule(tokens: ThemeTokens) {
+/** Remote url(...) references (masks, backgrounds) → local /images files. */
+function localizeUrls(value: string, images: ImageNamer): string {
+  return value.replace(/url\(\s*["']?(https?:\/\/[^"')]+)["']?\s*\)/g, (_m, url: string) => {
+    return `url('${images.publicPath(url, 'background')}')`;
+  });
+}
+
+function cssModule(tokens: ThemeTokens, images: ImageNamer) {
   const rules: string[] = [];
   const names = new NameRegistry();
   const decls = (style: Style) =>
     Object.entries(style)
-      .map(([k, v]) => `  ${k}: ${tokenizeColors(v, tokens)};`)
+      .map(([k, v]) => `  ${k}: ${localizeUrls(tokenizeColors(v, tokens), images)};`)
       .join('\n');
   return {
     importName: 'styles',
@@ -91,7 +98,7 @@ interface Rendered {
 }
 
 function renderWith(node: Node, model: ProjectModel, extra: Partial<JsxContext>, components: Map<string, string>): Rendered {
-  const mod = cssModule(model.tokens);
+  const mod = cssModule(model.tokens, model.images);
   const ctx: JsxContext = {
     tokens: model.tokens,
     contentVar: 'content',
@@ -182,7 +189,8 @@ function detectListings(model: ProjectModel): Listing[] {
           });
           if (!ok) continue;
           if (p.kind === 'image') {
-            return `${p.name}: { ...${JSON.stringify(insts[0].values[p.name])}, src: e.metadata.${f.key} }`;
+            const { src: _src, ...rest } = insts[0].values[p.name] as { src: string };
+            return `${p.name}: { ...${JSON.stringify(rest)}, src: e.metadata.${f.key} }`;
           }
           if (f.kind === 'date') {
             const locale = /^\d/.test(String(insts[0].values[p.name])) ? 'en-GB' : 'en-US';
@@ -448,7 +456,7 @@ export async function get${Name}() {
         }
       })
     );
-    const mod = cssModule(model.tokens);
+    const mod = cssModule(model.tokens, model.images);
     const ctx: JsxContext = {
       tokens: model.tokens,
       contentVar: 'metadata',
