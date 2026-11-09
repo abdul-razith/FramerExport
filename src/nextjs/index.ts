@@ -4,6 +4,7 @@ import { log, warn, success } from '../logger/index.js';
 import type { NextjsOptions } from './options.js';
 import { emptyReport, renderReport, type ConversionReport } from './report.js';
 import type { ConversionContext, PageModel } from './model.js';
+import type { ProjectModel } from './emit/project.js';
 
 export interface ConversionSource {
   outDir: string;
@@ -100,38 +101,71 @@ async function convert(exportDir: string, sourceUrl: string, options: NextjsOpti
       throw new Error('Simulated failure (FRAMER_NEXTJS_TEST_FAIL=emit)');
     }
 
-    await writeProject(
-      tmpDir,
-      {
-        siteName: pages[0].title.split(/\s[-|–]\s/)[0] || new URL(sourceUrl).hostname,
-        siteOrigin: origin,
-        exportDir,
-        tokens: collectTokens(pages.map((p) => p.root)),
-        fonts: extractFontFaces(exportDir, list.map((p) => p.exportHtml)),
-        plan,
-        content: files,
-        bindings,
-        collections: colls,
-        pages: regular,
-        motion: new Set(pages.flatMap((p) => [...motionUsage(p.root)])),
-        images,
-      },
-      (message) => {
+    const model: ProjectModel = {
+      siteName: pages[0].title.split(/\s[-|–]\s/)[0] || new URL(sourceUrl).hostname,
+      siteOrigin: origin,
+      exportDir,
+      tokens: collectTokens(pages.map((p) => p.root)),
+      fonts: extractFontFaces(exportDir, list.map((p) => p.exportHtml)),
+      plan,
+      content: files,
+      bindings,
+      collections: colls,
+      pages: regular,
+      motion: new Set(pages.flatMap((p) => [...motionUsage(p.root)])),
+      images,
+    };
+    const emit = async (dir: string, m: ProjectModel) => {
+      await writeProject(dir, m, (message) => {
         log(message);
         report.unconverted.push({ route: '(project)', what: message, why: 'see log' });
+      });
+      for (const f of report.pages.filter((p) => p.status === 'failed')) {
+        const file = path.join(dir, routeDir(f.route), 'page.tsx');
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, PLACEHOLDER);
       }
-    );
-    for (const f of report.pages.filter((p) => p.status === 'failed')) {
-      const file = path.join(tmpDir, routeDir(f.route), 'page.tsx');
-      await fs.mkdir(path.dirname(file), { recursive: true });
-      await fs.writeFile(file, PLACEHOLDER);
-    }
+    };
+    await emit(tmpDir, model);
 
-    if (options.verify) {
-      const { verifyProject } = await import('./verify.js');
-      await verifyProject(tmpDir, pages, ctx);
+    const { verifyProject } = await import('./verify.js');
+    if (options.verify) await verifyProject(tmpDir, pages, ctx);
+
+    if (options.aiRefine) {
+      const { runRefine } = await import('./refine/index.js');
+      const refined = await runRefine(model, ctx);
+      if (refined !== model && (report.refine?.accepted ?? 0) > 0) {
+        const refineDir = path.join(exportDir, 'nextjs.refine.tmp');
+        await fs.rm(refineDir, { recursive: true, force: true });
+        await emit(refineDir, refined);
+        let keep = true;
+        if (options.verify) {
+          // Reuse the installed dependencies, then check the refined project once.
+          await fs.rename(path.join(tmpDir, 'node_modules'), path.join(refineDir, 'node_modules')).catch(() => undefined);
+          const before = { build: report.build, similarity: report.similarity };
+          report.similarity = [];
+          await verifyProject(refineDir, pages, ctx);
+          const worse = report.similarity.filter((s) => {
+            const b = before.similarity.find((x) => x.route === s.route && x.width === s.width)?.score ?? 1;
+            return s.score < Math.min(0.97, b) - 0.005;
+          });
+          keep = !!report.build?.ok && worse.length === 0;
+          if (!keep) {
+            report.refine!.stoppedEarly =
+              `Final check of the AI-refined project failed (${report.build?.ok ? `${worse.length} page/width checks got worse` : 'build failed'}); kept the rule-based project.`;
+            report.build = before.build;
+            report.similarity = before.similarity;
+            await fs.rename(path.join(refineDir, 'node_modules'), path.join(tmpDir, 'node_modules')).catch(() => undefined);
+          }
+        }
+        if (keep) {
+          await fs.rm(tmpDir, { recursive: true, force: true });
+          await fs.rename(refineDir, tmpDir);
+        } else {
+          await fs.rm(refineDir, { recursive: true, force: true });
+        }
+      }
     }
-    if (options.aiRefine) log('AI refine is not available in this build yet; keeping the rule-based result.');
 
     await fs.writeFile(path.join(tmpDir, 'CONVERSION-REPORT.md'), renderReport(report));
     await fs.mkdir(cacheDir, { recursive: true });
