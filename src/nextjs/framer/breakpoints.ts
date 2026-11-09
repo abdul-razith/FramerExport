@@ -129,6 +129,12 @@ function mergeVariants(v: Variants, ctx: MergeCtx): Node {
   if (hover) node.hover = hover;
   const asset = assetOf(rep);
   if (asset) node.asset = asset;
+  if (rep.scrollSamples?.length) {
+    const scroll = (['transform', 'opacity'] as const)
+      .map((property) => ({ property, values: rep.scrollSamples!.map((s) => s[property] ?? '') }))
+      .filter((s) => s.values.some((v) => v !== s.values[0]));
+    if (scroll.length) node.motion = { kind: 'scroll', scroll };
+  }
   return collapseWrapper(node);
 }
 

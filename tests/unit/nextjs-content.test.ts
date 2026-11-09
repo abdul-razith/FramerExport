@@ -119,3 +119,19 @@ test('ImageNamer reuses paths per source and de-duplicates names', () => {
   assert.equal(namer.publicPath('https://cdn.test/z', 'Ünïcode Name!'), '/images/unicode-name.png');
   assert.deepEqual([...namer.entries()].map(([src]) => src), ['https://cdn.test/x.png', 'https://cdn.test/y.png?w=2', 'https://cdn.test/z']);
 });
+
+test('a split-text parent is bound as one text value', () => {
+  const letters = [...'Hello'].map((ch) => n('span', { text: ch }));
+  const tagline = n('p', { framerName: 'Tagline', animation: { kind: 'split-text', from: { opacity: 0 } } }, letters);
+  const pages = [
+    page('/', [
+      n('section', { framerName: 'Hero Section' }, [tagline]),
+      n('section', { framerName: 'Outro' }, [text('p', 'Note', 'Bye')]),
+    ]),
+  ];
+  const report = emptyReport();
+  const { files, bindings } = extractContent(planComponents(pages, report), report, new ImageNamer());
+  assert.deepEqual(files[0].data, { hero: { tagline: 'Hello' }, outro: { note: 'Bye' } });
+  assert.equal(bindings.text.get(tagline.id), 'tagline');
+  assert.equal(letters.some((l) => bindings.text.has(l.id)), false);
+});

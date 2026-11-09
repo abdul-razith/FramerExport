@@ -129,6 +129,15 @@ function sectionContent(section: Node, sectionName: string, ctx: Ctx): Record<st
       list.push(instanceValues(inst.comp, inst.comp.instances[inst.index].values, ctx));
       return;
     }
+    if (node.animation?.kind === 'split-text') {
+      const text = (function joined(n: Node): string {
+        return (n.text ?? '') + n.children.map(joined).join('');
+      })(node);
+      const key = keys.unique(leafKey(node));
+      data[key] = text;
+      ctx.bindings.text.set(node.id, key);
+      return;
+    }
     if (node.asset?.kind === 'image') {
       const key = keys.unique(leafKey(node));
       data[key] = imageValue(node, ctx, `${sectionName} ${key}`);
