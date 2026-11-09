@@ -84,11 +84,29 @@ test('motion wrappers and split text', () => {
   c.bindings!.text.set(reveal.id, 'intro');
   c.bindings!.text.set(split.id, 'tagline');
   const out = renderNode(root, c);
-  assert.match(out, /<Reveal from=\{\{ opacity: 0, y: 40 \}\}><p>\{content\.intro\}<\/p><\/Reveal>/);
+  assert.match(
+    out,
+    /<motion\.p initial=\{\{ opacity: 0, y: 40 \}\} whileInView=\{\{ opacity: 1, y: 0 \}\} viewport=\{\{ once: true \}\} transition=\{reveal\}>\{content\.intro\}<\/motion\.p>/
+  );
   assert.match(out, /<SplitText as="p" text=\{content\.tagline\} from=\{\{ opacity: 0, x: 40, scale: 0\.9 \}\} \/>/);
   assert.doesNotMatch(out, /Smooth/);
-  assert.ok(c.imports.has("import { Reveal } from '@/components/motion/Reveal';"));
+  assert.ok(c.imports.has("import * as motion from 'motion/react-client';"));
+  assert.ok(c.imports.has("import { reveal } from '@/components/motion/config';"));
   assert.ok(c.imports.has("import { SplitText } from '@/components/motion/SplitText';"));
+});
+
+test('revealed images and links use motion-wrapped next components', () => {
+  const img = n('img', {
+    asset: { kind: 'image', src: 'x', width: 1, height: 1 },
+    motion: { kind: 'reveal', from: { opacity: 0 } },
+  });
+  const c = ctx();
+  c.bindings!.image.set(img.id, 'image');
+  assert.equal(
+    renderNode(img, c),
+    '<MotionImage initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={reveal} src={content.image.src} alt={content.image.alt} width={content.image.width} height={content.image.height} />'
+  );
+  assert.ok(c.imports.has("import { MotionImage } from '@/components/motion/MotionImage';"));
 });
 
 test('consecutive component instances render as a map over the content array', () => {

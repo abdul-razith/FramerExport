@@ -17,6 +17,10 @@ export interface JsxContext {
   /** Full import lines collected while rendering. */
   imports: Set<string>;
   siteOrigin: string;
+  /** Collection templates: replace a node's text, image source or whole content with an expression. */
+  overrides?: Map<string, { text?: string; image?: string; children?: string }>;
+  /** Component arrays rendered from an `items` prop (collection listings) instead of content. */
+  listingArrays?: Set<string>;
 }
 
 const VOID = new Set(['img', 'br', 'hr', 'input', 'source', 'wbr', 'meta', 'link']);
@@ -29,10 +33,22 @@ const KEEP_ATTRS: Record<string, string> = {
 const IMPORTS = {
   image: "import Image from 'next/image';",
   link: "import Link from 'next/link';",
-  reveal: "import { Reveal } from '@/components/motion/Reveal';",
+  motion: "import * as motion from 'motion/react-client';",
+  revealConfig: "import { reveal } from '@/components/motion/config';",
+  motionImage: "import { MotionImage } from '@/components/motion/MotionImage';",
+  motionLink: "import { MotionLink } from '@/components/motion/MotionLink';",
   split: "import { SplitText } from '@/components/motion/SplitText';",
   scroll: "import { ScrollEffect } from '@/components/motion/ScrollEffect';",
 };
+
+const REST: Record<string, number> = { opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 };
+
+/** `initial/whileInView/viewport/transition` attributes for an appear animation. */
+function revealAttrs(from: Transform | undefined, ctx: JsxContext): string {
+  ctx.imports.add(IMPORTS.revealConfig);
+  const to = Object.fromEntries(Object.keys(from ?? {}).map((k) => [k, REST[k]]));
+  return `initial=${fromLiteral(from)} whileInView=${fromLiteral(to)} viewport={{ once: true }} transition={reveal}`;
+}
 
 /** JSX text: plain when safe, otherwise a JSON string literal expression. */
 export function escapeJsxText(s: string): string {
@@ -80,6 +96,8 @@ function localPath(href: string, ctx: JsxContext): string {
 }
 
 function textExpr(node: Node, ctx: JsxContext): string | undefined {
+  const override = ctx.overrides?.get(node.id)?.text;
+  if (override) return `{${override}}`;
   const bound = ctx.bindings?.text.get(node.id);
   if (bound) return `{${ctx.contentVar}.${bound}}`;
   const prop = ctx.props?.get(node.id);
@@ -87,17 +105,27 @@ function textExpr(node: Node, ctx: JsxContext): string | undefined {
   return node.text ? escapeJsxText(node.text) : undefined;
 }
 
-function renderImage(node: Node, ctx: JsxContext): string {
-  ctx.imports.add(IMPORTS.image);
+function renderImage(node: Node, ctx: JsxContext, motionAttrs: string): string {
+  let tag = 'Image';
+  if (motionAttrs) {
+    tag = 'MotionImage';
+    ctx.imports.add(IMPORTS.motionImage);
+  } else ctx.imports.add(IMPORTS.image);
+  const lead = motionAttrs ? ' ' + motionAttrs : '';
   const bound = ctx.bindings?.image.get(node.id);
   const prop = ctx.props?.get(node.id);
   const base = bound ? `${ctx.contentVar}.${bound}` : prop?.kind === 'image' ? prop.name : undefined;
   const cls = classNameAttr(node, ctx);
+  const override = ctx.overrides?.get(node.id)?.image;
+  if (override) {
+    const a = node.asset!;
+    return `<${tag}${lead} src={${override}} alt=${attrValue(node.attrs.alt ?? '')} width={${a.width}} height={${a.height}}${cls} />`;
+  }
   if (base) {
-    return `<Image src={${base}.src} alt={${base}.alt} width={${base}.width} height={${base}.height}${cls} />`;
+    return `<${tag}${lead} src={${base}.src} alt={${base}.alt} width={${base}.width} height={${base}.height}${cls} />`;
   }
   const a = node.asset!;
-  return `<Image src=${attrValue(a.src)} alt=${attrValue(node.attrs.alt ?? '')} width={${a.width}} height={${a.height}}${cls} />`;
+  return `<${tag}${lead} src=${attrValue(a.src)} alt=${attrValue(node.attrs.alt ?? '')} width={${a.width}} height={${a.height}}${cls} />`;
 }
 
 interface RenderState {
@@ -124,7 +152,9 @@ function renderChildren(node: Node, ctx: JsxContext, state: RenderState): string
       }
       const run = j - i;
       const arr = `${ctx.contentVar}.${inst.array}`;
-      if (inst.index === 0 && run === state.arrayCounts.get(inst.array)) {
+      if (ctx.listingArrays?.has(inst.array)) {
+        if (inst.index === 0) out.push(`{items.map((item, i) => <${comp} key={i} {...item} />)}`);
+      } else if (inst.index === 0 && run === state.arrayCounts.get(inst.array)) {
         out.push(`{${arr}.map((item, i) => <${comp} key={i} {...item} />)}`);
       } else {
         for (let k = 0; k < run; k++) out.push(`<${comp} {...${arr}[${inst.index + k}]} />`);
@@ -154,14 +184,15 @@ function render(node: Node, ctx: JsxContext, state: RenderState): string {
     return `<SplitText as="${node.tag}" text={${text}} from=${fromLiteral(node.motion!.from)}${cls} />`;
   }
 
+  const motionAttrs = kind === 'reveal' ? revealAttrs(node.motion!.from, ctx) : '';
   let element: string;
   if (node.asset?.kind === 'image') {
-    element = renderImage(node, ctx);
-  } else if (node.asset?.kind === 'svg' && node.attrs['data-svg']) {
+    element = renderImage(node, ctx, motionAttrs);
+  } else if (node.asset?.kind === 'svg' && node.attrs['data-svg'] && !motionAttrs) {
     element = svgToJsx(node.attrs['data-svg']);
   } else {
     let tag = node.tag;
-    const attrs: string[] = [];
+    const attrs: string[] = motionAttrs ? [motionAttrs] : [];
     const href = node.attrs.href;
     if (tag === 'a' && href !== undefined) {
       const boundHref = ctx.bindings?.href.get(node.id);
@@ -172,10 +203,14 @@ function render(node: Node, ctx: JsxContext, state: RenderState): string {
           ? `{${prop.name}}`
           : attrValue(localPath(href, ctx));
       if (isInternal(href, ctx)) {
-        tag = 'Link';
-        ctx.imports.add(IMPORTS.link);
+        tag = motionAttrs ? 'MotionLink' : 'Link';
+        ctx.imports.add(motionAttrs ? IMPORTS.motionLink : IMPORTS.link);
       }
       attrs.push(`href=${hrefExpr}`);
+    }
+    if (motionAttrs && tag === node.tag) {
+      tag = `motion.${node.tag}`;
+      ctx.imports.add(IMPORTS.motion);
     }
     for (const [name, value] of Object.entries(node.attrs)) {
       if (name.startsWith('aria-')) attrs.push(`${name}=${attrValue(value)}`);
@@ -184,14 +219,13 @@ function render(node: Node, ctx: JsxContext, state: RenderState): string {
       }
     }
     const open = `<${tag}${attrs.length ? ' ' + attrs.join(' ') : ''}${classNameAttr(node, ctx)}`;
-    const inner = (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state);
+    const childrenOverride = ctx.overrides?.get(node.id)?.children;
+    const inner = childrenOverride
+      ? `{${childrenOverride}}`
+      : (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state);
     element = VOID.has(node.tag) || !inner ? `${open} />` : `${open}>${inner}</${tag}>`;
   }
 
-  if (kind === 'reveal') {
-    ctx.imports.add(IMPORTS.reveal);
-    return `<Reveal from=${fromLiteral(node.motion!.from)}>${element}</Reveal>`;
-  }
   if (kind === 'scroll' && node.motion!.scroll) {
     ctx.imports.add(IMPORTS.scroll);
     return `<ScrollEffect values={${JSON.stringify(node.motion!.scroll)}}>${element}</ScrollEffect>`;

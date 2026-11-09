@@ -56,7 +56,7 @@ export function structuralHash(node: Node): string {
 }
 
 /** Tags and layer names only, used to recognise shared header/footer across pages. */
-function shapeHash(node: Node): string {
+export function shapeHash(node: Node): string {
   return sha(`${node.tag}[${node.framerName ?? ''}](${node.children.map(shapeHash).join(',')})`);
 }
 
