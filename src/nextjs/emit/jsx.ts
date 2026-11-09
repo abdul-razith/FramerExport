@@ -18,7 +18,7 @@ export interface JsxContext {
   imports: Set<string>;
   siteOrigin: string;
   /** Collection templates: replace a node's text, image source or whole content with an expression. */
-  overrides?: Map<string, { text?: string; image?: string; children?: string }>;
+  overrides?: Map<string, { text?: string; image?: string; alt?: string; children?: string }>;
   /** Component arrays rendered from an `items` prop (collection listings) instead of content. */
   listingArrays?: Set<string>;
 }
@@ -119,7 +119,9 @@ function renderImage(node: Node, ctx: JsxContext, motionAttrs: string): string {
   const override = ctx.overrides?.get(node.id)?.image;
   if (override) {
     const a = node.asset!;
-    return `<${tag}${lead} src={${override}} alt=${attrValue(node.attrs.alt ?? '')} width={${a.width}} height={${a.height}}${cls} />`;
+    const altOverride = ctx.overrides?.get(node.id)?.alt;
+    const alt = altOverride ? `{${altOverride}}` : attrValue(node.attrs.alt ?? '');
+    return `<${tag}${lead} src={${override}} alt=${alt} width={${a.width}} height={${a.height}}${cls} />`;
   }
   if (base) {
     return `<${tag}${lead} src={${base}.src} alt={${base}.alt} width={${base}.width} height={${base}.height}${cls} />`;
@@ -174,7 +176,8 @@ function renderChildren(node: Node, ctx: JsxContext, state: RenderState): string
 
 function render(node: Node, ctx: JsxContext, state: RenderState): string {
   const kind = node.motion?.kind;
-  if (kind === 'smooth-scroll' || kind === 'loader') return '';
+  // Behaviour markers live in layout.tsx; keep an empty element so stack gaps stay identical.
+  if (kind === 'smooth-scroll' || kind === 'loader') return `<div aria-hidden="true"${classNameAttr(node, ctx)} />`;
 
   if (kind === 'split-text') {
     ctx.imports.add(IMPORTS.split);

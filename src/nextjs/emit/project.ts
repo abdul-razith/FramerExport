@@ -424,12 +424,15 @@ export async function get${Name}() {
     const sections = contentRoot(itemPage.root).children.filter((s) => !layoutShapes.has(shapeHash(s)));
     const byKey = new Map<string, Node>();
     sections.forEach((s) => walk(s, (n) => byKey.set(n.key, n)));
-    const overrides = new Map<string, { text?: string; image?: string; children?: string }>();
+    const overrides = new Map<string, { text?: string; image?: string; alt?: string; children?: string }>();
+    const titleKey = (c.fields.find((f) => f.key === 'title') ?? c.fields.find((f) => f.kind === 'text'))?.key;
     let needsFormat = false;
     for (const f of c.fields) {
       const n = byKey.get(f.nodeKey);
       if (!n) continue;
-      if (f.kind === 'image') overrides.set(n.id, { image: `metadata.${f.key}` });
+      if (f.kind === 'image') {
+        overrides.set(n.id, { image: `metadata.${f.key}`, ...(titleKey ? { alt: `metadata.${titleKey}` } : {}) });
+      }
       else if (f.kind === 'date') {
         needsFormat = true;
         overrides.set(n.id, { text: `formatDate(metadata.${f.key}, '${/^\d/.test(n.text ?? '') ? 'en-GB' : 'en-US'}')` });
@@ -477,16 +480,35 @@ export async function get${Name}() {
         if (n !== body && !tagClasses.has(n.tag)) tagClasses.set(n.tag, classesFor(n, model.tokens));
       });
     }
-    const mdxTags = ['p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'blockquote', 'img'].filter((t) => tagClasses.get(t));
+    const mdxTags = ['p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'blockquote', 'img'];
+    const cls = (t: string) => (tagClasses.get(t) ? ` className="${tagClasses.get(t)}"` : '');
+    const entries = mdxTags
+      .filter((t) => tagClasses.has(t) || t === 'p' || t === 'img')
+      .map((t) => {
+        if (t === 'img') {
+          return `  // eslint-disable-next-line @next/next/no-img-element\n  img: ({ alt, ...props }) => <img alt={alt ?? ''}${cls(t)} {...props} />,`;
+        }
+        if (t === 'p') {
+          // Markdown wraps a standalone image in <p>; the original page had the image on its own.
+          return `  p: ({ children, ...props }) =>\n    onlyImage(children) ? <>{children}</> : <p${cls(t)} {...props}>{children}</p>,`;
+        }
+        return `  ${t}: (props) => <${t}${cls(t)} {...props} />,`;
+      });
     files.set(
       `components/mdx/${Name}Mdx.tsx`,
-      `import type { MDXComponents } from 'mdx/types';\n\n/** Styles for elements inside ${c.name} entries. */\nexport const ${toCamel(c.name)}Mdx: MDXComponents = {\n${mdxTags
-        .map((t) =>
-          t === 'img'
-            ? `  // eslint-disable-next-line @next/next/no-img-element\n  img: ({ alt, ...props }) => <img alt={alt ?? ''} className="${tagClasses.get(t)}" {...props} />,`
-            : `  ${t}: (props) => <${t} className="${tagClasses.get(t)}" {...props} />,`
-        )
-        .join('\n')}\n};\n`
+      `import { Children, isValidElement, type ReactNode } from 'react';
+import type { MDXComponents } from 'mdx/types';
+
+function onlyImage(children: ReactNode): boolean {
+  const items = Children.toArray(children);
+  return items.length === 1 && isValidElement<{ src?: string }>(items[0]) && !!items[0].props.src;
+}
+
+/** Styles for elements inside ${c.name} entries. */
+export const ${toCamel(c.name)}Mdx: MDXComponents = {
+${entries.join('\n')}
+};
+`
     );
 
     const titleField = c.fields.find((f) => f.key === 'title') ?? c.fields.find((f) => f.kind === 'text');
@@ -525,9 +547,17 @@ export default async function Page({ params }: Params) {
   }
 }
 
+/** Tailwind's size scale without its built-in line-heights: line-height stays inherited like the original. */
+const FONT_SCALE: Record<string, string> = {
+  xs: '0.75rem', sm: '0.875rem', base: '1rem', lg: '1.125rem', xl: '1.25rem', '2xl': '1.5rem', '3xl': '1.875rem',
+  '4xl': '2.25rem', '5xl': '3rem', '6xl': '3.75rem', '7xl': '4.5rem', '8xl': '6rem', '9xl': '8rem',
+};
+
 function globalsCss(tokens: ThemeTokens): string {
   const theme = [
     '  --color-*: initial;',
+    '  --text-*: initial;',
+    ...Object.entries(FONT_SCALE).map(([k, v]) => `  --text-${k}: ${v};`),
     ...Object.entries(tokens.colors).map(([k, v]) => `  --color-${k}: ${v};`),
     ...Object.entries(tokens.fonts).map(([k, v]) => `  --font-${k}: ${v}, sans-serif;`),
     ...Object.entries(tokens.radii).map(([k, v]) => `  --radius-${k.replace(/^radius-/, '')}: ${v};`),

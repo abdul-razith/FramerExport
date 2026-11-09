@@ -127,3 +127,14 @@ test('start states and hover styles attach by key; images get asset info', () =>
     height: 320,
   });
 });
+
+test('children do not repeat the visibility they inherit from their parent', () => {
+  const tree = (visible: boolean) =>
+    raw('body:0', 'body', {}, [
+      raw('body:0/nav[Nav]:0', 'nav', { name: 'Nav', visible }, visible ? [raw('body:0/nav[Nav]:0/a:0', 'a', { text: 'Home' })] : []),
+    ]);
+  const root = mergeBreakpoints(page(tree(true), tree(true), tree(false)), new Map(), emptyReport());
+  const nav = find(root, (n) => n.framerName === 'Nav')!;
+  assert.deepEqual(nav.visibility, ['base', 'tablet']);
+  assert.equal(nav.children[0].visibility, undefined);
+});

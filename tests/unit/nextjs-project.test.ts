@@ -177,3 +177,16 @@ test('MDX entries export metadata and collection pages read them', async () => {
   assert.match(slugPage, /generateStaticParams/);
   assert.match(slugPage, /getBlogEntry/);
 });
+
+test('font-size utilities do not carry Tailwind default line-heights', async () => {
+  const css = await read('app/globals.css');
+  assert.match(css, /--text-\*: initial;/);
+  assert.match(css, /--text-xl: 1\.25rem;/);
+  assert.doesNotMatch(css, /--text-xl--line-height/);
+});
+
+test('MDX paragraphs that only hold an image are not wrapped in <p>', async () => {
+  const mdx = await read('components/mdx/BlogMdx.tsx');
+  assert.match(mdx, /function onlyImage/);
+  assert.match(mdx, /p: \(\{ children, \.\.\.props \}\) =>\s*onlyImage\(children\)/);
+});

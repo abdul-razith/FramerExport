@@ -124,3 +124,18 @@ test('a page returning an HTTP error is reported and does not stop other pages',
     ['/']
   );
 });
+
+test('inherited values are kept where the browser default overrides inheritance', () => {
+  const home = captured.find((p) => p.route === '/')!;
+  const navLink = find(home.trees.base, (n) => n.tag === 'a' && n.text === 'Home')!;
+  assert.equal(navLink.styles.color, 'rgb(255, 255, 255)', 'link colour kept despite equal parent colour');
+  assert.equal(navLink.styles['text-decoration-line'], 'none');
+  const h1 = find(home.trees.base, (n) => n.tag === 'h1')!;
+  assert.equal(h1.styles['font-weight'], '400', 'h1 weight kept although the parent is also 400');
+});
+
+test('flex items do not report the blockified display value', () => {
+  const home = captured.find((p) => p.route === '/')!;
+  const logo = find(home.trees.base, (n) => n.framerName === 'Logo')!;
+  assert.equal(logo.styles.display, undefined);
+});

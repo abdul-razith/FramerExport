@@ -92,3 +92,9 @@ test('generic and colliding names are reported as fallbacks', () => {
     ['Content', 'Content2']
   );
 });
+
+test('behaviour marker sections get an Anchor name instead of clashing with motion components', () => {
+  const marker = n('div', { framerName: 'Smooth Scroll', motion: { kind: 'smooth-scroll' } });
+  const plan = planComponents([page('/', [header(), n('section', { framerName: 'Hero Section' }, [text('h1', 'Heading', 'x')]), marker, footer()])], emptyReport());
+  assert.deepEqual(plan.pages[0].sections.map((s) => s.name), ['Hero', 'SmoothScrollAnchor']);
+});

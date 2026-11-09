@@ -239,7 +239,7 @@ function mapStyle(style: Style, ctx: Ctx): void {
   if (fstyle === 'italic') push('italic');
   if (fstyle === 'initial' || fstyle === 'normal') push('not-italic');
   const lh = take('line-height');
-  if (lh) push(lh === 'normal' || lh === 'initial' ? 'leading-normal' : `leading-${arb(lh)}`);
+  if (lh) push(lh === 'normal' || lh === 'initial' ? 'leading-[normal]' : `leading-${arb(lh)}`);
   const ls = take('letter-spacing');
   if (ls && ls !== 'normal') push(ls === 'initial' ? 'tracking-normal' : `tracking-${arb(ls)}`);
   const align = take('text-align');
@@ -333,7 +333,7 @@ function mapStyle(style: Style, ctx: Ctx): void {
   const fit = take('object-fit');
   if (fit && fit !== 'fill') push(`object-${fit === 'initial' ? 'fill' : fit}`);
   const aspect = take('aspect-ratio');
-  if (aspect && aspect !== 'auto') push(`aspect-${arb(aspect.replace(/\s*\/\s*/, '/'))}`);
+  if (aspect && !aspect.startsWith('auto')) push(`aspect-${arb(aspect.replace(/\s*\/\s*/, '/'))}`);
 
   for (const [p, v] of Object.entries(style)) {
     if (done.has(p)) continue;

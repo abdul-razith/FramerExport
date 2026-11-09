@@ -120,3 +120,13 @@ test('output never contains a raw hex colour', () => {
   const r = toTailwind({ base: { color: '#123456', 'background-color': 'rgb(1, 2, 3)' } }, undefined, NO_TOKENS);
   for (const c of r.classes) assert.doesNotMatch(c, /#/);
 });
+
+test('CSS line-height normal is not Tailwind leading-normal (1.5)', () => {
+  assert.deepEqual(toTailwind({ base: { 'line-height': 'normal' } }, undefined, NO_TOKENS).classes, ['leading-[normal]']);
+  assert.deepEqual(toTailwind({ base: { 'line-height': 'initial' } }, undefined, NO_TOKENS).classes, ['leading-[normal]']);
+});
+
+test('aspect-ratio derived from width/height attributes is not emitted', () => {
+  assert.deepEqual(toTailwind({ base: { 'aspect-ratio': 'auto 240 / 120' } }, undefined, NO_TOKENS).classes, []);
+  assert.deepEqual(toTailwind({ base: { 'aspect-ratio': '16 / 9' } }, undefined, NO_TOKENS).classes, ['aspect-[16/9]']);
+});

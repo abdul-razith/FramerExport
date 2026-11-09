@@ -166,7 +166,10 @@ export function planComponents(pages: PageModel[], report: ConversionReport): Co
         sections.push({ name: reused, node });
         continue;
       }
-      const { name: base, fallback } = componentName(node, '');
+      const marker = node.motion?.kind === 'smooth-scroll' || node.motion?.kind === 'loader';
+      const { name: base, fallback } = marker
+        ? { name: toPascal(node.framerName ?? node.motion!.kind) + 'Anchor', fallback: false }
+        : componentName(node, '');
       let wanted = base;
       const owner = namePage.get(base);
       if (owner && owner !== page.route && !fallback) {

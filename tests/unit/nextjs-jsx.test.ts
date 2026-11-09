@@ -141,3 +141,14 @@ test('UI template mode renders props', () => {
     '<div><Image src={image.src} alt={image.alt} width={image.width} height={image.height} /><h3>{title}</h3><span>Read</span></div>'
   );
 });
+
+test('behaviour markers keep their place in the layout as empty hidden elements', () => {
+  const marker = attachMotion(n('div', { framerName: 'Smooth Scroll', styles: { base: { width: '0px' } } }));
+  assert.equal(renderNode(marker, ctx()), '<div aria-hidden="true" className="w-0" />');
+});
+
+test('image overrides can replace alt text', () => {
+  const img = n('img', { asset: { kind: 'image', src: 'x', width: 4, height: 2 }, attrs: { alt: 'Old' } });
+  const c = ctx({ overrides: new Map([[img.id, { image: 'metadata.cover', alt: 'metadata.title' }]]) });
+  assert.equal(renderNode(img, c), '<Image src={metadata.cover} alt={metadata.title} width={4} height={2} />');
+});

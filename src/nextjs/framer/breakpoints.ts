@@ -122,6 +122,17 @@ function mergeVariants(v: Variants, ctx: MergeCtx): Node {
   if (present.length < BREAKPOINTS.length) {
     node.visibility = present;
     ctx.report.keptDuplicates.push({ route: ctx.route, key: rep.key });
+    // Descendants visible exactly where this node is visible need no visibility of their own.
+    const clear = (n: Node) => {
+      for (const child of n.children) {
+        if (child.visibility && child.visibility.join() === present.join()) {
+          delete child.visibility;
+          ctx.report.keptDuplicates = ctx.report.keptDuplicates.filter((d) => d.key !== child.key || d.route !== ctx.route);
+          clear(child);
+        }
+      }
+    };
+    clear(node);
   }
   const animation = ctx.starts.get(rep.key);
   if (animation) node.animation = animation;

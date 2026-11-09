@@ -159,6 +159,7 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
     let d = defaults.get(tag);
     if (!d) {
       const el = frameDoc.createElement(tag);
+      if (tag === 'a' || tag === 'area') el.setAttribute('href', '#');
       frameDoc.body.appendChild(el);
       const cs = frame.contentWindow!.getComputedStyle(el);
       d = {};
@@ -167,6 +168,29 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
       defaults.set(tag, d);
     }
     return d;
+  };
+
+  // Which inherited properties does each tag really inherit? (<a> resets color, <h1> font-weight…)
+  const probe = frameDoc.createElement('div');
+  probe.style.cssText =
+    'color: rgb(1, 2, 3); font-family: probefont; font-size: 13px; font-weight: 300; font-style: oblique;' +
+    ' line-height: 17px; letter-spacing: 3px; text-align: right; text-transform: lowercase; white-space: pre;';
+  frameDoc.body.appendChild(probe);
+  const inheritance = new Map<string, Record<string, boolean>>();
+  const inheritsFor = (tag: string): Record<string, boolean> => {
+    let r = inheritance.get(tag);
+    if (!r) {
+      const el = frameDoc.createElement(tag);
+      if (tag === 'a' || tag === 'area') el.setAttribute('href', '#');
+      probe.appendChild(el);
+      const cs = frame.contentWindow!.getComputedStyle(el);
+      const ps = frame.contentWindow!.getComputedStyle(probe);
+      r = {};
+      for (const p of inherited) r[p] = cs.getPropertyValue(p) === ps.getPropertyValue(p);
+      el.remove();
+      inheritance.set(tag, r);
+    }
+    return r;
   };
 
   const keys = new WeakMap<Element, string>();
@@ -214,12 +238,16 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
     if (!visible) return node;
 
     const defs = defaultsFor(tag);
+    const inherits = inheritsFor(tag);
+    const parentDisplay = parentStyle?.getPropertyValue('display') ?? '';
     for (const p of props) {
       const v = cs.getPropertyValue(p);
       if (!v) continue;
-      if (inheritedSet.has(p)) {
-        if (parentStyle && parentStyle.getPropertyValue(p) === v) continue;
+      if (inheritedSet.has(p) && parentStyle && inherits[p]) {
+        if (parentStyle.getPropertyValue(p) === v) continue;
       } else if (defs[p] === v) continue;
+      // Flex/grid items are "blockified": display:block there is not an authored value.
+      if (p === 'display' && v === 'block' && /flex|grid/.test(parentDisplay) && defs.display.startsWith('inline')) continue;
       node.styles[p] = v;
     }
     if (el instanceof HTMLElement && !(el instanceof HTMLImageElement)) {
