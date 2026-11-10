@@ -92,6 +92,7 @@ function sectionsOf(d: Data) {
   return [
     ...(d.plan.layout.header ? [d.plan.layout.header] : []),
     ...(d.plan.layout.footer ? [d.plan.layout.footer] : []),
+    ...(d.plan.layout.overlays ?? []),
     ...d.plan.pages.flatMap((p) => p.sections),
   ];
 }

@@ -223,13 +223,11 @@ export function extractContent(
   };
 
   for (const page of plan.pages) build(moduleName(page.route), page.route, page.sections);
-  const layout = [plan.layout.header, plan.layout.footer].filter((s): s is NonNullable<typeof s> => !!s);
-  if (layout.length) {
-    build(
-      'layout',
-      '(layout)',
-      layout.map((s) => ({ name: s === plan.layout.header ? 'header' : 'footer', node: s.node }))
-    );
-  }
+  const layout = [
+    ...(plan.layout.header ? [{ name: 'header', node: plan.layout.header.node }] : []),
+    ...(plan.layout.footer ? [{ name: 'footer', node: plan.layout.footer.node }] : []),
+    ...(plan.layout.overlays ?? []).map((o) => ({ name: o.name, node: o.node })),
+  ];
+  if (layout.length) build('layout', '(layout)', layout);
   return { files, bindings };
 }

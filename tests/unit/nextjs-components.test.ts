@@ -121,3 +121,35 @@ test('nodes that differ only by their SVG drawing are not the same component', (
   const b = n('a', { framerName: 'Nav Item' }, [icon('<svg><path d="M1 1h2"/></svg>'), text('span', 'Label', 'About')]);
   assert.notEqual(structuralHash(a), structuralHash(b));
 });
+
+function framerPage(route: string, sections: Node[]): PageModel {
+  const fixed = (name: string, kids: Node[]) => n('div', { framerName: name, styles: { base: { position: 'fixed' } } }, kids);
+  const root = n('body', {}, [
+    n('div', { attrs: { id: 'main' } }, [
+      n('div', { framerName: 'Desktop', styles: { base: { position: 'relative' } } }, sections),
+      n('div', { attrs: { id: 'template-overlay' } }),
+      fixed('Cursor', [text('p', 'Label', 'You')]),
+    ]),
+    n('div', { attrs: { id: '__framer-badge-container' }, styles: { base: { position: 'fixed' } } }, [n('a', { text: 'Made in Framer', attrs: { href: 'https://www.framer.com/' } })]),
+    n('div', { attrs: { id: 'svg-templates' }, styles: { base: { position: 'absolute' } } }),
+    fixed('Buy Button', [n('a', { text: 'Buy Nudge', attrs: { href: 'https://x.test/buy' } })]),
+    n('iframe', { attrs: { id: '__framer-editorbar' } }),
+  ]);
+  return { route, sourceUrl: 'https://x.test' + route, title: route, meta: {}, root, screenshots: { base: '', tablet: '', mobile: '' } };
+}
+
+test('real Framer pages: sections are found inside #main, overlays go to the layout, Framer chrome is dropped', () => {
+  const plan = planComponents(
+    [
+      framerPage('/', [header(), n('section', { framerName: 'Hero Section' }, [text('h1', 'Heading', 'Hi')]), footer()]),
+      framerPage('/about', [header(), n('section', { framerName: 'About Hero' }, [text('h1', 'Heading', 'About')]), footer()]),
+    ],
+    emptyReport()
+  );
+  assert.equal(plan.layout.header?.name, 'Header');
+  assert.equal(plan.layout.footer?.name, 'Footer');
+  assert.deepEqual(plan.pages.map((p) => p.sections.map((s) => s.name)), [['Hero'], ['AboutHero']]);
+  assert.deepEqual(plan.layout.overlays?.map((o) => o.name).sort(), ['BuyButton', 'Cursor']);
+  const all = JSON.stringify(plan, (k, v) => (k === 'children' && Array.isArray(v) ? v.map((c: Node) => c.attrs?.id) : v));
+  assert.doesNotMatch(all, /__framer-badge|__framer-editorbar/);
+});

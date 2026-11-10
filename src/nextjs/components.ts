@@ -23,7 +23,7 @@ export interface Section {
 }
 
 export interface ComponentPlan {
-  layout: { header?: Section; footer?: Section };
+  layout: { header?: Section; footer?: Section; overlays?: Section[] };
   pages: { route: string; sections: Section[] }[];
   ui: UiComponent[];
 }
@@ -67,10 +67,39 @@ function size(node: Node): number {
 }
 
 /** The node whose children are the page sections: descend through single-child wrappers. */
-export function contentRoot(root: Node): Node {
+/** Framer's own page furniture: never part of the converted site. */
+const FRAMER_CHROME_IDS = new Set(['__framer-badge-container', '__framer-editorbar', 'svg-templates', 'template-overlay']);
+
+export function isFramerChrome(node: Node): boolean {
+  return FRAMER_CHROME_IDS.has(node.attrs.id ?? '') || node.tag === 'iframe';
+}
+
+const isEmptyNode = (n: Node) => !n.children.length && !n.text && !n.asset && !n.inline;
+const isOutOfFlow = (n: Node) => /^(fixed|absolute)$/.test(n.styles.base.position ?? '');
+
+/**
+ * Walks from <body> to the element that holds the page sections, through wrappers that have a
+ * single in-flow child. Fixed/absolute elements met on the way (cursors, floating buttons) are
+ * overlays; Framer's badge and editor furniture are dropped.
+ */
+export function pageStructure(root: Node): { content: Node; path: Node[]; overlays: Node[] } {
   let node = root;
-  while (node.children.length === 1) node = node.children[0];
-  return node;
+  const path: Node[] = [];
+  const overlays: Node[] = [];
+  for (;;) {
+    const kids = node.children.filter((c) => !isFramerChrome(c) && !isEmptyNode(c));
+    const flow = kids.filter((c) => !isOutOfFlow(c));
+    if (flow.length !== 1 || !flow[0].children.length) break;
+    overlays.push(...kids.filter(isOutOfFlow));
+    node = flow[0];
+    path.push(node);
+  }
+  return { content: node, path, overlays };
+}
+
+/** The node whose children are the page sections. */
+export function contentRoot(root: Node): Node {
+  return pageStructure(root).content;
 }
 
 function looksLike(node: Node, kind: 'header' | 'footer'): boolean {
@@ -147,13 +176,28 @@ function buildProps(instances: Node[]): { props: PropDef[]; values: Record<strin
 /** Sections per page, shared header/footer and repeated UI components with their props. */
 export function planComponents(pages: PageModel[], report: ConversionReport): ComponentPlan {
   const registry = new NameRegistry();
-  const sectionsByPage = pages.map((p) => contentRoot(p.root).children);
+  const structures = pages.map((p) => pageStructure(p.root));
+  const sectionsByPage = structures.map((s) => s.content.children.filter((c) => !isFramerChrome(c)));
   const headers = detectLayout(sectionsByPage, 'first');
   const footers = detectLayout(sectionsByPage, 'last');
   const layoutNodes = new Set([...(headers ?? []), ...(footers ?? [])]);
   const plan: ComponentPlan = { layout: {}, pages: [], ui: [] };
   if (headers) plan.layout.header = { name: registry.unique('Header'), node: headers[0] };
   if (footers) plan.layout.footer = { name: registry.unique('Footer'), node: footers[0] };
+
+  // Fixed/absolute elements outside the page flow (cursors, floating buttons): shared ones belong to the layout.
+  const overlayPages = new Map<string, Node[]>();
+  structures.forEach((s) => s.overlays.forEach((o) => overlayPages.set(shapeHash(o), [...(overlayPages.get(shapeHash(o)) ?? []), o])));
+  const sharedOverlay = new Set<Node>();
+  for (const nodes of overlayPages.values()) {
+    if (nodes.length >= 2 && nodes.length >= pages.length / 2) {
+      const { name, fallback } = componentName(nodes[0], '');
+      const overlayName = registry.unique(fallback ? 'Overlay' : name);
+      (plan.layout.overlays ??= []).push({ name: overlayName, node: nodes[0] });
+      nodes.forEach((n) => sharedOverlay.add(n));
+    }
+  }
+  structures.forEach((s, i) => sectionsByPage[i].push(...s.overlays.filter((o) => !sharedOverlay.has(o))));
 
   const sectionNameByHash = new Map<string, string>();
   const namePage = new Map<string, string>();
@@ -193,6 +237,7 @@ export function planComponents(pages: PageModel[], report: ConversionReport): Co
     ...uniqueSections,
     ...(plan.layout.header ? [{ node: plan.layout.header.node, sectionName: 'Header' }] : []),
     ...(plan.layout.footer ? [{ node: plan.layout.footer.node, sectionName: 'Footer' }] : []),
+    ...(plan.layout.overlays ?? []).map((o) => ({ node: o.node, sectionName: o.name })),
   ];
   const groups = new Map<string, { nodes: Node[]; sectionName: string }>();
   const collect = (node: Node, sectionName: string) => {

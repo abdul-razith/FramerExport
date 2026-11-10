@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { format } from 'prettier';
 import type { ComponentPlan, UiComponent } from '../components.js';
-import { contentRoot, shapeHash } from '../components.js';
+import { contentRoot, pageStructure, shapeHash } from '../components.js';
 import type { ContentBindings, ContentFile, ImageNamer } from '../content.js';
 import type { FontFace } from '../fonts.js';
 import { renderFontsCss } from '../fonts.js';
@@ -239,6 +239,7 @@ function writeSections(model: ProjectModel, files: Files, listings: Listing[]): 
   const all = [
     ...(model.plan.layout.header ? [model.plan.layout.header] : []),
     ...(model.plan.layout.footer ? [model.plan.layout.footer] : []),
+    ...(model.plan.layout.overlays ?? []),
     ...model.plan.pages.flatMap((p) => p.sections),
   ];
   for (const section of all) {
@@ -343,28 +344,24 @@ function writeLayout(model: ProjectModel, files: Files): void {
     "import './globals.css';",
     "import { MotionProvider } from '@/components/motion/MotionProvider';",
   ]);
-  if (header || footer) imports.add("import { layout } from '@/content/layout';");
   const sectionCall = (s: { name: string; node: Node } | undefined) => {
     if (!s) return '';
     imports.add(`import { ${s.name} } from '@/components/sections/${s.name}';`);
-    const data = model.content.find((f) => f.module === 'layout')?.data[s === header ? 'header' : 'footer'];
-    return data && Object.keys(data as object).length
-      ? `<${s.name} content={layout.${s === header ? 'header' : 'footer'}} />`
-      : `<${s.name} />`;
+    const binding = model.bindings.section.get(s.node.id);
+    const data = binding ? model.content.find((f) => f.module === binding.module)?.data[binding.key] : undefined;
+    if (!binding || !data || !Object.keys(data as object).length) return `<${s.name} />`;
+    imports.add("import { layout } from '@/content/layout';");
+    return `<${s.name} content={layout.${binding.key}} />`;
   };
   // wrapper chain between <body> and the node that holds the sections
-  const chain: Node[] = [];
-  let node = first?.root;
-  const target = first ? contentRoot(first.root) : undefined;
-  while (node && node !== target && node.children.length === 1) {
-    node = node.children[0];
-    chain.push(node);
-  }
+  const chain: Node[] = first ? pageStructure(first.root).path : [];
   let inner = `${sectionCall(header)}{children}${sectionCall(footer)}`;
   for (const wrapper of [...chain].reverse()) {
     const cls = classesFor(wrapper, model.tokens);
     inner = `<${wrapper.tag}${cls ? ` className="${cls}"` : ''}>${inner}</${wrapper.tag}>`;
   }
+  // Fixed overlays shared by every page (cursor labels, floating buttons) sit outside the page flow.
+  inner += (model.plan.layout.overlays ?? []).map(sectionCall).join('');
   const bodyCls = first ? classesFor(first.root, model.tokens) : '';
   const bg = colorClass('bg', first?.root.styles.base['background-color'], model.tokens) ?? 'bg-white';
   const fg = colorClass('bg', first?.root.styles.base.color, model.tokens) ?? 'bg-current';

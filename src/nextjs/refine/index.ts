@@ -64,6 +64,7 @@ function allSections(m: ProjectModel) {
   return [
     ...(m.plan.layout.header ? [m.plan.layout.header] : []),
     ...(m.plan.layout.footer ? [m.plan.layout.footer] : []),
+    ...(m.plan.layout.overlays ?? []),
     ...m.plan.pages.flatMap((p) => p.sections),
   ];
 }
