@@ -167,11 +167,27 @@ async function convert(exportDir: string, sourceUrl: string, options: NextjsOpti
       }
     }
 
-    await fs.writeFile(path.join(tmpDir, 'CONVERSION-REPORT.md'), renderReport(report));
+    // Swap safely: a rename either succeeds or changes nothing, unlike a recursive delete that can
+    // fail half-way when a dev server or editor holds files in the old folder.
+    let outputDir = finalDir;
+    const oldDir = `${finalDir}.old`;
+    try {
+      if (process.env.FRAMER_NEXTJS_TEST_FAIL === 'swap') throw new Error('EBUSY: simulated lock');
+      await fs.rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
+      if (await fs.stat(finalDir).then(() => true, () => false)) await fs.rename(finalDir, oldDir);
+      await fs.rename(tmpDir, finalDir);
+      await fs.rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
+    } catch (e) {
+      outputDir = path.join(exportDir, 'nextjs.new');
+      await fs.rm(outputDir, { recursive: true, force: true });
+      await fs.rename(tmpDir, outputDir);
+      const message = `The previous nextjs/ folder is in use (${(e as Error).message}); the new project was saved as nextjs.new/`;
+      report.unconverted.push({ route: '(project)', what: message, why: 'Close programs using nextjs/ (dev server, editor), then replace it with nextjs.new/' });
+      warn(message);
+    }
+    await fs.writeFile(path.join(outputDir, 'CONVERSION-REPORT.md'), renderReport(report));
     await fs.mkdir(cacheDir, { recursive: true });
     await fs.writeFile(path.join(cacheDir, 'report.json'), JSON.stringify(report, null, 2));
-    await fs.rm(finalDir, { recursive: true, force: true });
-    await fs.rename(tmpDir, finalDir);
     return report;
   } catch (e) {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);

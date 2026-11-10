@@ -97,3 +97,19 @@ test('a crash keeps the previous nextjs/ folder and writes an error report', asy
   assert.equal(existsSync(path.join(dir, 'nextjs.tmp')), false);
   assert.match(await fs.readFile(path.join(dir, 'nextjs-error-report.md'), 'utf8'), /FRAMER_NEXTJS_TEST_FAIL/);
 });
+
+test('if the old nextjs/ folder is locked, the new project is kept as nextjs.new', async () => {
+  const dir = await exportCopy(server.url + '/');
+  await fs.mkdir(path.join(dir, 'nextjs'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'nextjs', 'marker.txt'), 'previous');
+  process.env.FRAMER_NEXTJS_TEST_FAIL = 'swap';
+  try {
+    assert.equal(await runToNextjs(dir, NO_VERIFY), 0);
+  } finally {
+    delete process.env.FRAMER_NEXTJS_TEST_FAIL;
+  }
+  assert.equal(await fs.readFile(path.join(dir, 'nextjs', 'marker.txt'), 'utf8'), 'previous');
+  assert.ok(existsSync(path.join(dir, 'nextjs.new', 'app', 'page.tsx')), 'new project kept');
+  const report = await readReport(dir);
+  assert.match(report.unconverted.map((u) => u.what).join('\n'), /nextjs\.new/);
+});
