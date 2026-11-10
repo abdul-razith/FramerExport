@@ -67,14 +67,20 @@ export function summarizeLoad(samples: TimelineSample[], frameEveryMs: number, f
       continue;
     }
     if (series.every((s) => same(s.v, last.v))) continue;
-    if (series.slice(-3).some((s) => !same(s.v, last.v))) {
-      entries.push({ key, label, section: '', trigger: 'loop', note: `keeps changing: ${describe(first.v, last.v) || 'transform'} …`, frames: frames(first.t, last.t) });
-      continue;
-    }
     const firstChange = series.findIndex((s) => !same(s.v, first.v));
     const start = firstChange > 0 ? series[firstChange - 1].t : first.t;
+    const stillMoving = series.slice(-3).some((s) => !same(s.v, last.v));
+    if (stillMoving) {
+      // A loop moves the whole time; an entrance that began late is merely unfinished.
+      const active = series.slice(Math.max(1, firstChange));
+      const moving = active.filter((s, i) => !same(s.v, (i === 0 ? series[Math.max(0, firstChange - 1)] : active[i - 1]).v)).length;
+      if (last.t - start >= LOOP_MIN_MS && moving / active.length >= 0.7) {
+        entries.push({ key, label, section: '', trigger: 'loop', note: `keeps changing: ${describe(first.v, last.v) || 'transform'} …`, frames: frames(first.t, last.t) });
+        continue;
+      }
+    }
     let endIndex = series.length - 1;
-    while (endIndex > 0 && same(series[endIndex - 1].v, last.v)) endIndex--;
+    while (!stillMoving && endIndex > 0 && same(series[endIndex - 1].v, last.v)) endIndex--;
     const end = series[endIndex].t;
     entries.push({
       key,
@@ -87,10 +93,14 @@ export function summarizeLoad(samples: TimelineSample[], frameEveryMs: number, f
       durationMs: end - start,
       easing: overshoots(series.map((s) => s.v)) ? 'spring-like overshoot' : 'ease-out',
       frames: frames(start, end),
+      ...(stillMoving ? { note: 'still moving when the recording ended — see the last frames for its final state' } : {}),
     });
   }
-  return entries;
+  return mergeRepeats(entries);
 }
+
+/** Below this, an element still changing at the end of the recording is an unfinished entrance. */
+const LOOP_MIN_MS = 2500;
 
 function describeFrom(t: Transform | undefined): string {
   if (!t) return '';
@@ -106,7 +116,7 @@ export function motionFromNodes(root: Node, hover: { key: string; style: Style }
     if (m?.kind === 'reveal' || m?.kind === 'split-text') {
       entries.push({ key: n.key, label, section: '', trigger: 'in-view', from: describeFrom(m.from), to: 'its normal state', note: m.kind === 'split-text' ? 'letters/words animate one after another' : undefined });
     } else if (m?.kind === 'scroll') {
-      entries.push({ key: n.key, label, section: '', trigger: 'scroll', note: (m.scroll ?? []).map((s) => `${s.property}: ${s.values.join(' → ')}`).join('; ') + ' (top → bottom of the page)' });
+      entries.push({ key: n.key, label, section: '', trigger: 'scroll', note: (m.scroll ?? []).map((s) => `${s.property}: ${s.values.map((v) => readableValue(s.property, v)).join(' → ')}`).join('; ') + ' (top → bottom of the page)' });
     } else if (m?.kind === 'loader' || m?.kind === 'cursor' || m?.kind === 'smooth-scroll') {
       const what = { loader: 'page loader (see load frames)', cursor: 'custom cursor that follows the mouse', 'smooth-scroll': 'smooth scrolling for the whole page' }[m.kind];
       entries.push({ key: n.key, label, section: '', trigger: 'custom', note: what });
@@ -120,18 +130,55 @@ export function motionFromNodes(root: Node, hover: { key: string; style: Style }
   return mergeRepeats(entries);
 }
 
-/** Repeated elements (cards in a grid) with the same animation are listed once, with a count. */
+/** `span "B"` → `B`: the one-character label of a letter Framer split into its own span. */
+const letterOf = (label: string) => label.match(/^[a-z0-9]+ "(.{1,2})"$/)?.[1];
+
+/**
+ * Siblings with the same animation are listed once: repeated elements (cards in a grid) with a
+ * count, and the letters of a split word as `letters "<word>"` (staggered when their starts differ).
+ */
 function mergeRepeats(entries: MotionEntry[]): MotionEntry[] {
-  const out: (MotionEntry & { count: number })[] = [];
+  type Group = MotionEntry & { count: number; letters: string; end: number; starts: Set<number> };
+  const out: Group[] = [];
+  const parentOf = (k: string) => k.split('/').slice(0, -1).join('/');
   for (const e of entries) {
-    const parent = e.key.split('/').slice(0, -1).join('/');
+    const letter = letterOf(e.label);
     const twin = out.find(
-      (o) => o.label === e.label && o.trigger === e.trigger && o.note === e.note && o.from === e.from && o.key.split('/').slice(0, -1).join('/') === parent
+      (o) =>
+        o.trigger === e.trigger &&
+        o.from === e.from &&
+        o.to === e.to &&
+        parentOf(o.key) === parentOf(e.key) &&
+        (letter !== undefined ? o.letters !== '' : o.label === e.label && o.note === e.note)
     );
-    if (twin) twin.count++;
-    else out.push({ ...e, count: 1 });
+    const end = (e.startMs ?? 0) + (e.durationMs ?? 0);
+    if (twin) {
+      twin.count++;
+      twin.letters += letter ?? '';
+      twin.end = Math.max(twin.end, end);
+      if (e.startMs !== undefined) twin.starts.add(e.startMs);
+      twin.startMs = Math.min(twin.startMs ?? Infinity, e.startMs ?? Infinity);
+      if (twin.startMs === Infinity) delete twin.startMs;
+    } else {
+      out.push({ ...e, count: 1, letters: letter ?? '', end, starts: new Set(e.startMs !== undefined ? [e.startMs] : []) });
+    }
   }
-  return out.map(({ count, ...e }) => (count > 1 ? { ...e, note: `${e.note ? e.note + ' ' : ''}(×${count})` } : e));
+  return out.map(({ count, letters, end, starts, ...e }) => {
+    if (count === 1) return e;
+    if (letters) {
+      const merged: MotionEntry = { ...e, label: `letters "${letters}"` };
+      if (merged.startMs !== undefined && merged.durationMs !== undefined) merged.durationMs = end - merged.startMs;
+      if (starts.size > 1) merged.note = `${merged.note ? merged.note + ' · ' : ''}one letter after another (staggered)`;
+      return merged;
+    }
+    return { ...e, note: `${e.note ? e.note + ' ' : ''}(×${count})` };
+  });
+}
+
+/** `matrix(1, 0, 0, 1, 0, -40)` → `translateY -40px`. */
+function readableValue(property: string, value: string): string {
+  if (property !== 'transform' || value === 'none') return value;
+  return describeTransform(parseTransform(value)).join(', ') || 'none';
 }
 
 function line(e: MotionEntry): string {

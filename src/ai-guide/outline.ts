@@ -66,8 +66,10 @@ function collect(node: Node, args: BuildPageArgs) {
     }
     if (n.asset?.kind === 'image') {
       const alt = n.attrs.alt ?? '';
+      const exportPath = args.localAsset?.(n.asset.src) ?? n.asset.src;
+      if (images.some((i) => i.exportPath === exportPath)) return;
       images.push({
-        exportPath: args.localAsset?.(n.asset.src) ?? n.asset.src,
+        exportPath,
         suggested: args.images.publicPath(n.asset.src, n.framerName ?? alt ?? 'image'),
         width: n.asset.width,
         height: n.asset.height,
@@ -76,7 +78,8 @@ function collect(node: Node, args: BuildPageArgs) {
     }
     if (n.tag === 'a') return;
     // Split text (words/letters as spans) is one value; block containers can carry `inline` too.
-    if (n.inline && TEXT_TAGS.test(n.tag) && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n));
+    const splitText = n.inline && (TEXT_TAGS.test(n.tag) || (n.children.length > 0 && n.children.every((c) => c.tag === 'span' && !c.children.length)));
+    if (splitText && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n));
     if (n.text) addText(n.text);
     n.children.forEach(walk);
   };

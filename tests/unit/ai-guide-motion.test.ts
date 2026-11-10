@@ -21,11 +21,6 @@ test('an element that fades in and settles is a load animation with start and du
   assert.equal(e.frames, 'load/001–003');
 });
 
-test('an element still changing at the end of the window is a loop, not a load animation', () => {
-  const samples = [0, 200, 400, 600].map((t, i) => s(t, '1', `rotate(${i * 30}deg)`));
-  assert.equal(summarizeLoad(samples, 200)[0].trigger, 'loop');
-});
-
 test('text that changes during load is custom behaviour (typing, clock)', () => {
   const samples = [s(0, '1', 'none', 'H'), s(200, '1', 'none', 'He'), s(400, '1', 'none', 'Hey')];
   const [e] = summarizeLoad(samples, 200);
@@ -76,4 +71,33 @@ test('identical entries (three cards with the same hover) are listed once', () =
   ]);
   assert.equal(entries.length, 1);
   assert.match(entries[0].note!, /×3/);
+});
+
+test('an entrance still moving when the recording ends is a load animation, not a loop', () => {
+  const samples = Array.from({ length: 31 }, (_, i) => s(i * 200, i < 20 ? '0' : String(Math.min(1, (i - 19) * 0.08))));
+  const [e] = summarizeLoad(samples, 200);
+  assert.equal(e.trigger, 'load');
+  assert.match(e.note!, /still moving when the recording ended/);
+});
+
+test('an element moving the whole time is a loop', () => {
+  const samples = Array.from({ length: 31 }, (_, i) => s(i * 200, '1', `rotate(${i * 12}deg)`));
+  assert.equal(summarizeLoad(samples, 200)[0].trigger, 'loop');
+});
+
+test('letters of a split word are one entry', () => {
+  const values = (o: string) =>
+    Object.fromEntries([...'Bejaman'].map((ch, i) => [`body:0/h1:0/span:${i}`, { opacity: o, transform: 'none', text: ch }]));
+  const samples = [0, 200, 400, 600, 800, 1000].map((t, i) => ({ t, values: values(i < 2 ? '0' : '1') }));
+  const entries = summarizeLoad(samples, 200);
+  assert.equal(entries.length, 1);
+  assert.match(entries[0].label, /letters "Bejaman"/);
+});
+
+test('scroll-linked transforms are described, not raw matrices', () => {
+  const root = node('body:0', {}, [
+    node('body:0/div:0', { motion: { kind: 'scroll', scroll: [{ property: 'transform', values: ['matrix(1, 0, 0, 1, 0, -40)', 'none'] }] } }),
+  ]);
+  const [e] = motionFromNodes(root, []);
+  assert.match(e.note!, /transform: translateY -40px → none/);
 });

@@ -93,3 +93,16 @@ test('a block container marked inline keeps its children separate (texts and lin
   assert.deepEqual(s.links.map((l) => l.text), ['Home', 'About']);
   assert.ok(!s.texts.some((t) => t.includes('HomeAbout')), s.texts.join(' | '));
 });
+
+test('letters split into spans inside a div are one text, and repeated images are listed once', () => {
+  const letters = [...'Welcome'].map((ch, i) => n(`l${i}`, 'span', { text: ch }));
+  const img = () => n(`i${Math.random()}`, 'img', { framerName: 'Item', asset: { kind: 'image', src: 'https://framerusercontent.com/images/x.png', width: 10, height: 10 } });
+  const loader = n('body:0/main:0/div[Loader]:0', 'div', { framerName: 'Loader' }, [
+    n('w', 'div', { inline: [0, 1, 2, 3, 4, 5, 6] }, letters),
+    img(),
+    img(),
+  ]);
+  const [s] = buildGuidePage(args([loader, projects()])).sections;
+  assert.deepEqual(s.texts, ['Welcome']);
+  assert.equal(s.images.length, 1);
+});
