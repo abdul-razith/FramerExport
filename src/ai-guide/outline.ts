@@ -16,7 +16,8 @@ export interface BuildPageArgs {
   localAsset?: (src: string) => string | undefined;
 }
 
-const GENERIC = /^(frame|section|stack|container|div|wrapper|group)\s*\d*$/i;
+const TEXT_TAGS = /^(p|h[1-6]|span|label|li|blockquote)$/;
+const GENERIC =/^(frame|section|stack|container|div|wrapper|group)\s*\d*$/i;
 
 export function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
@@ -74,7 +75,8 @@ function collect(node: Node, args: BuildPageArgs) {
       });
     }
     if (n.tag === 'a') return;
-    if (n.inline) return addText(fullText(n));
+    // Split text (words/letters as spans) is one value; block containers can carry `inline` too.
+    if (n.inline && TEXT_TAGS.test(n.tag) && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n));
     if (n.text) addText(n.text);
     n.children.forEach(walk);
   };

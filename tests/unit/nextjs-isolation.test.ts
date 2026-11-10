@@ -23,15 +23,16 @@ async function tempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'fexport-nextjs-'));
 }
 
-test('no existing module statically imports src/nextjs', async () => {
-  const nextDir = path.join(ROOT, 'src', 'nextjs');
-  const files = (await walk(path.join(ROOT, 'src'))).filter((f) => !f.startsWith(nextDir));
+test('no existing module statically imports src/nextjs or src/ai-guide', async () => {
+  // Both are opt-in features (--nextjs, --ai-guide): the exporter and CLI load them with import().
+  const featureDirs = ['nextjs', 'ai-guide'].map((d) => path.join(ROOT, 'src', d));
+  const files = (await walk(path.join(ROOT, 'src'))).filter((f) => !featureDirs.some((d) => f.startsWith(d)));
   for (const file of files) {
     const text = await fs.readFile(file, 'utf8');
     assert.doesNotMatch(
       text,
-      /^\s*(import|export)\s[^;]*from\s+['"][^'"]*nextjs\//m,
-      `${path.relative(ROOT, file)} must not statically import src/nextjs`
+      /^\s*(import|export)\s[^;]*from\s+['"][^'"]*(nextjs|ai-guide)\//m,
+      `${path.relative(ROOT, file)} must not statically import src/nextjs or src/ai-guide`
     );
   }
 });

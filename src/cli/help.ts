@@ -38,6 +38,8 @@ export function showHelp(): void {
     ['--legacy-mode', 'With --setup: use text input instead of arrow selection'],
     ['--nextjs', 'Framer only: also convert the export to a Next.js project'],
     ['to-nextjs <dir>', 'Convert an existing Framer export folder to Next.js'],
+    ['--ai-guide', 'Framer only: add docs + a plan for Claude Code/agy to build a Next.js site'],
+    ['ai-guide <dir>', 'Add the AI guide to an existing Framer export folder'],
     ['--ai-refine', 'With --nextjs/to-nextjs: AI pass that improves names'],
     ['--ai-provider <id>', 'claude-code, agy, gemini, groq, openrouter, github, ollama, anthropic'],
     ['--ai-model <name>', 'Override the provider default model'],

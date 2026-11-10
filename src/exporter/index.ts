@@ -70,6 +70,7 @@ export class FramerExporter implements ExporterContext {
   deviceScaleFactor?: number;
   subpages: Map<string, string> = new Map();
   nextjs?: import('../nextjs/options.js').NextjsOptions;
+  aiGuide = false;
   constructor(
     siteUrl: string,
     outDir: string,
@@ -190,6 +191,14 @@ export class FramerExporter implements ExporterContext {
     if (this.nextjs) {
       const { runNextConversion } = await import('../nextjs/index.js');
       await runNextConversion(this, this.nextjs);
+    }
+    if (this.aiGuide) {
+      if (this.platform.name === 'framer') {
+        const { runAiGuide } = await import('../ai-guide/index.js');
+        await runAiGuide(this.outDir, this.siteUrl, log);
+      } else {
+        warn('AI guide supports Framer sites only; skipped');
+      }
     }
     if (this.terminalPresentation) await printSummary(this);
     if (this.interactive && this.terminalPresentation) {

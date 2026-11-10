@@ -81,3 +81,15 @@ test('pageSlug', () => {
   assert.equal(pageSlug('/'), 'index');
   assert.equal(pageSlug('/blog/a-post'), 'blog_a-post');
 });
+
+test('a block container marked inline keeps its children separate (texts and links)', () => {
+  const nav = n('body:0/main:0/header[Logo + Menu]:0', 'header', { framerName: 'Logo + Menu', inline: ['Nudge', 0] }, [
+    n('nv', 'nav', { inline: [0, 1] }, [
+      n('a1', 'a', { text: 'Home', attrs: { href: '/' } }),
+      n('a2', 'a', { text: 'About', attrs: { href: '/about' } }),
+    ]),
+  ]);
+  const [s] = buildGuidePage(args([nav, projects()])).sections;
+  assert.deepEqual(s.links.map((l) => l.text), ['Home', 'About']);
+  assert.ok(!s.texts.some((t) => t.includes('HomeAbout')), s.texts.join(' | '));
+});

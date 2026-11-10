@@ -191,6 +191,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === 'ai-guide') {
+    const exportDir = args[1];
+    if (!exportDir || exportDir.startsWith('--')) {
+      console.log(
+        `  ${ui.error('✗')} ${ui.error.bold('Missing export folder:')} ${ui.muted('framer-export ai-guide <export-dir>')}\n`
+      );
+      process.exit(1);
+    }
+    const { runAiGuideCommand } = await import('../ai-guide/index.js');
+    process.exit(await runAiGuideCommand(path.resolve(exportDir)));
+  }
+
   if (args[0] === 'to-nextjs') {
     const exportDir = args[1];
     if (!exportDir || exportDir.startsWith('--')) {
@@ -227,6 +239,9 @@ async function main(): Promise<void> {
   const hasDprFlag = args.includes('--dpr');
   const dprValue = extractFlag(args, '--dpr');
   const includeSubpages = hasFlag(args, '--subpages') || preferences.includeSubpages;
+  // Before the Next.js flags: that parser takes every other --ai-* flag.
+  const { takeAiGuideFlag } = await import('../ai-guide/flag.js');
+  const aiGuide = takeAiGuideFlag(args);
   let nextjsOptions: import('../nextjs/options.js').NextjsOptions | undefined;
   if (args.some((a) => a === '--nextjs' || a === '--no-verify' || a.startsWith('--ai-'))) {
     const { parseNextjsFlags } = await import('../nextjs/options.js');
@@ -284,6 +299,7 @@ async function main(): Promise<void> {
     );
     exporter.prettyPrint = preferences.prettyPrint;
     exporter.nextjs = nextjsOptions;
+    exporter.aiGuide = aiGuide;
     await exporter.run(includeSubpages);
   } catch (e) {
     const { AntiBotError, formatAntiBotError } = await import('../exporter/anti-bot.js');

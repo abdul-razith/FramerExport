@@ -66,3 +66,14 @@ test('motion.md groups entries by section and lists custom behaviour separately'
 test('motion.md says so when a page has no animation', () => {
   assert.match(renderMotionMd(guidePage(), []), /No animation was detected on this page/);
 });
+
+test('identical entries (three cards with the same hover) are listed once', () => {
+  const style = { 'background-color': 'rgb(0, 0, 0)' };
+  const entries = motionFromNodes(node('body:0'), [
+    { key: 'body:0/div[Card]:0', style },
+    { key: 'body:0/div[Card]:1', style },
+    { key: 'body:0/div[Card]:2', style },
+  ]);
+  assert.equal(entries.length, 1);
+  assert.match(entries[0].note!, /×3/);
+});

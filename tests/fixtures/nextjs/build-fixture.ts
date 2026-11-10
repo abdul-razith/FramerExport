@@ -91,6 +91,11 @@ const PAGES: PageDef[] = [
   <p data-framer-name="Tagline" class="tagline">${letters(v, 'Hello')}</p>
   <span data-framer-name="Arrow">→</span>
   <p data-framer-name="Status" class="status"><span style="display:inline-block">AVAILABLE</span> <span style="display:inline-block">FOR</span> <span style="display:inline-block">WORK</span></p>
+  <p data-framer-name="Typed" class="status" id="typed">Hey</p>${
+    v === 'site'
+      ? `<script>(()=>{const el=document.getElementById('typed');el.textContent='H';let i=1;setTimeout(function step(){el.textContent='Hey'.slice(0,++i);if(i<3)setTimeout(step,300)},800)})()</script>`
+      : ''
+  }
   <p data-framer-name="Read More" class="status">Read the <a href="https://example.com/x">full story</a> today.</p>
   <div data-framer-name="Bordered" data-border="true" class="bordered" style="--border-top-width:2px;--border-right-width:2px;--border-bottom-width:2px;--border-left-width:2px;--border-color:#133324;--border-style:solid">Box</div>
   <div class="avatar-wrap"><div data-framer-name="Avatar" class="avatar"><div class="avatar-inner"></div></div></div>

@@ -117,7 +117,21 @@ export function motionFromNodes(root: Node, hover: { key: string; style: Style }
   for (const h of hover) {
     entries.push({ key: h.key, label: labelOf(h.key), section: '', trigger: 'hover', note: Object.entries(h.style).map(([p, v]) => `${p}: ${v}`).join('; ') });
   }
-  return entries;
+  return mergeRepeats(entries);
+}
+
+/** Repeated elements (cards in a grid) with the same animation are listed once, with a count. */
+function mergeRepeats(entries: MotionEntry[]): MotionEntry[] {
+  const out: (MotionEntry & { count: number })[] = [];
+  for (const e of entries) {
+    const parent = e.key.split('/').slice(0, -1).join('/');
+    const twin = out.find(
+      (o) => o.label === e.label && o.trigger === e.trigger && o.note === e.note && o.from === e.from && o.key.split('/').slice(0, -1).join('/') === parent
+    );
+    if (twin) twin.count++;
+    else out.push({ ...e, count: 1 });
+  }
+  return out.map(({ count, ...e }) => (count > 1 ? { ...e, note: `${e.note ? e.note + ' ' : ''}(×${count})` } : e));
 }
 
 function line(e: MotionEntry): string {
@@ -138,7 +152,7 @@ export function renderMotionMd(page: GuidePage, entries: MotionEntry[]): string 
     return out.join('\n');
   }
   out.push(
-    'Measured on the live site. Times are from page load; frames are in `frames/`. Rebuild with motion (load, in-view, hover) or GSAP ScrollTrigger (scroll); animate only transform and opacity.',
+    'Measured on the live site. Times are from page load. Frames are in `frames/` (load, scroll, loop), numbered in 200 ms steps; a frame is only saved when the page changed, so a missing number means nothing moved at that moment. Rebuild with motion (load, in-view, hover) or GSAP ScrollTrigger (scroll); animate only transform and opacity.',
     ''
   );
   const sectionOf = (e: MotionEntry) =>
