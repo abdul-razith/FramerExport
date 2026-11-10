@@ -10,7 +10,16 @@ export interface JsxContext {
   /** Section mode: where each node's values live in the content object. */
   bindings?: ContentBindings;
   /** UI component template mode: node id → prop. */
-  props?: Map<string, { kind: 'text' | 'image' | 'href'; name: string }>;
+  props?: Map<string, { kind: 'text' | 'image' | 'href' | 'variant'; name: string }>;
+  /**
+   * UI component variants: node id → the classes every variant shares plus the key of its varying
+   * classes in the selected variant object, or the key of its icon.
+   */
+  variant?: {
+    objectVar: string;
+    classes: Map<string, { common: string[]; key: string }>;
+    icons: Map<string, string>;
+  };
   /** Node id → UI component name for instances rendered as components. */
   components: Map<string, string>;
   cssModule?: { importName: string; classFor(node: Node): string | undefined };
@@ -68,7 +77,7 @@ function textOf(node: Node): string {
   return (node.text ?? '') + node.children.map(textOf).join('');
 }
 
-function svgToJsx(svg: string): string {
+export function svgToJsx(svg: string): string {
   return svg
     .replace(/\s(?:style|class|data-[\w-]+)="[^"]*"/g, '')
     .replace(/\sxlink:href=/g, ' xlinkHref=')
@@ -78,8 +87,20 @@ function svgToJsx(svg: string): string {
 }
 
 function classNameAttr(node: Node, ctx: JsxContext): string {
-  const { classes } = toTailwind(node.styles, node.hover, ctx.tokens, node.visibility, node.afterBorder);
+  const varying = ctx.variant?.classes.get(node.id);
+  const { classes } = varying
+    ? { classes: varying.common }
+    : toTailwind(node.styles, node.hover, ctx.tokens, node.visibility, node.afterBorder);
   const moduleClass = ctx.cssModule?.classFor(node);
+  if (varying) {
+    const parts = [
+      ...(moduleClass ? [`\${${ctx.cssModule!.importName}.${moduleClass}}`] : []),
+      ...classes,
+      `\${${ctx.variant!.objectVar}.${varying.key}}`,
+    ];
+    if (parts.length === 1) return ` className={${ctx.variant!.objectVar}.${varying.key}}`;
+    return ` className={\`${parts.join(' ')}\`}`;
+  }
   if (moduleClass) {
     const rest = classes.length ? ' ' + classes.join(' ') : '';
     return ` className={\`\${${ctx.cssModule!.importName}.${moduleClass}}${rest}\`}`;
@@ -220,6 +241,8 @@ function render(original: Node, ctx: JsxContext, state: RenderState, inText = fa
   let element: string;
   if (node.asset?.kind === 'image') {
     element = renderImage(node, ctx, motionAttrs);
+  } else if (ctx.variant?.icons.has(node.id) && !motionAttrs) {
+    element = `{${ctx.variant.objectVar}.${ctx.variant.icons.get(node.id)}}`;
   } else if (node.asset?.kind === 'svg' && node.attrs['data-svg'] && !motionAttrs) {
     element = svgToJsx(node.attrs['data-svg']);
   } else {
@@ -253,9 +276,12 @@ function render(original: Node, ctx: JsxContext, state: RenderState, inText = fa
     }
     const open = `<${tag}${attrs.length ? ' ' + attrs.join(' ') : ''}${classNameAttr(node, ctx)}`;
     const childrenOverride = ctx.overrides?.get(node.id)?.children;
+    const textOverride = ctx.overrides?.get(node.id)?.text;
     const inner = childrenOverride
       ? `{${childrenOverride}}`
-      : node.inline
+      : textOverride && node.inline
+        ? `{${textOverride}}`
+        : node.inline
         ? renderInline(node, ctx, state, childInText)
         : (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state, childInText);
     element = VOID.has(node.tag) || !inner ? `${open} />` : `${open}>${inner}</${tag}>`;

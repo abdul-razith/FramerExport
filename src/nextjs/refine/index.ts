@@ -46,7 +46,7 @@ function unwrapCandidates(root: Node, m: ProjectModel): string[] {
   return out;
 }
 
-function jsxOf(node: Node, m: ProjectModel, props?: Map<string, { kind: 'text' | 'image' | 'href'; name: string }>): string {
+function jsxOf(node: Node, m: ProjectModel, props?: Map<string, { kind: 'text' | 'image' | 'href' | 'variant'; name: string }>): string {
   const components = new Map<string, string>();
   for (const u of m.plan.ui) for (const i of u.instances) if (i.node !== node) components.set(i.node.id, u.name);
   return renderNode(node, {
@@ -95,7 +95,7 @@ function buildUnits(m: ProjectModel): Unit[] {
         const c = cur.plan.ui.find((u) => u.template.id === templateId);
         if (!c) return null;
         const at = (root: Node, p: number[]) => p.reduce((x, i) => x.children[i], root);
-        const props = new Map(c.props.map((p) => [at(c.template, p.path).id, { kind: p.kind, name: p.name }]));
+        const props = new Map(c.props.filter((p) => p.kind !== 'variant').map((p) => [at(c.template, p.path).id, { kind: p.kind, name: p.name }]));
         return {
           user: [
             `Component: ${c.name} (reusable UI component, used ${c.instances.length} times)`,

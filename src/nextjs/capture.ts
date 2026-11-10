@@ -46,7 +46,7 @@ export const STYLE_PROPS: readonly string[] = [
   'border-bottom-right-radius', 'border-bottom-left-radius',
   'box-shadow', 'opacity', 'transform', 'overflow-x', 'overflow-y',
   'object-fit', 'object-position', 'aspect-ratio',
-  'filter', 'backdrop-filter', 'mix-blend-mode', 'clip-path', 'mask-image',
+  'filter', 'backdrop-filter', 'mix-blend-mode', 'clip-path', 'mask-image', 'mask-size', 'mask-position', 'mask-repeat', 'mask-mode',
 ];
 
 /** Inherited properties are dropped when equal to the parent's value instead of the tag default. */
@@ -362,10 +362,14 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
   return { tree, hover, title: document.title, meta };
 }
 
+/** Scroll-linked Framer effects are smoothed: after a jump they need a moment to catch up. */
+const SCROLL_SETTLE_MS = 800;
+
 /** Records transform/opacity per key at three scroll positions. Runs in the page. */
-function sampleScrollInPage(fraction: number) {
+async function sampleScrollInPage(args: { fraction: number; settle: number }) {
   const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  window.scrollTo({ top: max * fraction, behavior: 'instant' });
+  window.scrollTo({ top: max * args.fraction, behavior: 'instant' });
+  await new Promise((r) => setTimeout(r, args.settle));
   const out: Record<string, { transform: string; opacity: string }> = {};
   const walk = (el: Element, parentKey: string, index: number) => {
     const tag = el.tagName.toLowerCase();
@@ -423,9 +427,12 @@ async function captureOne(
       let samples: Record<string, { transform: string; opacity: string }>[] = [];
       if (bp === 'base') {
         for (const fraction of [0, 0.5, 1]) {
-          samples.push(await page.evaluate(sampleScrollInPage, fraction));
+          samples.push(await page.evaluate(sampleScrollInPage, { fraction, settle: SCROLL_SETTLE_MS }));
         }
-        await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        await page.evaluate(async (settle) => {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+          await new Promise((r) => setTimeout(r, settle));
+        }, SCROLL_SETTLE_MS);
       }
       const result = (await page.evaluate(serializeInPage, {
         props: [...STYLE_PROPS],

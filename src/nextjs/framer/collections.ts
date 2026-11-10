@@ -2,7 +2,7 @@ import { parse, serializeOuter } from 'parse5';
 import TurndownService from 'turndown';
 import type { Node, PageModel } from '../model.js';
 import type { ImageNamer } from '../content.js';
-import { contentRoot } from '../components.js';
+import { contentRoot, pageSections } from '../components.js';
 import { isGenericName, toCamel, toSlug } from './names.js';
 
 export interface CollectionField {
@@ -63,7 +63,7 @@ function byKey(root: Node): Map<string, Node> {
 }
 
 function signature(page: PageModel): string[] {
-  return contentRoot(page.root).children.map((s) => `${s.tag}[${s.framerName ?? ''}]`);
+  return pageSections(page.root).map((s) => `${s.tag}[${s.framerName ?? ''}]`);
 }
 
 function sameTemplate(a: string[], b: string[]): boolean {
@@ -103,25 +103,40 @@ function fieldKey(node: Node, used: Set<string>): string {
   return key;
 }
 
-const fieldValue = (n: Node) => (n.asset?.kind === 'image' ? n.asset.src : (n.text ?? ''));
+/** All text of a node. Text Framer split into word/letter spans (`inline`) is joined back together. */
+export function fullText(n: Node): string {
+  if (n.inline) return n.inline.map((x) => (typeof x === 'number' ? (n.children[x] ? fullText(n.children[x]) : '') : x)).join('');
+  return (n.text ?? '') + n.children.map(fullText).join('');
+}
+
+/** A text element whose words or letters Framer split into spans: one value, not one per span. */
+const isSplitText = (n: Node) => !!n.inline && /^(p|h[1-6]|span|a|label|li|blockquote)$/.test(n.tag);
+
+const fieldValue = (n: Node) => (n.asset?.kind === 'image' ? n.asset.src : isSplitText(n) ? fullText(n) : (n.text ?? ''));
+
+/** Pre-order walk that does not descend below nodes where `fn` returns false. */
+function walkUntil(node: Node, fn: (n: Node) => boolean): void {
+  if (fn(node)) node.children.forEach((c) => walkUntil(c, fn));
+}
 
 function detectFields(items: PageModel[], bodyKey: string | undefined): CollectionField[] {
   const maps = items.map((p) => byKey(p.root));
   const template = items[0].root;
-  const bodyNode = bodyKey ? maps[0].get(bodyKey) : undefined;
-  const inBody = new Set<Node>();
-  if (bodyNode) walk(bodyNode, (n) => inBody.add(n));
   const used = new Set<string>();
   const fields: CollectionField[] = [];
-  walk(template, (n) => {
-    if (inBody.has(n) || (!n.text && n.asset?.kind !== 'image')) return;
+  walkUntil(template, (n) => {
+    if (n.key === bodyKey) return false;
+    if (!n.text && !isSplitText(n) && n.asset?.kind !== 'image') return true;
     const nodes = maps.map((m) => m.get(n.key));
-    if (nodes.some((x) => !x)) return;
+    // A split text is one value: its word/letter spans are never fields of their own.
+    if (nodes.some((x) => !x)) return !isSplitText(n);
     const values = nodes.map((x) => fieldValue(x!));
-    if (values.every((v) => v === values[0])) return;
-    const kind: CollectionField['kind'] =
-      n.asset?.kind === 'image' ? 'image' : values.every((v) => toIsoDate(v)) ? 'date' : 'text';
-    fields.push({ key: fieldKey(n, used), kind, nodeKey: n.key });
+    if (!values.every((v) => v === values[0])) {
+      const kind: CollectionField['kind'] =
+        n.asset?.kind === 'image' ? 'image' : values.every((v) => toIsoDate(v)) ? 'date' : 'text';
+      fields.push({ key: fieldKey(n, used), kind, nodeKey: n.key });
+    }
+    return !isSplitText(n);
   });
   return fields;
 }
@@ -221,7 +236,9 @@ export function itemToMdx(
 
   const nodes = byKey(page.root);
   const title = c.fields.find((f) => f.key === 'title');
-  const titleText = title ? nodes.get(title.nodeKey)?.text : undefined;
+  const textOf = (n: Node) => (isSplitText(n) ? fullText(n) : (n.text ?? ''));
+  const titleNode = title ? nodes.get(title.nodeKey) : undefined;
+  const titleText = titleNode ? textOf(titleNode) : undefined;
   const metadata: Record<string, unknown> = {};
   for (const f of c.fields) {
     const n = nodes.get(f.nodeKey);
@@ -229,9 +246,9 @@ export function itemToMdx(
     if (f.kind === 'image' && n.asset) {
       metadata[f.key] = ctx.images.publicPath(n.asset.src, n.attrs.alt || `${titleText ?? slug} ${f.key}`);
     } else if (f.kind === 'date') {
-      metadata[f.key] = toIsoDate(n.text ?? '') ?? n.text;
+      metadata[f.key] = toIsoDate(textOf(n)) ?? textOf(n);
     } else {
-      metadata[f.key] = n.text ?? '';
+      metadata[f.key] = textOf(n);
     }
   }
 

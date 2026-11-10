@@ -2,19 +2,19 @@ import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { format } from 'prettier';
-import type { ComponentPlan, UiComponent } from '../components.js';
-import { contentRoot, pageStructure, shapeHash } from '../components.js';
+import type { ComponentPlan, PropDef, UiComponent } from '../components.js';
+import { pageSections, pageStructure, shapeHash } from '../components.js';
 import type { ContentBindings, ContentFile, ImageNamer } from '../content.js';
 import type { FontFace } from '../fonts.js';
 import { renderFontsCss } from '../fonts.js';
 import type { Collection, MdxItem } from '../framer/collections.js';
 import { toIsoDate } from '../framer/collections.js';
-import { NameRegistry, toCamel, toPascal, toSlug } from '../framer/names.js';
+import { isGenericName, NameRegistry, toCamel, toPascal, toSlug } from '../framer/names.js';
 import type { MotionSpec, Node, PageModel, Style } from '../model.js';
 import { toTailwind } from '../tailwind.js';
 import { nameColor, normalizeColor, type ThemeTokens } from '../tokens.js';
 import { NEXT_PROJECT_VERSIONS } from '../versions.js';
-import { renderNode, type JsxContext } from './jsx.js';
+import { renderNode, svgToJsx, type JsxContext } from './jsx.js';
 import * as T from './templates.js';
 
 export interface ProjectModel {
@@ -126,7 +126,8 @@ function componentFile(
   signature: string,
   files: Files,
   typeImports: string[],
-  preamble = ''
+  preamble = '',
+  body = ''
 ): void {
   const extra = [...typeImports];
   if (r.css) {
@@ -135,7 +136,7 @@ function componentFile(
   }
   files.set(
     `${dir}/${name}.tsx`,
-    `${importBlock(r.imports, extra)}\n\n${preamble ? preamble + '\n\n' : ''}export function ${name}(${signature}) {\n  return (${r.jsx || 'null'});\n}\n`
+    `${importBlock(r.imports, extra)}\n\n${preamble ? preamble + '\n\n' : ''}export function ${name}(${signature}) {\n${body ? body + '\n' : ''}  return (${r.jsx || 'null'});\n}\n`
   );
 }
 
@@ -145,20 +146,69 @@ function instanceComponents(plan: ComponentPlan): Map<string, string> {
   return map;
 }
 
-function propType(kind: 'text' | 'image' | 'href'): string {
+function propType(kind: PropDef['kind']): string {
   return kind === 'image' ? 'ImageData' : 'string';
 }
 
+const nodeAt = (root: Node, p: number[]) => p.reduce((n, i) => n.children[i], root);
+
+/** Variant objects: per variant, the classes and icons that change. Returns the JSX context and the declaration. */
+function variantTable(comp: UiComponent, model: ProjectModel): { ctx: NonNullable<JsxContext['variant']>; decl: string } {
+  const vs = comp.variants!;
+  const reps = vs.representative.map((i) => comp.instances[i].node);
+  const keys = new NameRegistry();
+  const classes = new Map<string, { common: string[]; key: string }>();
+  const icons = new Map<string, string>();
+  const rows: Record<string, string>[] = vs.names.map(() => ({}));
+  for (const p of vs.paths) {
+    const node = nodeAt(comp.template, p);
+    const base = node.framerName && !isGenericName(node.framerName) ? toCamel(node.framerName) : '';
+    const perVariant = reps.map((rep) => {
+      const n = nodeAt(rep, p);
+      return toTailwind(n.styles, n.hover, model.tokens, n.visibility, n.afterBorder).classes;
+    });
+    const common = perVariant[0].filter((c) => perVariant.every((list) => list.includes(c)));
+    if (perVariant.some((list) => list.some((c) => !common.includes(c)))) {
+      const key = keys.unique(base ? `${base}Class` : 'className');
+      classes.set(node.id, { common, key });
+      perVariant.forEach((list, v) => (rows[v][key] = JSON.stringify(list.filter((c) => !common.includes(c)).join(' '))));
+    }
+    const svgs = reps.map((rep) => nodeAt(rep, p).attrs['data-svg'] ?? '');
+    if (node.asset?.kind === 'svg' && svgs.some((x) => x !== svgs[0])) {
+      const key = keys.unique(base || 'icon');
+      icons.set(node.id, key);
+      svgs.forEach((svg, v) => (rows[v][key] = svg ? `(${svgToJsx(svg)})` : 'null'));
+    }
+  }
+  const body = vs.names
+    .map((name, v) => `  ${name}: {\n${Object.entries(rows[v]).map(([k, val]) => `    ${k}: ${val},`).join('\n')}\n  },`)
+    .join('\n');
+  return {
+    ctx: { objectVar: 'v', classes, icons },
+    decl: `/** The looks this component comes in (Framer variants). Add an entry to add a variant. */\nconst variants = {\n${body}\n};`,
+  };
+}
+
 function writeUiComponent(comp: UiComponent, model: ProjectModel, files: Files, components: Map<string, string>): void {
-  const at = (root: Node, p: number[]) => p.reduce((n, i) => n.children[i], root);
-  const props = new Map(comp.props.map((p) => [at(comp.template, p.path).id, { kind: p.kind, name: p.name }]));
+  const props = new Map(comp.props.filter((p) => p.kind !== 'variant').map((p) => [nodeAt(comp.template, p.path).id, { kind: p.kind, name: p.name }]));
   const inner = new Map(components);
   inner.delete(comp.template.id);
-  const r = renderWith(comp.template, model, { props, bindings: undefined }, inner);
+  const table = comp.variants ? variantTable(comp, model) : undefined;
+  const r = renderWith(comp.template, model, { props, bindings: undefined, variant: table?.ctx }, inner);
   const typeImports = comp.props.some((p) => p.kind === 'image') ? ["import type { ImageData } from '@/lib/types';"] : [];
-  const iface = `export interface ${comp.name}Props {\n${comp.props.map((p) => `  ${p.name}: ${propType(p.kind)};`).join('\n')}\n}`;
+  const variantProp = comp.props.find((p) => p.kind === 'variant');
+  const fields = comp.props.map((p) =>
+    p.kind === 'variant'
+      ? `  /** ${comp.variants!.names.map((n) => `"${n}"`).join(' | ')} */\n  ${p.name}: string;`
+      : `  ${p.name}: ${propType(p.kind)};`
+  );
+  const iface = `export interface ${comp.name}Props {\n${fields.join('\n')}\n}`;
   const args = comp.props.length ? `{ ${comp.props.map((p) => p.name).join(', ')} }: ${comp.name}Props` : '';
-  componentFile('components/ui', comp.name, r, args, files, typeImports, iface);
+  const preamble = table ? `${table.decl}\n\n${iface}` : iface;
+  const body = variantProp
+    ? `  const v = variants[${variantProp.name} as keyof typeof variants] ?? variants.${comp.variants!.names[0]};`
+    : '';
+  componentFile('components/ui', comp.name, r, args, files, typeImports, preamble, body);
 }
 
 interface Listing {
@@ -185,6 +235,14 @@ function detectListings(model: ProjectModel): Listing[] {
       if (!insts.every(itemFor)) continue;
       const parts = comp.props.map((p) => {
         if (p === hrefProp) return `${p.name}: \`${c.indexRoute}/\${e.slug}\``;
+        if (p.kind === 'variant') {
+          // Each entry records its look in its own front matter, so new entries can pick one.
+          const key = c.fields.some((f) => f.key === p.name && f.nodeKey) ? `${p.name}2` : p.name;
+          if (!c.fields.some((f) => f.key === key)) c.fields.push({ key, kind: 'text', nodeKey: '' });
+          for (const it of items) it.metadata[key] ??= comp.variants!.names[0];
+          for (const inst of insts) itemFor(inst)!.metadata[key] = inst.values[p.name];
+          return `${p.name}: e.metadata.${key}`;
+        }
         for (const f of c.fields) {
           const ok = insts.every((inst) => {
             const meta = itemFor(inst)!.metadata[f.key];
@@ -441,7 +499,7 @@ export async function get${Name}() {
     );
 
     // Article template: the item page sections without the shared header/footer.
-    const sections = contentRoot(itemPage.root).children.filter((s) => !layoutShapes.has(shapeHash(s)));
+    const sections = pageSections(itemPage.root).filter((s) => !layoutShapes.has(shapeHash(s)));
     const byKey = new Map<string, Node>();
     sections.forEach((s) => walk(s, (n) => byKey.set(n.key, n)));
     const overrides = new Map<string, { text?: string; image?: string; alt?: string; children?: string }>();
@@ -589,6 +647,15 @@ function globalsCss(tokens: ThemeTokens): string {
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 @import './fonts.css';
+
+/* Framer sizes every element as border-box; widths in the components assume it. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+}
 
 /* Desktop-first breakpoints matching the original Framer site. */
 @custom-variant tablet (@media (max-width: 1199px));

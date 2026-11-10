@@ -198,3 +198,17 @@ test('scroll effects inside text elements use a span wrapper', () => {
   const block = n('div', { text: 'y', motion: { kind: 'scroll', scroll: [{ property: 'opacity', values: ['0', '1'] }] } });
   assert.doesNotMatch(renderNode(n('section', {}, [block]), ctx()), /as="span"/);
 });
+
+test('a collection override replaces a split text as a whole', () => {
+  const span = (t: string): Node => ({ id: `s-${t}`, key: `s-${t}`, tag: 'span', attrs: {}, styles: { base: {} }, children: [], text: t });
+  const h1: Node = { id: 'h', key: 'h', tag: 'h1', attrs: {}, styles: { base: {} }, children: [span('A'), span('B')], inline: [0, ' ', 1] };
+  const out = renderNode(h1, {
+    tokens: { colorByValue: new Map(), colors: [], fonts: [], radii: [], shadows: [] } as never,
+    contentVar: 'content',
+    components: new Map(),
+    imports: new Set(),
+    siteOrigin: 'https://x.test',
+    overrides: new Map([['h', { text: 'entry.metadata.title' }]]),
+  });
+  assert.equal(out, '<h1>{entry.metadata.title}</h1>');
+});

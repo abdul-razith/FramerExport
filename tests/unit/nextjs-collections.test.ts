@@ -64,3 +64,30 @@ test('toIsoDate understands day-month-year and month-day-year', () => {
 test('escapeMdx escapes braces and angle brackets', () => {
   assert.equal(escapeMdx('Use {x} and a < b'), 'Use \\{x\\} and a \\< b');
 });
+
+test('a title Framer splits into word and letter spans is one field with the whole text', async () => {
+  const { itemToMdx } = await import('../../src/nextjs/framer/collections.js');
+  const { ImageNamer } = await import('../../src/nextjs/content.js');
+  const word = (w: string) => n('span', { inline: Array.from(w).map((_, i) => i) }, Array.from(w).map((ch) => n('span', { text: ch })));
+  const itemPage = (route: string, words: string[]) => {
+    const h1 = n('h1', { inline: words.flatMap((_, i) => (i ? [' ', i] : [i])) }, words.map(word));
+    const p = page(route, ['Header', 'Post Header', 'Post Body', 'Footer']);
+    const header = (p.root.children[0].children[0].children[1]);
+    header.children = [h1, n('p', { text: route.endsWith('a') ? '12 March 2025' : '3 May 2025' })];
+    const rekey = (node: Node, key: string) => {
+      node.key = key;
+      node.children.forEach((c, i) => rekey(c, `${key}/${c.tag}:${i}`));
+    };
+    rekey(p.root, 'body:0');
+    return p;
+  };
+  const pages = [
+    page('/blog', ['Header', 'Posts', 'Footer']),
+    itemPage('/blog/post-a', ['A', 'Greener', 'Workspace']),
+    itemPage('/blog/post-b', ['Ideas', 'Need', 'Silence']),
+  ];
+  const [c] = detectCollections(pages);
+  assert.deepEqual(c.fields.map((f) => [f.key, f.kind]), [['title', 'text'], ['text', 'date']]);
+  const mdx = itemToMdx(pages[1], c, { exportHtml: '', images: new ImageNamer(), usedSlugs: new Set() });
+  assert.deepEqual(mdx.metadata, { title: 'A Greener Workspace', text: '2025-03-12' });
+});

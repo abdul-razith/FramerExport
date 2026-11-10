@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pageStructure, planComponents, structuralHash } from '../../src/nextjs/components.js';
+import { pageSections, pageStructure, planComponents, structuralHash } from '../../src/nextjs/components.js';
 import { emptyReport } from '../../src/nextjs/report.js';
 import type { Node, PageModel, Style } from '../../src/nextjs/model.js';
 
@@ -161,4 +161,50 @@ test('absolutely positioned content stops the search for the section container',
   const s = pageStructure(root);
   assert.equal(s.content.framerName, 'Desktop');
   assert.deepEqual(s.overlays, []);
+});
+
+test('copies that differ only in colours and icons become one component with a variant prop', () => {
+  const tagCard = (title: string, bg: string, svg: string) =>
+    n('div', { framerName: 'Post Card' }, [
+      n('div', { framerName: 'Badge', styles: { base: { 'background-color': bg } } }, [
+        n('svg', { asset: { kind: 'svg', src: '', width: 16, height: 16 }, attrs: { 'data-svg': svg } }),
+      ]),
+      text('p', 'Title', title),
+    ]);
+  const yellow = 'rgb(234, 179, 8)';
+  const pink = 'rgb(236, 72, 153)';
+  const plan = planComponents(
+    [
+      page('/', [
+        n('section', { framerName: 'Posts' }, [
+          tagCard('One', yellow, '<svg><path d="M1"/></svg>'),
+          tagCard('Two', pink, '<svg><path d="M2"/></svg>'),
+          tagCard('Three', yellow, '<svg><path d="M1"/></svg>'),
+        ]),
+        n('section', { framerName: 'About' }, [text('p', 'Text', 'Hi')]),
+      ]),
+    ],
+    emptyReport()
+  );
+  const comp = plan.ui.find((u) => u.name === 'PostCard');
+  assert.ok(comp, 'one PostCard component');
+  assert.equal(comp.instances.length, 3);
+  assert.deepEqual(comp.variants?.names, ['yellow', 'pink']);
+  assert.deepEqual(
+    comp.instances.map((i) => i.values.variant),
+    ['yellow', 'pink', 'yellow']
+  );
+  assert.deepEqual(comp.variants?.paths, [[0], [0, 0]]);
+});
+
+test("the sections inside Framer's display:contents page wrapper are the page sections", () => {
+  const hero = n('section', { framerName: 'Hero' }, [text('h1', 'Heading', 'Hi')]);
+  const work = n('section', { framerName: 'Work' }, [text('p', 'Text', 'x')]);
+  const wrapper = n('div', { styles: { base: { display: 'contents' } } }, [hero, work]);
+  const root = n('body', {}, [n('div', { attrs: { id: 'main' } }, [
+    n('div', { framerName: 'Desktop' }, [header(), wrapper, footer()]),
+  ])]);
+  const sections = pageSections(root);
+  assert.deepEqual(sections.map((s) => s.framerName), ['Logo + Menu', 'Hero', 'Work', 'Footer']);
+  assert.equal(pageStructure(root).content.framerName, 'Desktop');
 });

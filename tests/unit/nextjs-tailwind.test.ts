@@ -90,6 +90,17 @@ test('breakpoint visibility becomes hidden/display classes', () => {
   );
 });
 
+test('a node hidden at a breakpoint keeps its display where it is visible', () => {
+  assert.deepEqual(
+    toTailwind({ base: { display: 'flex' } }, undefined, NO_TOKENS, ['base']).classes,
+    ['flex', 'tablet:hidden']
+  );
+  assert.deepEqual(
+    toTailwind({ base: { display: 'flex' }, tablet: { display: 'block' } }, undefined, NO_TOKENS, ['base', 'tablet']).classes,
+    ['flex', 'tablet:block', 'mobile:hidden']
+  );
+});
+
 test('border, radius and font tokens', () => {
   const tokens = tokensFor(
     { 'font-family': '"Inter Display", sans-serif' },
@@ -139,4 +150,18 @@ test("Framer ::after borders become inset rings, or leftover CSS when they can't
   const r = toTailwind({ base: {} }, undefined, tokens, undefined, dashed);
   assert.deepEqual(r.classes, []);
   assert.deepEqual(r.leftover.after, { 'border-width': '1px 0px 1px 0px', 'border-style': 'dashed', 'border-color': 'rgb(19, 51, 36)' });
+});
+
+test('Framer masks keep size, position and repeat', () => {
+  const r = toTailwind(
+    { base: { 'mask-image': 'url("a.png")', 'mask-size': 'cover', 'mask-position': '50% 50%', 'mask-repeat': 'no-repeat' } },
+    undefined,
+    NO_TOKENS
+  );
+  assert.deepEqual(r.leftover.base, {
+    'mask-image': 'url("a.png")',
+    'mask-size': 'cover',
+    'mask-position': '50% 50%',
+    'mask-repeat': 'no-repeat',
+  });
 });

@@ -62,6 +62,10 @@ before(async () => {
         n('a', { framerName: 'Post Card', attrs: { href: 'https://nudge.test/blog/' + slug } }, [
           image('https://cdn.test/covers/' + slug + '.png?scale-down-to=512', slug),
           text('h3', 'Title', slug),
+          // A Framer variant: each post's badge has its own colour and icon.
+          n('div', { framerName: 'Badge', styles: { base: { 'background-color': slug === 'post-a' ? 'rgb(234, 179, 8)' : 'rgb(236, 72, 153)' } } }, [
+            n('svg', { asset: { kind: 'svg', src: '', width: 16, height: 16 }, attrs: { 'data-svg': `<svg viewBox="0 0 16 16"><path d="${slug === 'post-a' ? 'M1 1' : 'M2 2'}"/></svg>` } }),
+          ]),
         ])
       )),
       footer(),
@@ -219,4 +223,20 @@ test('collection listings read cards from MDX metadata, including resized cover 
   const blogPage = await read('app/blog/page.tsx');
   assert.match(blogPage, /e.metadata.image/);
   assert.match(blogPage, /e.metadata.title/);
+});
+
+test('Framer variants become a variants map, and listings store each entry variant in its MDX', async () => {
+  const card = await read('components/ui/PostCard.tsx');
+  assert.match(card, /const variants = \{/);
+  assert.match(card, /yellow: \{/);
+  assert.match(card, /pink: \{/);
+  assert.match(card, /const v = variants\[variant as keyof typeof variants\] \?\? variants\.yellow;/);
+  assert.match(card, /className=\{v\.badgeClass\}/);
+  assert.match(card, /\{v\.icon\}/);
+  // The variant colours live only in the variants map, never in a fixed className.
+  assert.doesNotMatch(card, /className[^\n]*bg-(yellow|pink)/);
+  assert.match(await read('content/blog/post-a.mdx'), /"variant": "yellow"/);
+  assert.match(await read('content/blog/post-b.mdx'), /"variant": "pink"/);
+  assert.match(await read('app/blog/page.tsx'), /variant: e\.metadata\.variant/);
+  assert.match(await read('lib/blog.ts'), /variant: string;/);
 });

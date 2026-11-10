@@ -37,7 +37,7 @@ const DISPLAY: Record<string, string> = {
 /** Properties that never become utilities in v1 (spec 6.2) → CSS module. */
 const LEFTOVER = new Set([
   'background-image', 'transform', 'filter', 'backdrop-filter', 'mix-blend-mode', 'clip-path',
-  'mask-image', 'object-position',
+  'mask-image', 'mask-size', 'mask-position', 'mask-repeat', 'mask-mode', 'object-position',
 ]);
 
 const SKIP_VALUES = new Set(['normal', 'none', 'auto']);
@@ -338,7 +338,7 @@ function mapStyle(style: Style, ctx: Ctx): void {
   for (const [p, v] of Object.entries(style)) {
     if (done.has(p)) continue;
     if (LEFTOVER.has(p)) {
-      if (!SKIP_VALUES.has(v) && v !== 'initial' && v !== '50% 50%') leftover[p] = v;
+      if (!SKIP_VALUES.has(v) && v !== 'initial' && (v !== '50% 50%' || p === 'mask-position')) leftover[p] = v;
       continue;
     }
     if (!SKIP_VALUES.has(v)) leftover[p] = v;
@@ -349,15 +349,30 @@ function visibilityClasses(vis: Breakpoint[] | undefined, style: Node['styles'])
   if (!vis) return [];
   const shown = (bp: Breakpoint) => vis.includes(bp);
   const displayFor = (bp: Breakpoint) => {
-    const d = style[bp]?.display ?? style.base.display;
+    const d =
+      (bp === 'mobile' ? style.mobile?.display : undefined) ??
+      (bp !== 'base' ? style.tablet?.display : undefined) ??
+      style.base.display;
     return d && DISPLAY[d] && d !== 'none' ? DISPLAY[d] : 'block';
   };
   const out: string[] = [];
+  // The display classes are emitted here (and removed from the per-breakpoint styles), so every
+  // breakpoint where the node is visible must state its display again.
   if (!shown('base')) out.push('hidden');
+  else if (style.base.display && style.base.display !== 'none' && DISPLAY[style.base.display]) {
+    out.push(DISPLAY[style.base.display]);
+  }
   let visibleSoFar = shown('base');
+  let current = shown('base') ? displayFor('base') : 'hidden';
   for (const bp of ['tablet', 'mobile'] as const) {
-    if (shown(bp) && !visibleSoFar) out.push(`${bp}:${displayFor(bp)}`);
-    if (!shown(bp) && visibleSoFar) out.push(`${bp}:hidden`);
+    if (shown(bp)) {
+      const d = displayFor(bp);
+      if (!visibleSoFar || d !== current) out.push(`${bp}:${d}`);
+      current = d;
+    } else if (visibleSoFar) {
+      out.push(`${bp}:hidden`);
+      current = 'hidden';
+    }
     visibleSoFar = shown(bp);
   }
   return out;
