@@ -123,7 +123,7 @@ The guide step loads each page of the live site in a headless browser and record
 
 - **Load:** a frame every 200 ms for the first 6 s (loader and entrance animations).
 - **Scroll:** a frame at each half-screen step; a 2 s recording at one mid-page position for loops.
-- **Hover:** before/after frames for elements with hover rules.
+- **Hover:** listed from the site's hover CSS rules with their exact values (more precise than before/after frames).
 
 It also samples computed `opacity` and `transform` of visible elements during load and scroll
 and writes `motion.md` from the measurements:
