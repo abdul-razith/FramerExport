@@ -220,21 +220,30 @@ export function useScrollAnimation(ref: RefObject<HTMLElement | null>, values: S
 
 export const SCROLL_EFFECT = `'use client';
 
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { useScrollAnimation, type ScrollValue } from './useScrollAnimation';
 
 /** Applies a scroll-linked effect to its only child without adding a layout box. */
-export function ScrollEffect({ values, children }: { values: ScrollValue[]; children: ReactNode }) {
-  const wrapper = useRef<HTMLDivElement>(null);
+export function ScrollEffect({
+  values,
+  children,
+  as: Wrapper = 'div',
+}: {
+  values: ScrollValue[];
+  children: ReactNode;
+  /** Use "span" inside paragraphs and headings, where a div is invalid HTML. */
+  as?: 'div' | 'span';
+}) {
+  const wrapper = useRef<HTMLElement>(null);
   const target = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     target.current = wrapper.current?.firstElementChild as HTMLElement | null;
   }, []);
   useScrollAnimation(target, values);
   return (
-    <div ref={wrapper} style={{ display: 'contents' }}>
+    <Wrapper ref={wrapper as RefObject<never>} style={{ display: 'contents' }}>
       {children}
-    </div>
+    </Wrapper>
   );
 }
 `;

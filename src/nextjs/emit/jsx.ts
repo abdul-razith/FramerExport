@@ -263,7 +263,9 @@ function render(original: Node, ctx: JsxContext, state: RenderState, inText = fa
 
   if (kind === 'scroll' && node.motion!.scroll) {
     ctx.imports.add(IMPORTS.scroll);
-    return `<ScrollEffect values={${JSON.stringify(node.motion!.scroll)}}>${element}</ScrollEffect>`;
+    // Inside text elements the wrapper must be a span to keep the HTML valid.
+    const as = inText ? ' as="span"' : '';
+    return `<ScrollEffect${as} values={${JSON.stringify(node.motion!.scroll)}}>${element}</ScrollEffect>`;
   }
   return element;
 }

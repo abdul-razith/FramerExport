@@ -190,3 +190,11 @@ test('inline content renders in order with its spaces', () => {
     '<p>{content.read}{" "}<a href="https://example.com/x">full story</a>{" today."}</p>'
   );
 });
+
+test('scroll effects inside text elements use a span wrapper', () => {
+  const word = n('span', { text: 'x', motion: { kind: 'scroll', scroll: [{ property: 'opacity', values: ['0', '1'] }] } });
+  const out = renderNode(n('p', {}, [word]), ctx());
+  assert.match(out, /<ScrollEffect as="span" values=/);
+  const block = n('div', { text: 'y', motion: { kind: 'scroll', scroll: [{ property: 'opacity', values: ['0', '1'] }] } });
+  assert.doesNotMatch(renderNode(n('section', {}, [block]), ctx()), /as="span"/);
+});
