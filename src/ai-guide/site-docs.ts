@@ -1,3 +1,4 @@
+import { planTasks } from './plan.js';
 import type { GuideImage, GuideSite } from './types.js';
 
 const row = (cells: (string | number | undefined)[]) => `| ${cells.map((c) => c ?? '').join(' | ')} |`;
@@ -35,6 +36,7 @@ export function renderSiteMd(site: GuideSite): string {
     ...(site.sharedSections.length ? site.sharedSections.map((s) => `- ${s.name}: ${s.routes.join(', ')}`) : ['None.']),
     ''
   );
+  out.push('## Tasks (ai-guide/plan.md)', '', ...planTasks(site).map((t, i) => `${i + 1}. Task ${t.number}: ${t.title}`), '');
   return out.join('\n');
 }
 
