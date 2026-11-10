@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Browser, Page } from 'puppeteer';
 import { settlePage } from '../nextjs/capture.js';
+import { needsMoreTime } from './motion.js';
 import type { TimelineSample } from './types.js';
 
 export interface RecordResult {
@@ -94,26 +95,34 @@ async function shoot(page: Page, dir: string, ms: number, every: number, started
   return taken.size;
 }
 
-/** Records how a page moves: the first seconds after load, a pass of scroll frames, and 2 s mid-page. */
+/** Records how a page moves: 6–12 s after load (longer while it still moves), a pass of scroll frames, and 2 s mid-page. */
 export async function recordPage(
   browser: Browser,
   url: string,
   outDir: string,
-  opts: { loadMs?: number; frameEveryMs?: number } = {}
+  opts: { loadMs?: number; maxLoadMs?: number; frameEveryMs?: number } = {}
 ): Promise<RecordResult> {
   const loadMs = opts.loadMs ?? 6000;
+  const maxLoadMs = Math.max(loadMs, opts.maxLoadMs ?? 12000);
   const every = opts.frameEveryMs ?? 200;
   const page = await browser.newPage();
   try {
     await page.setViewport({ width: 1440, height: 900 });
     // Bundlers (tsx/esbuild keepNames) wrap named functions in __name(), which the page lacks.
     await page.evaluateOnNewDocument('globalThis.__name = (fn) => fn;');
-    await page.evaluateOnNewDocument(installSampler, every, loadMs, '__aiGuideLoad', false);
+    await page.evaluateOnNewDocument(installSampler, every, maxLoadMs, '__aiGuideLoad', false);
     const startedAt = Date.now();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
-    const loadFrames = await shoot(page, path.join(outDir, 'frames', 'load'), loadMs, every, startedAt);
+    const loadDir = path.join(outDir, 'frames', 'load');
+    const readLoad = async () =>
+      ((await page.evaluate(() => (window as unknown as Record<string, unknown>).__aiGuideLoad)) as TimelineSample[] | undefined) ?? [];
+    let loadFrames = await shoot(page, loadDir, loadMs, every, startedAt);
+    // Keep recording while the page still moves (a long loader delays every entrance after it).
+    for (let until = loadMs + 2000; until <= maxLoadMs && needsMoreTime(await readLoad(), Date.now() - startedAt, maxLoadMs); until += 2000) {
+      loadFrames += await shoot(page, loadDir, until, every, startedAt);
+    }
     await new Promise((r) => setTimeout(r, every * 2));
-    const load = (await page.evaluate(() => (window as unknown as Record<string, unknown>).__aiGuideLoad)) as TimelineSample[];
+    const load = (await readLoad()).filter((s) => s.t <= Date.now() - startedAt);
 
     await settlePage(page);
     const scrollDir = path.join(outDir, 'frames', 'scroll');

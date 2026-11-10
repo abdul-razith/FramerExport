@@ -106,3 +106,9 @@ test('letters split into spans inside a div are one text, and repeated images ar
   assert.deepEqual(s.texts, ['Welcome']);
   assert.equal(s.images.length, 1);
 });
+
+test('letters split into divs are one text too', () => {
+  const letters = [...'Welcome!'].map((ch, i) => n(`d${i}`, 'div', { text: ch }));
+  const loader = n('body:0/main:0/div[Loader]:0', 'div', { framerName: 'Loader' }, [n('w', 'div', {}, letters)]);
+  assert.deepEqual(buildGuidePage(args([loader, projects()])).sections[0].texts, ['Welcome!']);
+});

@@ -78,7 +78,9 @@ function collect(node: Node, args: BuildPageArgs) {
     }
     if (n.tag === 'a') return;
     // Split text (words/letters as spans) is one value; block containers can carry `inline` too.
-    const splitText = n.inline && (TEXT_TAGS.test(n.tag) || (n.children.length > 0 && n.children.every((c) => c.tag === 'span' && !c.children.length)));
+    // A word Framer split into one element per letter (spans or divs): at least 3 leaf children of ≤ 2 characters.
+    const letters = n.children.length >= 3 && n.children.every((c) => !c.children.length && !c.asset && (c.text ?? '').trim().length <= 2);
+    const splitText = letters || (n.inline && (TEXT_TAGS.test(n.tag) || (n.children.length > 0 && n.children.every((c) => c.tag === 'span' && !c.children.length))));
     if (splitText && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n));
     if (n.text) addText(n.text);
     n.children.forEach(walk);

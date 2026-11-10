@@ -121,6 +121,17 @@ function isPausingLoop(values: Value[]): boolean {
   return values.slice(bursts[1]).some((v) => before.some((b) => same(v, b)));
 }
 
+/**
+ * Whether the load recording should go on: something changed during the last second and the
+ * limit is not reached. A 5 s loader leaves the entrances after it unfinished at 6 s.
+ */
+export function needsMoreTime(samples: TimelineSample[], nowMs: number, maxMs: number): boolean {
+  if (nowMs >= maxMs || samples.length < 2) return false;
+  const last = samples[samples.length - 1];
+  const earlier = [...samples].reverse().find((s) => s.t <= last.t - 1000) ?? samples[0];
+  return Object.entries(last.values).some(([k, v]) => !same(v, earlier.values[k]) || v.text !== earlier.values[k]?.text);
+}
+
 /** Below this, an element still changing at the end of the recording is an unfinished entrance. */
 const LOOP_MIN_MS = 2500;
 
@@ -169,9 +180,9 @@ function mergeRepeats(entries: MotionEntry[]): MotionEntry[] {
       (o) =>
         o.trigger === e.trigger &&
         o.from === e.from &&
-        o.to === e.to &&
         parentOf(o.key) === parentOf(e.key) &&
-        (letter !== undefined ? o.letters !== '' : o.label === e.label && o.note === e.note)
+        // Letters still mid-animation each end somewhere else; only their start state must match.
+        (letter !== undefined ? o.letters !== '' : o.to === e.to && o.label === e.label && o.note === e.note)
     );
     const end = (e.startMs ?? 0) + (e.durationMs ?? 0);
     if (twin) {

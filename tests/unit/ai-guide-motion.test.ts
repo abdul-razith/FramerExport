@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { motionFromNodes, renderMotionMd, summarizeLoad } from '../../src/ai-guide/motion.js';
+import { motionFromNodes, needsMoreTime, renderMotionMd, summarizeLoad } from '../../src/ai-guide/motion.js';
 import type { MotionEntry } from '../../src/ai-guide/types.js';
 import type { Node, Style } from '../../src/nextjs/model.js';
 import { guidePage } from './ai-guide-fixture.js';
@@ -113,4 +113,20 @@ test('a two-step entrance (move, pause, move on) is still a load animation', () 
   const xs = [0, 0, 20, 40, 40, 40, 60, 80, 80, 80, 80, 80, 80];
   const samples = xs.map((x, i) => s(i * 200, '1', `translateX(${x}px)`));
   assert.equal(summarizeLoad(samples, 200)[0].trigger, 'load');
+});
+
+test('letters still mid-animation at the end of the recording are one entry', () => {
+  const values = (t: number) =>
+    Object.fromEntries([...'Bejaman'].map((ch, i) => [`body:0/h1:0/span:${i}`, { opacity: t < 400 ? '0' : String(Math.min(1, (t - 400) / 2000 + i * 0.01)), transform: 'none', text: ch }]));
+  const samples = [0, 200, 400, 600, 800].map((t) => ({ t, values: values(t) }));
+  const entries = summarizeLoad(samples, 200);
+  assert.equal(entries.length, 1, entries.map((e) => e.label).join(', '));
+  assert.match(entries[0].label, /letters "Bejaman"/);
+});
+
+test('the recorder keeps going while the page still moves, up to the limit', () => {
+  const at = (t: number, o: string) => s(t, o);
+  assert.equal(needsMoreTime([at(0, '0'), at(5800, '0.5'), at(6000, '0.6')], 6000, 12000), true);
+  assert.equal(needsMoreTime([at(0, '0'), at(2000, '1'), at(6000, '1')], 6000, 12000), false);
+  assert.equal(needsMoreTime([at(0, '0'), at(11800, '0.5'), at(12000, '0.6')], 12000, 12000), false);
 });
