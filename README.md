@@ -194,7 +194,33 @@ Every run writes `export.log` with untruncated messages from its retained log hi
 
 After a direct-command or legacy terminal export you can generate a conversion brief for an AI coding agent. Pick a target stack (React with Vite, Next.js, Vue, SvelteKit or Astro), pick the tool you use (Claude Code, Codex, OpenCode or another agent), pick a goal (clean rebuild, pixel-perfect migration, component system, or performance and SEO), and it writes a detailed prompt file into `ai/` inside the export. The prompt references the real files and counts from your export, so the agent starts from facts instead of guesses. The modern wizard finishes in its log viewer.
 
-## Convert a Framer site to Next.js
+## Build a clean Next.js site with an AI agent
+
+For Framer sites, the export can include a guide that lets an AI coding agent (Claude Code or agy) rebuild the site as a clean, editable Next.js project, one page per task, while you check each step. This is the recommended way to get code you will keep editing. It is opt-in and does not change the normal export.
+
+```bash
+framer-export https://mysite.framer.app --subpages --ai-guide    # export, then write the guide
+framer-export ai-guide ./framer-mysite-fresh-build-a1b2          # add the guide to an existing export
+```
+
+The guide adds `AGENTS.md` and `CLAUDE.md` (the agent's rules) and an `ai-guide/` folder:
+
+| File | What it holds |
+| --- | --- |
+| `ai-guide/README.md` | How to run the conversion, check each task and undo a bad one |
+| `ai-guide/site.md` | Pages, sections, navigation, footer, shared sections, CMS pages, task list |
+| `ai-guide/files.md` | Which export file holds what, with readable names for images |
+| `ai-guide/content.md` | CMS collections, their items and fields, suggested MDX front matter |
+| `ai-guide/tokens.md` | Colours, fonts, radii and shadows with token names |
+| `ai-guide/pages/<page>/` | `outline.md`, `motion.md` (animations measured on the live site), screenshots at 1440/1024/390, section crops, recorded frames |
+| `ai-guide/plan.md` | The tasks as a [superpowers](https://github.com/obra/superpowers) plan: project setup, site shell, one task per page, one per CMS collection, review |
+| `ai-guide/scripts/compare.mjs` | Screenshots a page of the new project next to the original |
+
+Then make the export folder a git repository, open it in Claude Code or agy with the superpowers plugin installed, and say "Execute ai-guide/plan.md with superpowers, next task". The agent builds `nextjs-app/` (Next.js 16, React 19, Tailwind 4, motion, GSAP, Lenis, MDX), ticks the plan's checkboxes, and stops after each task for you to check and commit. Re-running the guide never touches `nextjs-app/`, and keeps a `plan.md` that has ticked steps (the new plan goes to `plan.new.md`). Design: `docs/superpowers/specs/2026-11-10-ai-conversion-kit-design.md`.
+
+## Convert a Framer site to Next.js automatically
+
+This is the older, fully automatic converter. It copies the rendered page closely but the code is harder to edit; for a project you will keep changing, prefer the AI guide above.
 
 For Framer sites, the export can also be turned into a clean, editable Next.js project: named components, Tailwind CSS classes, colours and fonts as theme tokens, page text in content files, and blog or other CMS collections as MDX files. It is opt-in and does not change the normal export.
 
