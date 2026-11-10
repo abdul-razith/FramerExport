@@ -121,18 +121,28 @@ async function writeCrops(dir: string, page: GuidePage, captured: CapturedPage):
   }
 }
 
-/** Empties ai-guide/ but keeps plan.md, so ticked progress survives (writePlanFile decides). */
-async function resetGuideDir(guideDir: string): Promise<void> {
+/**
+ * Replaces ai-guide/ with the finished build: everything except plan.md (writePlanFile decides
+ * about that one, so ticked progress survives). Runs only after a successful build, so a failed
+ * re-run leaves the previous guide as it was.
+ */
+async function swapIn(buildDir: string, guideDir: string): Promise<void> {
   await fs.mkdir(guideDir, { recursive: true });
   for (const entry of await fs.readdir(guideDir)) {
     if (entry !== 'plan.md') await fs.rm(path.join(guideDir, entry), { recursive: true, force: true });
   }
+  for (const entry of await fs.readdir(buildDir)) {
+    await fs.rename(path.join(buildDir, entry), path.join(guideDir, entry));
+  }
+  await fs.rm(buildDir, { recursive: true, force: true });
 }
 
-async function build(exportDir: string, sourceUrl: string, guideDir: string, log: (m: string) => void): Promise<void> {
-  await resetGuideDir(guideDir);
+/** Writes the guide into `guideDir` (a build folder) and returns the plan's text. */
+async function build(exportDir: string, sourceUrl: string, guideDir: string, log: (m: string) => void): Promise<string> {
+  await fs.rm(guideDir, { recursive: true, force: true });
+  await fs.mkdir(guideDir, { recursive: true });
   const list = listExportPages(exportDir, sourceUrl);
-  if (process.env.FRAMER_AIGUIDE_TEST_FAIL) throw new Error('Simulated failure (FRAMER_AIGUIDE_TEST_FAIL)');
+  if (process.env.FRAMER_AIGUIDE_TEST_FAIL === '1') throw new Error('Simulated failure (FRAMER_AIGUIDE_TEST_FAIL)');
   const report = emptyReport();
   const ctx: ConversionContext = {
     exportDir,
@@ -181,14 +191,22 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
       }
       await writeCrops(dir, page, c);
       const entries: MotionEntry[] = motionFromNodes(byRoute.get(page.route)!.root, c.hover);
+      let recordingNote = '';
       if (!page.collection || firstItems.has(page.route)) {
         log(`AI guide: recording ${page.route}`);
-        const rec = await recordPage(browser, c.url, dir, { frameEveryMs: FRAME_EVERY_MS });
-        entries.push(...summarizeLoad(rec.samples, FRAME_EVERY_MS));
-        entries.push(...summarizeLoad(rec.midSamples, FRAME_EVERY_MS, 'loop').filter((e) => e.trigger === 'loop'));
+        try {
+          if (process.env.FRAMER_AIGUIDE_TEST_FAIL === `record:${page.route}`) throw new Error('Simulated recording failure');
+          const rec = await recordPage(browser, c.url, dir, { frameEveryMs: FRAME_EVERY_MS });
+          entries.push(...summarizeLoad(rec.samples, FRAME_EVERY_MS));
+          entries.push(...summarizeLoad(rec.midSamples, FRAME_EVERY_MS, 'loop').filter((e) => e.trigger === 'loop'));
+        } catch (e) {
+          // One slow or broken page must not cost the whole guide.
+          log(`AI guide: recording ${page.route} failed (${(e as Error).message})`);
+          recordingNote = `\n> The recording failed for this page (${(e as Error).message}), so its load and loop animations are not listed here; only what the page's CSS and markup show is. Check the live site for the rest.\n`;
+        }
       }
       await fs.writeFile(path.join(dir, 'outline.md'), renderOutline(page));
-      await fs.writeFile(path.join(dir, 'motion.md'), renderMotionMd(page, entries));
+      await fs.writeFile(path.join(dir, 'motion.md'), renderMotionMd(page, entries) + recordingNote);
     }
   } finally {
     await browser.close().catch(() => undefined);
@@ -235,10 +253,8 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
   await fs.writeFile(path.join(guideDir, 'checklist.md'), CHECKLIST_MD);
   await fs.mkdir(path.join(guideDir, 'scripts'), { recursive: true });
   await fs.writeFile(path.join(guideDir, 'scripts', 'compare.mjs'), COMPARE_MJS);
-  const planFile = await writePlanFile(guideDir, renderPlan(site));
-  if (planFile === 'plan.new.md') log('AI guide: plan.md has ticked steps, so the new plan was written to ai-guide/plan.new.md');
-  await fs.writeFile(path.join(exportDir, 'AGENTS.md'), AGENTS_MD);
-  await fs.writeFile(path.join(exportDir, 'CLAUDE.md'), AGENTS_MD);
+  await fs.rm(path.join(guideDir, '.capture'), { recursive: true, force: true });
+  return renderPlan(site);
 }
 
 /** Writes AGENTS.md, CLAUDE.md and ai-guide/ into a Framer export. Never throws. */
@@ -248,9 +264,16 @@ export async function runAiGuide(
   log: (m: string) => void
 ): Promise<{ ok: boolean; guideDir: string }> {
   const guideDir = path.join(exportDir, 'ai-guide');
+  const buildDir = path.join(exportDir, '.ai-guide-build');
   try {
     log('Writing the AI guide...');
-    await build(exportDir, sourceUrl, guideDir, log);
+    const plan = await build(exportDir, sourceUrl, buildDir, log);
+    await swapIn(buildDir, guideDir);
+    await fs.rm(path.join(guideDir, 'ERROR.md'), { force: true });
+    const planFile = await writePlanFile(guideDir, plan);
+    if (planFile === 'plan.new.md') log('AI guide: plan.md has ticked steps, so the new plan was written to ai-guide/plan.new.md');
+    await fs.writeFile(path.join(exportDir, 'AGENTS.md'), AGENTS_MD);
+    await fs.writeFile(path.join(exportDir, 'CLAUDE.md'), AGENTS_MD);
     log(`AI guide written to ${guideDir} — open the export folder in Claude Code or agy (see ai-guide/README.md)`);
     return { ok: true, guideDir };
   } catch (e) {
@@ -262,7 +285,7 @@ export async function runAiGuide(
     warn(`AI guide failed: ${err.message} (see ai-guide/ERROR.md)`);
     return { ok: false, guideDir };
   } finally {
-    await fs.rm(path.join(guideDir, '.capture'), { recursive: true, force: true }).catch(() => undefined);
+    await fs.rm(buildDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

@@ -10,15 +10,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { pathToFileURL } from 'node:url';
+
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const puppeteer = require('puppeteer');
 const { PNG } = require('pngjs');
-const pixelmatch = require('pixelmatch').default ?? require('pixelmatch');
+// pixelmatch is an ES module: import() works on every Node version, require() does not.
+const { default: pixelmatch } = await import(pathToFileURL(require.resolve('pixelmatch')).href);
 
 const args = process.argv.slice(2);
-const route = args.find((a) => a.startsWith('/')) ?? '/';
-const baseIndex = args.indexOf('--base');
-const base = baseIndex >= 0 ? args[baseIndex + 1] : 'http://localhost:3000';
+let base = 'http://localhost:3000';
+let route;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--base') base = args[++i];
+  else if (args[i].startsWith('--')) {
+    console.error(\`Unknown argument: \${args[i]}. Usage: npm run compare <route> [-- --base http://localhost:3000]\`);
+    process.exit(1);
+  } else if (route === undefined) route = args[i];
+}
+// Git Bash on Windows rewrites "/about" into "C:/Program Files/Git/about": undo that.
+route = '/' + (route ?? '/').replace(/^[A-Za-z]:[\\\\/].*?[\\\\/]Git[\\\\/]/, '').replace(/^\\/+/, '');
 const guideDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const slug = route === '/' ? 'index' : route.replace(/^\\/+|\\/+$/g, '').replace(/\\//g, '_');
 const WIDTHS = { desktop: 1440, tablet: 1024, mobile: 390 };
@@ -26,7 +37,7 @@ const WIDTHS = { desktop: 1440, tablet: 1024, mobile: 390 };
 try {
   await fetch(base + route);
 } catch {
-  console.error(\`Nothing answers at \${base}. Start the site first (npm run dev), then run the comparison again.\`);
+  console.error(\`Nothing answers at \${base}\${route}. Start the site first (npm run dev), then run the comparison again.\`);
   process.exit(1);
 }
 

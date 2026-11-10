@@ -101,3 +101,16 @@ test('scroll-linked transforms are described, not raw matrices', () => {
   const [e] = motionFromNodes(root, []);
   assert.match(e.note!, /transform: translateY -40px → none/);
 });
+
+test('an element that moves in bursts with pauses (carousel, blinking caret) is a loop', () => {
+  // Moves for 400 ms every 2 s; still the rest of the time.
+  const x = (t: number) => Math.floor(t / 2000) * 100 + Math.min(100, Math.max(0, ((t % 2000) - 1600) / 4));
+  const samples = Array.from({ length: 31 }, (_, i) => s(i * 200, '1', `translateX(${x(i * 200)}px)`));
+  assert.equal(summarizeLoad(samples, 200)[0].trigger, 'loop');
+});
+
+test('a two-step entrance (move, pause, move on) is still a load animation', () => {
+  const xs = [0, 0, 20, 40, 40, 40, 60, 80, 80, 80, 80, 80, 80];
+  const samples = xs.map((x, i) => s(i * 200, '1', `translateX(${x}px)`));
+  assert.equal(summarizeLoad(samples, 200)[0].trigger, 'load');
+});

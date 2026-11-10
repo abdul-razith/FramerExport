@@ -56,3 +56,14 @@ test('the compare script is valid JavaScript', async () => {
   await fs.writeFile(file, COMPARE_MJS);
   execFileSync(process.execPath, ['--check', file]);
 });
+
+test('compare.mjs reads the route even after Git Bash rewrote it into a Windows path', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const file = path.join(await tmpDir(), 'compare.mjs');
+  await fs.writeFile(file, COMPARE_MJS);
+  const run = (arg: string) =>
+    spawnSync(process.execPath, [file, arg, '--base', 'http://127.0.0.1:9'], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.match(run('C:/Program Files/Git/about').stderr, /http:\/\/127\.0\.0\.1:9\/about/);
+  assert.match(run('about').stderr, /http:\/\/127\.0\.0\.1:9\/about/);
+  assert.match(run('--bogus').stderr, /Unknown argument/);
+});

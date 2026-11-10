@@ -43,7 +43,13 @@ after(async () => {
 test('ai-guide writes the guide next to an unchanged export', { timeout: 600000 }, async () => {
   const dir = await exportCopy(server.url + '/');
   const before = await hashTree(dir);
-  const { ok } = await runAiGuide(dir, server.url + '/', () => {});
+  process.env.FRAMER_AIGUIDE_TEST_FAIL = 'record:/about';
+  let ok = false;
+  try {
+    ({ ok } = await runAiGuide(dir, server.url + '/', () => {}));
+  } finally {
+    delete process.env.FRAMER_AIGUIDE_TEST_FAIL;
+  }
   assert.equal(ok, true, existsSync(path.join(dir, 'ai-guide/ERROR.md')) ? await fs.readFile(path.join(dir, 'ai-guide/ERROR.md'), 'utf8') : '');
   for (const f of [
     'AGENTS.md', 'CLAUDE.md', 'ai-guide/README.md', 'ai-guide/site.md', 'ai-guide/files.md', 'ai-guide/content.md',
@@ -62,6 +68,8 @@ test('ai-guide writes the guide next to an unchanged export', { timeout: 600000 
   const plan = await fs.readFile(path.join(dir, 'ai-guide/plan.md'), 'utf8');
   assert.match(plan, /### Task 2: Home page \(\/\)/);
   assert.match(plan, /### Task \d+: Blog collection \(\/blog\)/);
+  // One page's recording failing does not fail the guide; that page says so.
+  assert.match(await fs.readFile(path.join(dir, 'ai-guide/pages/about/motion.md'), 'utf8'), /recording failed/);
   const motion = await fs.readFile(path.join(dir, 'ai-guide/pages/index/motion.md'), 'utf8');
   assert.match(motion, /^## Custom behaviour$/m, motion);
   assert.match(motion, /text changes/, motion);
@@ -69,6 +77,10 @@ test('ai-guide writes the guide next to an unchanged export', { timeout: 600000 
 
 test('a failure writes ai-guide/ERROR.md and leaves the export usable', async () => {
   const dir = await exportCopy(server.url + '/');
+  // A guide from an earlier run survives a failed re-run.
+  await fs.mkdir(path.join(dir, 'ai-guide/pages/index'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'ai-guide/site.md'), 'previous guide');
+  await fs.writeFile(path.join(dir, 'ai-guide/pages/index/outline.md'), 'previous outline');
   process.env.FRAMER_AIGUIDE_TEST_FAIL = '1';
   try {
     assert.equal((await runAiGuide(dir, server.url + '/', () => {})).ok, false);
@@ -77,4 +89,6 @@ test('a failure writes ai-guide/ERROR.md and leaves the export usable', async ()
   }
   assert.match(await fs.readFile(path.join(dir, 'ai-guide/ERROR.md'), 'utf8'), /FRAMER_AIGUIDE_TEST_FAIL/);
   assert.ok(existsSync(path.join(dir, 'index.html')));
+  assert.equal(await fs.readFile(path.join(dir, 'ai-guide/site.md'), 'utf8'), 'previous guide');
+  assert.equal(await fs.readFile(path.join(dir, 'ai-guide/pages/index/outline.md'), 'utf8'), 'previous outline');
 });

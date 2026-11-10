@@ -70,6 +70,10 @@ export function summarizeLoad(samples: TimelineSample[], frameEveryMs: number, f
     const firstChange = series.findIndex((s) => !same(s.v, first.v));
     const start = firstChange > 0 ? series[firstChange - 1].t : first.t;
     const stillMoving = series.slice(-3).some((s) => !same(s.v, last.v));
+    if (isPausingLoop(series.map((s) => s.v))) {
+      entries.push({ key, label, section: '', trigger: 'loop', note: `moves in repeated bursts with pauses (carousel, blinking, ticker): ${describe(first.v, last.v) || 'transform'} …`, frames: frames(first.t, last.t) });
+      continue;
+    }
     if (stillMoving) {
       // A loop moves the whole time; an entrance that began late is merely unfinished.
       const active = series.slice(Math.max(1, firstChange));
@@ -97,6 +101,24 @@ export function summarizeLoad(samples: TimelineSample[], frameEveryMs: number, f
     });
   }
   return mergeRepeats(entries);
+}
+
+/**
+ * Bursts of movement separated by still stretches. Three or more bursts, or two where the element
+ * comes back to a state it had before, repeat (carousel, blinking caret); one or two one-way
+ * steps are an entrance (a loader that moves, pauses and moves on).
+ */
+function isPausingLoop(values: Value[]): boolean {
+  const bursts: number[] = []; // index where each burst starts
+  for (let i = 1; i < values.length; i++) {
+    const moving = !same(values[i], values[i - 1]);
+    const wasMoving = i > 1 && !same(values[i - 1], values[i - 2]);
+    if (moving && !wasMoving) bursts.push(i);
+  }
+  if (bursts.length >= 3) return true;
+  if (bursts.length < 2) return false;
+  const before = values.slice(0, bursts[1]);
+  return values.slice(bursts[1]).some((v) => before.some((b) => same(v, b)));
 }
 
 /** Below this, an element still changing at the end of the recording is an unfinished entrance. */

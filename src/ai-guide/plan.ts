@@ -62,16 +62,17 @@ function setupTask(site: GuideSite): string[] {
     .map(([k, v]) => `${k}@${v}`)
     .join(' ');
   const routes = site.pages.filter((p) => !p.collection).map((p) => p.route);
+  const detailStubs = site.collections.map((c) => `\`app${c.indexRoute}/[slug]/page.tsx\``);
   return [
-    '**Files:** create `nextjs-app/` (package.json, next.config.ts, tsconfig.json, postcss.config.mjs, eslint.config.mjs, .prettierrc, app/layout.tsx, app/globals.css, app/fonts.css, public/images/*, a stub `page.tsx` per route).',
+    '**Files:** create `nextjs-app/` (package.json, .gitignore, next.config.ts, tsconfig.json, postcss.config.mjs, eslint.config.mjs, .prettierrc, app/layout.tsx, app/globals.css, app/fonts.css, public/images/*, a stub `page.tsx` per route).',
     '**Read first:** `ai-guide/site.md`, `ai-guide/tokens.md`, `ai-guide/files.md`.',
     '',
-    step(1, 'Create the project', `in \`nextjs-app/\` with App Router, TypeScript, \`src\`-less layout and the \`@/*\` import alias. Install exactly: \`npm install ${deps}\` and \`npm install -D ${devDeps}\`.`),
-    step(2, 'Configure', 'MDX in `next.config.ts` (`pageExtensions` includes `mdx`), Tailwind 4 via `@tailwindcss/postcss`, ESLint flat config with `eslint-config-next`, Prettier with `prettier-plugin-tailwindcss`. Scripts: dev, build, start, lint, format, and `"compare": "node ../ai-guide/scripts/compare.mjs"`.'),
+    step(1, 'Create the project', `in \`nextjs-app/\` with App Router, TypeScript, \`src\`-less layout and the \`@/*\` import alias, and a \`nextjs-app/.gitignore\` listing node_modules, .next, next-env.d.ts. Install exactly: \`npm install ${deps}\` and \`npm install -D ${devDeps}\`.`),
+    step(2, 'Configure', 'MDX in `next.config.ts` (`pageExtensions` includes `mdx`), Tailwind 4 via `@tailwindcss/postcss`, ESLint flat config with `eslint-config-next`, Prettier with `prettier-plugin-tailwindcss`. Scripts: `"dev": "next dev"`, `"build": "next build"`, `"start": "next start"`, `"lint": "eslint ."`, `"format": "prettier --write ."`, `"compare": "node ../ai-guide/scripts/compare.mjs"`.'),
     step(3, 'Tokens', 'every colour, font, radius and shadow from `ai-guide/tokens.md` into `@theme` in `app/globals.css`; custom variants `tablet` = `@media (max-width: 1199px)` and `mobile` = `@media (max-width: 809px)`; base `box-sizing: border-box`.'),
     step(4, 'Fonts', 'copy the font files listed in `ai-guide/files.md` to `public/fonts/` and declare them with `@font-face` in `app/fonts.css`.'),
     step(5, 'Images', 'copy every image in `ai-guide/files.md` from its export path to its suggested `public/images/...` name.'),
-    step(6, 'Route stubs', `a \`page.tsx\` for each route that renders its title and "Not built yet": ${routes.join(', ')}; plus \`app/${site.collections.map((c) => c.indexRoute.replace(/^\//, '')).join('|') || '<collection>'}/[slug]/page.tsx\` stubs for CMS detail pages. Metadata (title, description) from \`ai-guide/site.md\`.`),
+    step(6, 'Route stubs', `a \`page.tsx\` for each route that renders its title and "Not built yet": ${routes.join(', ')}${detailStubs.length ? `; plus ${detailStubs.join(', ')} for CMS detail pages` : ''}. Metadata (title, description) from \`ai-guide/site.md\`.`),
     verifyStep(7, ['/']),
     commitStep(8, 'chore: create the Next.js project'),
   ];

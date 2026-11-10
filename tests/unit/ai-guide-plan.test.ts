@@ -79,3 +79,22 @@ test('the checklist covers looks, mobile, links, animation and code', () => {
 test('setup installs what the compare script needs', () => {
   assert.match(renderPlan(fixtureSite()), /npm install -D [^`]*puppeteer@[^`]* pngjs@[^`]* pixelmatch@/);
 });
+
+test('setup ignores build output in git and defines the lint script', () => {
+  const md = renderPlan(fixtureSite());
+  assert.match(md, /nextjs-app\/\.gitignore/);
+  assert.match(md, /node_modules, \.next/);
+  assert.match(md, /"lint": "eslint \."/);
+});
+
+test('route stubs name one real folder per collection, none when there is no collection', () => {
+  const site = fixtureSite();
+  const two = { ...site, collections: [...site.collections, { ...site.collections[0], name: 'work', indexRoute: '/work', itemPattern: '/work/[slug]' }] };
+  const md = renderPlan(two);
+  assert.match(md, /`app\/blog\/\[slug\]\/page\.tsx`, `app\/work\/\[slug\]\/page\.tsx`/);
+  assert.doesNotMatch(renderPlan({ ...site, collections: [] }), /<collection>|\[slug\]\/page\.tsx` stubs/);
+});
+
+test('the agent rules allow the compare output folder', () => {
+  assert.match(AGENTS_MD, /ai-guide\/compare\//);
+});

@@ -43,6 +43,7 @@ clean, editable Next.js project. You build that project in \`nextjs-app/\`.
    <route>\` was run for the task's routes and you list the visible differences that remain;
    only the files the task names were changed.
 9. **Never.** Add a dependency the task does not name without saying why; edit the export or
-   \`ai-guide/\` (except ticking boxes in \`plan.md\`); invent content; leave placeholder text or
+   \`ai-guide/\` (except ticking boxes in \`plan.md\`, and the images \`npm run compare\` writes to
+   \`ai-guide/compare/\`); invent content; leave placeholder text or
    TODOs.
 `;
