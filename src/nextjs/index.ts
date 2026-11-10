@@ -43,12 +43,16 @@ const PLACEHOLDER = `export default function Page() {
 async function convert(exportDir: string, sourceUrl: string, options: NextjsOptions): Promise<ConversionReport> {
   const report = emptyReport();
   const finalDir = path.join(exportDir, 'nextjs');
-  const tmpDir = path.join(exportDir, 'nextjs.tmp');
+  let tmpDir = path.join(exportDir, 'nextjs.tmp');
   const cacheDir = path.join(exportDir, '.nextjs-cache');
   const ctx: ConversionContext = { exportDir, sourceUrl, outDir: tmpDir, cacheDir, options, report, log };
 
   try {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    // A terminal left open inside an old nextjs.tmp/ keeps it from being removed: use a new name.
+    if (!(await fs.rm(tmpDir, { recursive: true, force: true }).then(() => true, () => false))) {
+      tmpDir = path.join(exportDir, `nextjs.tmp-${Date.now()}`);
+      ctx.outDir = tmpDir;
+    }
     const { listExportPages, capturePages } = await import('./capture.js');
     const { extractStartStates } = await import('./framer/animations.js');
     const { mergeBreakpoints } = await import('./framer/breakpoints.js');
