@@ -68,3 +68,25 @@ export interface GuideSite {
   /** Export files not tied to one section: unused images, videos, CMS data chunks. */
   exportFiles: { images: GuideImage[]; videos: string[]; data: string[] };
 }
+
+/** Opacity, transform and own text of every sampled element at one moment (ms after navigation). */
+export interface TimelineSample {
+  t: number;
+  values: Record<string, { opacity: string; transform: string; text: string }>;
+}
+
+export interface MotionEntry {
+  /** Node key (same scheme as the capture's RawNode.key). */
+  key: string;
+  label: string;
+  /** Section name; empty means "find it from the key". */
+  section: string;
+  trigger: 'load' | 'in-view' | 'scroll' | 'hover' | 'loop' | 'custom';
+  from?: string;
+  to?: string;
+  startMs?: number;
+  durationMs?: number;
+  easing?: string;
+  frames?: string;
+  note?: string;
+}
