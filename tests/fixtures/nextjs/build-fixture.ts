@@ -47,6 +47,8 @@ body{font-family:"Inter Display",sans-serif;background-color:var(--token-b2);col
 .footer a{color:var(--token-b2)}
 .post-body h2{font-size:30px}
 .post-body img{width:240px;height:120px}
+.fill-row{display:flex;gap:16px}.fill{flex:1 0 0px;width:1px}
+.icon{display:inline-block;height:1em}.icon img{display:block;width:auto;height:100%}
 .click-layer{position:fixed;top:0;left:0;width:100%;height:100vh;pointer-events:none;z-index:10}
 .badge{position:absolute;right:16px;bottom:16px;padding:8px;pointer-events:auto;background-color:#ffffff;color:var(--token-a1)}
 @media (max-width:809px){.hidden-abc{display:none!important}.hero-title{font-size:48px}.cards{flex-direction:column}}
@@ -103,6 +105,8 @@ const PAGES: PageDef[] = [
 <section data-framer-name="Content" class="content"><p data-framer-name="Text">Second content block.</p></section>
 <div data-framer-name="Smooth Scroll"></div>
 <div data-framer-cursor="cursor-1" data-framer-name="Cursor Area" class="content"><p>Hover area</p></div>
+<div data-framer-name="Fill Row" class="fill-row"><p data-framer-name="Fill" class="fill">Fills the row</p><p data-framer-name="Fixed">Fixed</p></div>
+<p data-framer-name="Icon Line" class="status">I design <span class="icon">${img(v, p, 'card-1.png', '', 'Icon')}</span> products</p>
 <div data-framer-name="Click Layer" class="click-layer"><a data-framer-name="Badge" class="badge" href="${p}about">Badge</a></div>`,
   },
   {

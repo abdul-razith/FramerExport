@@ -179,9 +179,10 @@ async function convert(exportDir: string, sourceUrl: string, options: NextjsOpti
       await fs.rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
     } catch (e) {
       outputDir = path.join(exportDir, 'nextjs.new');
-      await fs.rm(outputDir, { recursive: true, force: true });
-      await fs.rename(tmpDir, outputDir);
-      const message = `The previous nextjs/ folder is in use (${(e as Error).message}); the new project was saved as nextjs.new/`;
+      await fs.rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
+      // A terminal or dev server open inside nextjs.tmp/ blocks this rename too: keep it there.
+      if (!(await fs.rename(tmpDir, outputDir).then(() => true, () => false))) outputDir = tmpDir;
+      const message = `The previous nextjs/ folder is in use (${(e as Error).message}); the new project was saved as ${path.basename(outputDir)}/`;
       report.unconverted.push({ route: '(project)', what: message, why: 'Close programs using nextjs/ (dev server, editor), then replace it with nextjs.new/' });
       warn(message);
     }

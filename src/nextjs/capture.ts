@@ -261,7 +261,6 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
   // Framer sets this variable from JavaScript to the window height; in the project it is the viewport.
   const authoredValue = (v: string): string =>
     resolveVars(v.replace(/var\(\s*--framer-viewport-height\s*(,[^)]*)?\)/g, '100vh')).replace(/\s+/g, ' ').trim();
-  const isFluid = (v: string) => !/^-?[\d.]+px$/.test(v) && v !== '0' && v !== 'initial' && v !== 'inherit' && v !== 'unset';
 
   const keys = new WeakMap<Element, string>();
   const isAuto = (el: HTMLElement, prop: 'width' | 'height'): boolean => {
@@ -323,10 +322,18 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
       node.styles[p] = v;
     }
     const authored = el instanceof HTMLElement ? authoredSizes(el) : {};
+    // Images, video and svg get width/height attributes in the project (next/image), so their
+    // authored auto size must stay explicit.
+    const replaced = /^(img|video|svg|canvas|iframe|picture)$/.test(tag);
     for (const p of SIZE_PROPS) {
       const a = authored[p] ? authoredValue(authored[p]) : '';
-      if (!a || !isFluid(a)) continue;
-      if (a === 'auto' || (a === 'none' && p.startsWith('max'))) delete node.styles[p];
+      if (!a || ['initial', 'inherit', 'unset'].includes(a)) continue;
+      // Framer's "fill" is width: 1px plus flex-grow; the authored value, not the computed
+      // pixels of this window width, reproduces it at every width.
+      if (a === 'auto') {
+        if (replaced && (p === 'width' || p === 'height')) node.styles[p] = 'auto';
+        else delete node.styles[p];
+      } else if (a === 'none' && p.startsWith('max')) delete node.styles[p];
       else if (!/^[a-z-]+$/.test(a) || ['min-content', 'max-content', 'fit-content'].includes(a)) node.styles[p] = a;
     }
     if (el instanceof HTMLElement && !(el instanceof HTMLImageElement)) {

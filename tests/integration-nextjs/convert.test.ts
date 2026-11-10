@@ -71,7 +71,8 @@ test(
           .map((f) => fs.readFile(path.join(next, f), 'utf8'))
       )
     ).join('\n');
-    for (const cls of ['pointer-events-none', 'pointer-events-auto', 'w-full', 'h-screen']) {
+    // Framer's fill (width: 1px + grow) and inline icons (width: auto under next/image) are kept.
+    for (const cls of ['pointer-events-none', 'pointer-events-auto', 'w-full', 'h-screen', 'w-[1px]', 'w-auto']) {
       assert.ok(source.includes(cls), `${cls} in the generated components`);
     }
     // Review Focus 3: JSX-significant characters survive into the built HTML.
