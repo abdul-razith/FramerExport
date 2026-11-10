@@ -75,3 +75,7 @@ test('site.md ends with the task list', () => {
 test('the checklist covers looks, mobile, links, animation and code', () => {
   for (const s of ['1440', '390', 'links', 'animation', 'raw hex']) assert.ok(CHECKLIST_MD.includes(s), s);
 });
+
+test('setup installs what the compare script needs', () => {
+  assert.match(renderPlan(fixtureSite()), /npm install -D [^`]*puppeteer@[^`]* pngjs@[^`]* pixelmatch@/);
+});

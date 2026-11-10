@@ -39,6 +39,9 @@ export function planTasks(site: GuideSite): PlanTask[] {
   return tasks.map((t, i) => ({ ...t, number: i }));
 }
 
+/** What ai-guide/scripts/compare.mjs loads from the project (same versions as framer-export uses). */
+const COMPARE_DEPS = { puppeteer: '^24.43.1', pngjs: '^7.0.0', pixelmatch: '^8.0.0' };
+
 const step = (n: number, title: string, body: string) => `- [ ] **Step ${n}: ${title}** — ${body}`;
 
 function verifyStep(n: number, routes: string[]): string {
@@ -55,7 +58,9 @@ const commitStep = (n: number, message: string) => step(n, 'Commit', `\`git add 
 
 function setupTask(site: GuideSite): string[] {
   const deps = Object.entries(NEXT_PROJECT_VERSIONS.dependencies).map(([k, v]) => `${k}@${v}`).join(' ');
-  const devDeps = Object.entries(NEXT_PROJECT_VERSIONS.devDependencies).map(([k, v]) => `${k}@${v}`).join(' ');
+  const devDeps = [...Object.entries(NEXT_PROJECT_VERSIONS.devDependencies), ...Object.entries(COMPARE_DEPS)]
+    .map(([k, v]) => `${k}@${v}`)
+    .join(' ');
   const routes = site.pages.filter((p) => !p.collection).map((p) => p.route);
   return [
     '**Files:** create `nextjs-app/` (package.json, next.config.ts, tsconfig.json, postcss.config.mjs, eslint.config.mjs, .prettierrc, app/layout.tsx, app/globals.css, app/fonts.css, public/images/*, a stub `page.tsx` per route).',
