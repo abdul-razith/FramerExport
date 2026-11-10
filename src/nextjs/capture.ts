@@ -47,12 +47,13 @@ export const STYLE_PROPS: readonly string[] = [
   'box-shadow', 'opacity', 'transform', 'overflow-x', 'overflow-y',
   'object-fit', 'object-position', 'aspect-ratio',
   'filter', 'backdrop-filter', 'mix-blend-mode', 'clip-path', 'mask-image', 'mask-size', 'mask-position', 'mask-repeat', 'mask-mode',
+  'pointer-events',
 ];
 
 /** Inherited properties are dropped when equal to the parent's value instead of the tag default. */
 const INHERITED = [
   'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing',
-  'text-align', 'text-transform', 'white-space', 'color',
+  'text-align', 'text-transform', 'white-space', 'color', 'pointer-events',
 ];
 
 const VIEWPORT_HEIGHT = 900;
@@ -195,6 +196,73 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
     return r;
   };
 
+  // Framer authors most sizes as 100%, 1fr, 100vh or calc(); the computed style only has the
+  // pixels for this one window width. Read the authored value the cascade picks for each element.
+  const SIZE_PROPS = ['width', 'height', 'min-width', 'max-width', 'min-height', 'max-height', 'top', 'right', 'bottom', 'left'];
+  type SizeRule = { selectors: string[]; specificity: number[]; order: number; decls: [string, string, boolean][] };
+  const sizeRules: SizeRule[] = [];
+  const specificityOf = (sel: string): number => {
+    const noNot = sel.replace(/:(not|is|where|has)\(/g, ' (');
+    const ids = (noNot.match(/#[\w-]+/g) ?? []).length;
+    const classes = (noNot.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length;
+    const tags = (noNot.replace(/\[[^\]]*\]|\([^)]*\)/g, '').match(/(^|[\s>+~])[a-z][\w-]*|::[\w-]+/gi) ?? []).length;
+    return ids * 1e6 + classes * 1e3 + tags;
+  };
+  const collectRules = (list: CSSRuleList, active: boolean) => {
+    for (const r of Array.from(list)) {
+      if (r instanceof CSSMediaRule) collectRules(r.cssRules, active && matchMedia(r.conditionText).matches);
+      else if (r instanceof CSSStyleRule) {
+        if (!active || r.selectorText.includes(':hover')) continue;
+        const decls: [string, string, boolean][] = [];
+        for (const p of SIZE_PROPS) {
+          const v = r.style.getPropertyValue(p);
+          if (v) decls.push([p, v.trim(), r.style.getPropertyPriority(p) === 'important']);
+        }
+        if (decls.length) {
+          const selectors = r.selectorText.split(',').map((x) => x.trim());
+          sizeRules.push({ selectors, specificity: selectors.map(specificityOf), order: sizeRules.length, decls });
+        }
+      } else if ((r as CSSGroupingRule).cssRules) collectRules((r as CSSGroupingRule).cssRules, active);
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      collectRules(sheet.cssRules, !sheet.media.mediaText || matchMedia(sheet.media.mediaText).matches);
+    } catch {
+      // cross-origin sheet: computed values are used for its elements
+    }
+  }
+  const authoredSizes = (el: HTMLElement): Record<string, string> => {
+    const best: Record<string, [number, number, number, string]> = {};
+    for (const r of sizeRules) {
+      let spec = -1;
+      r.selectors.forEach((sel, i) => {
+        try {
+          if (r.specificity[i] > spec && el.matches(sel)) spec = r.specificity[i];
+        } catch {
+          // selector this browser cannot match
+        }
+      });
+      if (spec < 0) continue;
+      for (const [p, v, imp] of r.decls) {
+        const cur = best[p];
+        const rank: [number, number, number, string] = [imp ? 1 : 0, spec, r.order, v];
+        if (!cur || rank[0] > cur[0] || (rank[0] === cur[0] && (rank[1] > cur[1] || (rank[1] === cur[1] && rank[2] > cur[2])))) best[p] = rank;
+      }
+    }
+    const out: Record<string, string> = {};
+    for (const p of SIZE_PROPS) {
+      const inline = el.style.getPropertyValue(p);
+      if (inline && !(best[p]?.[0] === 1 && el.style.getPropertyPriority(p) !== 'important')) out[p] = inline.trim();
+      else if (best[p]) out[p] = best[p][3];
+    }
+    return out;
+  };
+  // Framer sets this variable from JavaScript to the window height; in the project it is the viewport.
+  const authoredValue = (v: string): string =>
+    resolveVars(v.replace(/var\(\s*--framer-viewport-height\s*(,[^)]*)?\)/g, '100vh')).replace(/\s+/g, ' ').trim();
+  const isFluid = (v: string) => !/^-?[\d.]+px$/.test(v) && v !== '0' && v !== 'initial' && v !== 'inherit' && v !== 'unset';
+
   const keys = new WeakMap<Element, string>();
   const isAuto = (el: HTMLElement, prop: 'width' | 'height'): boolean => {
     const before = prop === 'width' ? el.offsetWidth : el.offsetHeight;
@@ -254,16 +322,18 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
       if (p === 'display' && v === 'block' && /flex|grid/.test(parentDisplay) && defs.display.startsWith('inline')) continue;
       node.styles[p] = v;
     }
-    // Elements with no in-flow content cannot size themselves: their explicit size is authored.
-    const hasFlowContent =
-      Array.from(el.childNodes).some((c) => c.nodeType === Node.TEXT_NODE && (c.textContent ?? '').trim()) ||
-      Array.from(el.children).some((c) => {
-        const s = getComputedStyle(c);
-        return s.display !== 'none' && s.position !== 'absolute' && s.position !== 'fixed';
-      });
-    if (el instanceof HTMLElement && !(el instanceof HTMLImageElement) && hasFlowContent) {
-      if (node.styles.width && isAuto(el, 'width')) delete node.styles.width;
-      if (node.styles.height && isAuto(el, 'height')) delete node.styles.height;
+    const authored = el instanceof HTMLElement ? authoredSizes(el) : {};
+    for (const p of SIZE_PROPS) {
+      const a = authored[p] ? authoredValue(authored[p]) : '';
+      if (!a || !isFluid(a)) continue;
+      if (a === 'auto' || (a === 'none' && p.startsWith('max'))) delete node.styles[p];
+      else if (!/^[a-z-]+$/.test(a) || ['min-content', 'max-content', 'fit-content'].includes(a)) node.styles[p] = a;
+    }
+    if (el instanceof HTMLElement && !(el instanceof HTMLImageElement)) {
+      // A pixel size no rule authored is the browser's auto size: keep it out of the code.
+      for (const p of ['width', 'height'] as const) {
+        if (node.styles[p]?.endsWith('px') && !authored[p] && isAuto(el, p)) delete node.styles[p];
+      }
     }
     const after = getComputedStyle(el, '::after');
     if (after.content && after.content !== 'none' && after.content !== 'normal') {

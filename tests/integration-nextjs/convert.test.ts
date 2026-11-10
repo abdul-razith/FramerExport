@@ -63,6 +63,17 @@ test(
       assert.equal(scores.length, 3, `${route} scored at 3 widths`);
       for (const s of scores) assert.ok(s.score >= 0.97, `${route} @${s.width}px scored ${s.score.toFixed(4)}`);
     }
+    // A full-screen click-through layer keeps its fluid size and lets clicks reach the page.
+    const source = (
+      await Promise.all(
+        (await fs.readdir(next, { recursive: true }))
+          .filter((f) => /^(app|components)[\\/].*\.tsx$/.test(f))
+          .map((f) => fs.readFile(path.join(next, f), 'utf8'))
+      )
+    ).join('\n');
+    for (const cls of ['pointer-events-none', 'pointer-events-auto', 'w-full', 'h-screen']) {
+      assert.ok(source.includes(cls), `${cls} in the generated components`);
+    }
     // Review Focus 3: JSX-significant characters survive into the built HTML.
     const html = await fs.readFile(path.join(next, '.next', 'server', 'app', 'index.html'), 'utf8');
     assert.ok(html.includes('Build {curly} &lt;tag&gt;'), 'braces and angle brackets rendered as text');

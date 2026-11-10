@@ -165,3 +165,22 @@ test('Framer masks keep size, position and repeat', () => {
     'mask-repeat': 'no-repeat',
   });
 });
+
+test('fluid Framer sizes map to fluid utilities', () => {
+  const cls = (base: Style) => toTailwind({ base }, undefined, NO_TOKENS).classes;
+  assert.deepEqual(cls({ width: '100%', height: '100vh' }), ['w-full', 'h-screen']);
+  assert.deepEqual(cls({ width: '100vw', height: 'min-content' }), ['w-screen', 'h-min']);
+  assert.deepEqual(cls({ height: 'max-content', 'max-width': '1800px' }), ['h-max', 'max-w-[1800px]']);
+  assert.deepEqual(cls({ height: 'calc(min(100vh, 100%) * 1)' }), ['h-[calc(min(100vh,_100%)_*_1)]']);
+});
+
+test('calc and viewport insets are kept, not dropped', () => {
+  const r = toTailwind({ base: { position: 'absolute', top: 'calc(49.875% - 50px)', left: '-0.166667%' } }, undefined, NO_TOKENS);
+  assert.deepEqual(r.classes, ['absolute', 'top-[calc(49.875%_-_50px)]', 'left-[-0.166667%]']);
+  assert.deepEqual(r.leftover, {});
+});
+
+test('pointer-events none lets clicks through overlays', () => {
+  const r = toTailwind({ base: { 'pointer-events': 'none' }, mobile: { 'pointer-events': 'auto' } }, undefined, NO_TOKENS);
+  assert.deepEqual(r.classes, ['pointer-events-none', 'mobile:pointer-events-auto']);
+});

@@ -53,7 +53,11 @@ const arb = (v: string) => `[${v.trim().replace(/\s+/g, '_')}]`;
 function spacing(v: string): { neg: boolean; val: string } | undefined {
   if (v === 'initial') return { neg: false, val: '0' };
   const n = num(v);
-  if (n === undefined) return v.endsWith('%') ? { neg: false, val: v === '100%' ? 'full' : arb(v) } : undefined;
+  if (n === undefined) {
+    if (v === '100%') return { neg: false, val: 'full' };
+    // %, vh, calc(), min()… stay as arbitrary values; only keywords are not lengths.
+    return /^[a-z-]+$/.test(v) ? undefined : { neg: false, val: arb(v) };
+  }
   const abs = Math.abs(n);
   const val = abs === 0 ? '0' : abs % 4 === 0 && abs / 4 <= 96 ? String(abs / 4) : arb(`${abs}px`);
   return { neg: n < 0, val };
@@ -73,13 +77,18 @@ function sizeClass(prefix: string, v: string): string | undefined {
   }
   if (v === '100%') return `${prefix}-full`;
   if (v === 'fit-content') return `${prefix}-fit`;
+  if (v === 'min-content') return `${prefix}-min`;
+  if (v === 'max-content') return `${prefix}-max`;
+  if (v === '100vw' && prefix.endsWith('w')) return `${prefix}-screen`;
+  if (v === '100vh' && prefix.endsWith('h')) return `${prefix}-screen`;
   const n = num(v);
   if (n !== undefined) {
     if (n === 0) return `${prefix}-0`;
     if (n > 0 && n % 4 === 0 && n / 4 <= 96) return `${prefix}-${n / 4}`;
     return `${prefix}-${arb(v)}`;
   }
-  return /^[\d.]+(%|vw|vh|rem|em)$/.test(v) ? `${prefix}-${arb(v)}` : undefined;
+  if (/^[\d.]+(%|vw|vh|svh|dvh|lvh|rem|em)$/.test(v) || /^(calc|min|max|clamp)\(/.test(v)) return `${prefix}-${arb(v)}`;
+  return undefined;
 }
 
 function colorClass(prefix: string, v: string, tokens: ThemeTokens): string | undefined | null {
@@ -157,6 +166,8 @@ function mapStyle(style: Style, ctx: Ctx): void {
     const v = take(side);
     if (v) push(spaceClass(side, v === 'initial' ? 'auto' : v));
   }
+  const pe = take('pointer-events');
+  if (pe === 'none' || pe === 'auto') push(`pointer-events-${pe}`);
   const z = take('z-index');
   if (z && z !== 'auto') push(['0', '10', '20', '30', '40', '50'].includes(z) ? `z-${z}` : `z-[${z}]`);
   const dir = take('flex-direction');
