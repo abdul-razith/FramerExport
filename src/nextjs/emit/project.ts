@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { format } from 'prettier';
 import type { ComponentPlan, PropDef, UiComponent } from '../components.js';
@@ -787,4 +787,37 @@ export async function writeProject(
     if (existsSync(from)) await fs.copyFile(from, path.join(fontsDir, face.file));
   }
   await copyImages(dir, model, warn);
+  await copySiteIcons(model.exportDir, dir);
+}
+
+/** The site's favicon and Apple touch icon, from the exported home page's <link> tags. */
+export function findSiteIcons(exportDir: string): { icon?: string; apple?: string } {
+  let html = '';
+  try {
+    html = readFileSync(path.join(exportDir, 'index.html'), 'utf8');
+  } catch {
+    return {};
+  }
+  const href = (rel: string) => {
+    for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
+      const r = tag.match(/\brel="([^"]*)"/i)?.[1].toLowerCase().split(/\s+/) ?? [];
+      const h = tag.match(/\bhref="([^"]*)"/i)?.[1];
+      if (h && r.includes(rel) && !/^(https?:|data:|\/\/)/i.test(h)) {
+        const file = path.join(exportDir, h.split(/[?#]/)[0]);
+        if (existsSync(file)) return file;
+      }
+    }
+    return undefined;
+  };
+  return { icon: href('icon'), apple: href('apple-touch-icon') };
+}
+
+/** Next.js serves app/icon.* and app/apple-icon.* and adds the <link> tags itself. */
+async function copySiteIcons(exportDir: string, dir: string): Promise<void> {
+  const { icon, apple } = findSiteIcons(exportDir);
+  const ok = (f: string) => /\.(ico|png|jpe?g|svg|gif)$/i.test(f);
+  if (icon && ok(icon)) await fs.copyFile(icon, path.join(dir, 'app', `icon${path.extname(icon).toLowerCase()}`));
+  if (apple && ok(apple) && !/\.(ico|svg)$/i.test(apple)) {
+    await fs.copyFile(apple, path.join(dir, 'app', `apple-icon${path.extname(apple).toLowerCase()}`));
+  }
 }

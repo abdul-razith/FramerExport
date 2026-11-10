@@ -186,6 +186,8 @@ async function convert(exportDir: string, sourceUrl: string, options: NextjsOpti
       warn(message);
     }
     await fs.writeFile(path.join(outputDir, 'CONVERSION-REPORT.md'), renderReport(report));
+    // An error report from an earlier failed run no longer describes the current output.
+    await fs.rm(path.join(exportDir, 'nextjs-error-report.md'), { force: true });
     await fs.mkdir(cacheDir, { recursive: true });
     await fs.writeFile(path.join(cacheDir, 'report.json'), JSON.stringify(report, null, 2));
     return report;

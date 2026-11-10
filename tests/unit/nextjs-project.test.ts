@@ -240,3 +240,19 @@ test('Framer variants become a variants map, and listings store each entry varia
   assert.match(await read('app/blog/page.tsx'), /variant: e\.metadata\.variant/);
   assert.match(await read('lib/blog.ts'), /variant: string;/);
 });
+
+test('the site favicon and Apple touch icon are found in the export', async () => {
+  const { findSiteIcons } = await import('../../src/nextjs/emit/project.js');
+  const exp = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-icons-'));
+  await fs.mkdir(path.join(exp, 'assets', 'images'), { recursive: true });
+  await fs.writeFile(path.join(exp, 'assets', 'images', 'fav.png'), 'png');
+  await fs.writeFile(path.join(exp, 'assets', 'images', 'touch.jpg'), 'jpg');
+  await fs.writeFile(
+    path.join(exp, 'index.html'),
+    '<head><link href="https://cdn.test/x.png" rel="icon"><link href="assets/images/fav.png" rel="icon" media="(prefers-color-scheme: light)"><link rel="apple-touch-icon" href="assets/images/touch.jpg"></head>'
+  );
+  const icons = findSiteIcons(exp);
+  assert.equal(icons.icon, path.join(exp, 'assets', 'images', 'fav.png'));
+  assert.equal(icons.apple, path.join(exp, 'assets', 'images', 'touch.jpg'));
+  assert.deepEqual(findSiteIcons(path.join(exp, 'missing')), {});
+});

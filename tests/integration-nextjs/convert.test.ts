@@ -72,7 +72,9 @@ test(
 
 test('a page that fails to capture gets a placeholder and the rest still converts', async () => {
   const dir = await exportCopy(failingServer.url + '/');
+  await fs.writeFile(path.join(dir, 'nextjs-error-report.md'), 'from an earlier failed run');
   assert.equal(await runToNextjs(dir, NO_VERIFY), 0);
+  assert.equal(existsSync(path.join(dir, 'nextjs-error-report.md')), false, 'stale error report removed');
   const placeholder = await fs.readFile(path.join(dir, 'nextjs', 'app', 'about', 'page.tsx'), 'utf8');
   assert.match(placeholder, /could not be converted/);
   assert.ok(existsSync(path.join(dir, 'nextjs', 'app', 'page.tsx')));
