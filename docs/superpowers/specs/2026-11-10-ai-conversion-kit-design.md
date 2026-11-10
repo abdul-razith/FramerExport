@@ -1,134 +1,130 @@
-# AI conversion kit: Framer export → clean Next.js with an AI agent
+# AI guide: Framer export → clean Next.js, built by an AI agent
 
 Date: 2026-11-10
 Status: design approved in conversation; awaiting spec review
 Branch: `feature/framer-nextjs`
-Related: `2026-11-09-framer-to-nextjs-design.md` (the rule-based converter, kept as-is)
+Related: `2026-11-09-framer-to-nextjs-design.md` (the rule-based converter, kept in the repo but not part of this flow)
 
 ## 1. Why
 
 The rule-based converter (`to-nextjs`) copies the rendered Framer DOM element by element.
-It reaches high visual similarity on simple pages but cannot produce code a person wants
-to edit: Framer's wrapper nesting, pixel insets and generic names (`Section2`,
-`HeroAboutGroup` ×27) come along, every fix exposes a new layout case, and Framer's
-JavaScript-driven animations (loaders, timed entrances, typing text) are invisible to it.
+It reaches high visual similarity on simple pages but cannot produce code a person wants to
+edit: Framer's wrapper nesting, pixel insets and generic names (`Section2`, `HeroAboutGroup` ×27)
+come along, every fix exposes a new layout case, and Framer's JavaScript-driven animations
+(loaders, timed entrances, typing text) are invisible to it.
 
-The user's goal is a **clean, editable Next.js project** they will later change (content,
-colour theme, design). Clean code matters more than pixel identity.
+The user's goal is a **clean, editable Next.js project** they will later change (content, colour
+theme, design). Clean code matters more than pixel identity.
 
-New approach: a **prepare step** turns a Framer export into a **kit** — reference material plus
-a clean starter project — and an AI coding agent (Claude Code or agy) writes the React
-components, one small task at a time, run and checked by the user.
+## 2. The flow
 
-## 2. Decisions (from the brainstorming)
+1. The user runs the existing exporter with a new flag: `framer-export <url> --ai-guide`.
+2. The exporter produces the HTML export exactly as today (pages, assets, fonts, CMS data),
+   **plus** an AI guide: documents that explain the site and a step-by-step task list for turning
+   the HTML export into a Next.js project.
+3. The user opens the export folder in Claude Code or agy.
+4. The AI executes the tasks one by one — task 00 creates the Next.js project, later tasks build
+   the shell, each page's sections and the CMS pages. The user checks and commits after each task.
+
+For an export that already exists (e.g. `nudge-folio/`): `framer-export ai-guide <export-dir>`
+adds the guide without exporting again.
+
+## 3. Decisions
 
 | Question | Decision |
 | --- | --- |
-| How the AI is run | Docs + prompts; the user runs each task in Claude Code or agy and checks it. No automatic orchestration in this phase. |
-| What the AI starts from | A prepared kit: screenshots, outlines, typed content, MDX, assets, tokens, and a clean starter project. The AI writes only components. |
+| When the guide is made | Only with `--ai-guide` (or the `ai-guide` command). Exports without the flag are unchanged. |
+| How the AI is run | The user runs Claude Code or agy in the export folder and asks it to do the tasks in order; the user checks each task. No automatic orchestration. |
+| What the AI starts from | The HTML export plus the guide. The AI creates the Next.js project itself (task 00) and moves content into content files and MDX as part of its tasks. The tool describes the site; it does not convert it. |
 | How the AI learns animations | Recorded frames of the live site (load, scroll, hover) plus a measured `motion.md`. |
-| How work is split | Shared shell first, then one task per page section; CMS list + detail pages as one task per collection; a final review task. |
-| Scope | Any Framer site (site-specific parts are generated); nudge-folio is the first test site. |
+| How work is split | Project setup, then the shared shell, then one task per page section (small adjacent sections grouped), one task per CMS collection, and a final review task. |
+| Scope | Any Framer site; nudge-folio is the first test site. Other platforms later. |
+| Rule-based converter | Stays in the repo untouched; not used or referenced by the guide. |
 
-## 3. Deliverables
-
-### 3.1 Documents (this phase) — `docs/ai-conversion/`
-
-Reusable for every Framer site.
-
-| File | Reader | Content |
-| --- | --- | --- |
-| `README.md` | user | The workflow on one page: prepare the kit, open it in Claude Code or agy, run tasks in order, check, commit, recover from a bad task. |
-| `AGENTS.md` | AI (agy, others) | Permanent rules (section 6). |
-| `CLAUDE.md` | AI (Claude Code) | Same content as `AGENTS.md` (Claude Code loads `CLAUDE.md` automatically). |
-| `kit-spec.md` | user, `prepare-ai` code | The exact kit layout and how each file is produced from the export (section 4). |
-| `tasks/00-shell.md` | AI | Task template: the site shell. |
-| `tasks/section.md` | AI | Task template: one page section. |
-| `tasks/collection.md` | AI | Task template: a CMS list page and its detail template. |
-| `tasks/review.md` | AI | Task template: final cleanup pass. |
-| `checklist.md` | user | What to check after each task. |
-
-### 3.2 Tool change (next phase, own implementation plan)
-
-New CLI command `framer-export prepare-ai <export-dir>` that builds the kit (section 4).
-The existing `to-nextjs` command is unchanged and stays available.
-
-Out of scope: automatically driving agy/Claude through the tasks; platforms other than Framer.
-
-## 4. The kit
-
-`prepare-ai` writes `<export-dir>/site/`, the folder the user opens in the agent:
+## 4. What the export contains with `--ai-guide`
 
 ```
-site/
-  AGENTS.md  CLAUDE.md          rules (copied from docs/ai-conversion)
-  tasks/NN-<name>.md            this site's tasks, numbered, generated from the templates
-  reference/                    read-only material
-    site-map.md                 routes, nav + footer links, sections shared between pages
-    tokens.md                   colours, fonts, font sizes, radii, shadows — with token names
+<export-dir>/
+  index.html  subpages/  assets/  styles/  scripts/  data/     the HTML export, as today
+  AGENTS.md                 AI rules (agy and other agents read this)
+  CLAUDE.md                 same rules (Claude Code reads this)
+  ai-guide/
+    README.md               for the user: how to run the conversion, check, recover
+    site.md                 the site at a glance (see 4.1)
+    files.md                which export file holds what (see 4.2)
+    content.md              CMS collections and their items and fields (see 4.3)
+    tokens.md               colours, fonts, font sizes, radii, shadows with proposed token names
+    checklist.md            what the user checks after each task
+    tasks/NN-<name>.md      this site's tasks, in order (section 7)
     pages/<route-slug>/
-      desktop.png tablet.png mobile.png        full page at 1440 / 1024 / 390
-      sections/NN-<name>-{desktop,tablet,mobile}.png
-      outline.md                section list: name, size per width, text, images, links, content key
-      motion.md                 measured animations (section 5)
-      frames/                   load / scroll / hover frames
-  app/ components/ content/ lib/ public/      clean starter project
-  scripts/compare.mjs           side-by-side reference vs. result
+      outline.md            the page's sections (see 4.4)
+      motion.md             the page's measured animations (section 5)
+      desktop.png tablet.png mobile.png              full page at 1440 / 1024 / 390
+      sections/NN-<name>-{desktop,tablet,mobile}.png  each section cropped
+      frames/load/  frames/scroll/  frames/hover/      recorded frames
+    scripts/compare.mjs     reference vs. result, side by side (see 4.5)
+  nextjs-app/               created by the AI in task 00 (not by the tool)
 ```
 
-### 4.1 Starter project
+Everything in `ai-guide/` is generated from the export and the live site; the AI treats it as
+read-only reference.
 
-Reuses the parts of the current converter that are correct; emits **no** generated page
-components, CSS modules or pixel-positioned classes.
+### 4.1 `site.md`
 
-- Next.js 16 (App Router), React 19, Tailwind 4, motion, GSAP + ScrollTrigger, Lenis,
-  `@next/mdx`, ESLint flat config, Prettier. Builds as delivered.
-- `app/globals.css`: `@theme` tokens (colours, fonts, radii, shadows), `tablet`
-  (max 1199px) and `mobile` (max 809px) variants, border-box base rule.
-- Fonts from the export via `@font-face`; images in `public/images` with readable names;
-  favicon and Apple touch icon; per-page metadata.
-- `content/<page>.ts`: typed content per page (text, image paths and sizes, links), keyed by section.
-- CMS collections as MDX (`content/<collection>/<slug>.mdx`) with typed front matter and
-  `lib/<collection>.ts` loaders.
-- `app/**/page.tsx` stubs that render "Not built yet: <route>" so every route exists.
-- `package.json` scripts: `dev`, `build`, `lint`, `format`, `compare`.
+Routes with title and the export file for each; the navigation and footer links; which
+sections repeat across pages (shared header, footer, CTA); breakpoints the site uses; the
+pages that are CMS list or detail pages; fonts in use; the task list with one line per task.
 
-### 4.2 `outline.md` (one per page)
+### 4.2 `files.md`
 
-Replaces the 300–700 KB Framer HTML as the AI's structural input. One block per section, in
-reading order:
+A map of the export so the AI never has to guess: `index.html` and `subpages/*.html` (route of
+each), `assets/images` (with which page/section uses each image, its size and a suggested
+readable name), `assets/fonts` (family, weight, style for each file), `assets/videos`,
+`data/*.framercms` (which collection), `styles/` and `scripts/` (Framer runtime — **not** to be
+copied into the Next.js project).
+
+### 4.3 `content.md`
+
+Each CMS collection: name, list page route, detail route pattern, the items (slug, title, date,
+cover image, the export file of each detail page) and the fields seen on the detail page, with a
+suggested MDX front matter shape.
+
+### 4.4 `outline.md` (one per page)
+
+The structural input for the AI instead of the 300–700 KB Framer HTML. One block per section,
+in reading order:
 
 ```
 ## 02 Hero — 1440×900 (tablet 1024×780, mobile 390×640)
 screenshot: sections/02-hero-{desktop,tablet,mobile}.png
 text: "my name is" · "BEJAMAN" · "AVAILABLE FOR THOUGHTFUL PROJECTS" · "I design outstanding digital products."
 tags: "Currently at Meridian Health" · "Previously at Searchless AI" · "PRODUCT DESIGNER" · "CHICAGO, IL"
-images: /images/avatar.png (×2), /images/icon-target.svg, /images/icon-flower.svg
+images: assets/images/<file> → suggested /images/avatar.png (×2), …
 links: "Contact me" → /contact
-content key: home.hero
+animations: see motion.md #hero
+export markup: subpages/<page>.html, element data-framer-name="Hero Section"
 ```
 
-Sections come from the page structure the converter already detects (top-level sections,
-Framer layer names). Generic layer names ("Frame 12") are kept with a note so the AI renames
-the component.
+Sections come from the page structure the existing capture code detects (top-level sections,
+Framer layer names). Generic layer names ("Frame 12") are kept with a note so the AI names the
+component properly.
 
-### 4.3 `scripts/compare.mjs`
+### 4.5 `scripts/compare.mjs`
 
-`npm run compare <route>`: builds (or uses a running server), screenshots the route at 1440,
-1024 and 390, and writes `reference/compare/<route>-<width>.png` with reference and result side
-by side, plus a similarity number per width. It is a check for the AI and the user, not a
-pass/fail gate.
+`node ai-guide/scripts/compare.mjs <route>` (wired as `npm run compare` in task 00): screenshots
+the route of the running Next.js app at 1440, 1024 and 390 and writes side-by-side images with
+the reference plus a similarity number per width. A check for the AI and the user, not a pass/fail gate.
 
 ## 5. Animation recording
 
-`prepare-ai` loads each page of the live site in a headless browser and records:
+The guide step loads each page of the live site in a headless browser and records:
 
 - **Load:** a frame every 200 ms for the first 6 s (loader and entrance animations).
-- **Scroll:** a frame at each half-screen step; a 2 s recording at one mid-page position for loops (marquees, spinners).
-- **Hover:** before/after frames for elements with hover rules (buttons, links, cards).
+- **Scroll:** a frame at each half-screen step; a 2 s recording at one mid-page position for loops.
+- **Hover:** before/after frames for elements with hover rules.
 
-During the load and scroll recordings it also samples the computed `opacity` and `transform`
-of every visible element, and writes `motion.md` from the measurements:
+It also samples computed `opacity` and `transform` of visible elements during load and scroll
+and writes `motion.md` from the measurements:
 
 ```
 ## Hero tags — section 02, trigger: load
@@ -143,73 +139,92 @@ frame references; the AI writes a small component for it (e.g. `TypingText`, `Li
 
 ## 6. AI rules (`AGENTS.md` / `CLAUDE.md`)
 
-1. **Stack.** Next.js 16 App Router; server components by default, `'use client'` only where
-   there is animation or interaction. Tailwind 4 utilities with the theme tokens. motion for
-   load, hover and in-view animation; GSAP ScrollTrigger only for scroll-position-linked
-   animation; Lenis for smooth scroll.
-2. **Structure.** `components/layout` (Navbar, Footer, Loader); `components/sections/<page>`
-   (e.g. `HomeHero`); `components/ui` (Button, Tag, Card…); `components/motion` (FadeIn,
-   Reveal, TypingText…).
-3. **Clean code.** Layout with flex/grid, the spacing scale and `max-w-*` containers; absolute
+1. **Work order.** Do one task file at a time, in number order; read the files the task lists
+   before writing code; stop after the task and report.
+2. **Stack.** The Next.js project lives in `nextjs-app/`. Next.js 16 App Router, React 19,
+   TypeScript; server components by default, `'use client'` only where there is animation or
+   interaction. Tailwind 4 with the tokens from `tokens.md`. motion for load, hover and in-view
+   animation; GSAP ScrollTrigger only for scroll-position-linked animation; Lenis for smooth
+   scroll; `@next/mdx` for CMS content. Exact versions are pinned in task 00.
+3. **Structure.** `components/layout` (Navbar, Footer, Loader); `components/sections/<page>`
+   (e.g. `HomeHero`); `components/ui` (Button, Tag, Card…); `components/motion` (FadeIn, Reveal,
+   TypingText…); `content/<page>.ts`; `content/<collection>/<slug>.mdx`; `lib/`.
+4. **Clean code.** Layout with flex/grid, the spacing scale and `max-w-*` containers; absolute
    positioning only for genuinely overlapping decoration. Desktop-first with `tablet:` and
    `mobile:` variants, fluid between the reference widths. Colours only from tokens, never raw
    hex. Meaningful names. Anything used twice becomes a `components/ui` component. Files stay
    under about 200 lines.
-4. **Content.** All text, images and links come from `content/*.ts` or MDX; components receive
-   content through props. No hard-coded copy.
-5. **Animation.** Follow `motion.md`; animate only transform and opacity; respect
+5. **Content.** All text, images and links come from `content/*.ts` or MDX, copied exactly from
+   the outline/export; components receive content through props. Images are copied from
+   `assets/` to `public/images/` with the readable names from `files.md`.
+6. **Framer leftovers.** Never copy Framer runtime scripts, `framer-*` class names, generated CSS
+   or inline style blobs from the export. The export HTML is a reference for structure and text only.
+7. **Animation.** Follow `motion.md`; animate only transform and opacity; respect
    `prefers-reduced-motion`.
-6. **Done means.** `npm run build` and `npm run lint` pass; `npm run compare <route>` was run
-   and the remaining visible differences are listed in the reply; only the files named by the
-   task were changed.
-7. **Never.** Add a dependency without stating why; edit `reference/`; invent content; leave
-   placeholder text or `TODO`s.
+8. **Done means.** `npm run build` and `npm run lint` pass in `nextjs-app/`; `npm run compare
+   <route>` was run and the remaining visible differences are listed in the report; only the
+   files the task names were changed.
+9. **Never.** Add a dependency the task does not name without saying why; edit the export or
+   `ai-guide/`; invent content; leave placeholder text or `TODO`s.
 
-## 7. Task flow
+## 7. Tasks
 
-Generated per site into `site/tasks/`. For nudge-folio the expected list is:
+Generated per site into `ai-guide/tasks/` from templates kept in the repo
+(`src/ai-guide/templates/`). Each task file states: goal; files to read; files to create or
+change; shared components to reuse; done checks.
 
 | # | Task | Template |
 | --- | --- | --- |
-| 00 | Shell: tokens check, Navbar (desktop + mobile menu), Footer, Loader (with its intro), Cursor, smooth scroll, root layout | `00-shell.md` |
-| 01–05 | Home, one task per section | `section.md` |
-| 06–08 | About sections | `section.md` |
-| 09–10 | Services sections | `section.md` |
-| 11 | Contact | `section.md` |
-| 12 | Playground | `section.md` |
-| 13 | Blog list + post template (8 posts) | `collection.md` |
-| 14 | Case-study list + case-study template (4) | `collection.md` |
-| 15 | Review and cleanup | `review.md` |
+| 00 | Create `nextjs-app/`: Next.js 16 + Tailwind 4 + motion + GSAP + Lenis + MDX, ESLint, Prettier; tokens into `globals.css`; fonts; copy images; `compare` script; route stubs for every page | `setup.md` |
+| 01 | Shell: Navbar (desktop + mobile menu), Footer, Loader (with its intro), Cursor, smooth scroll, root layout | `shell.md` |
+| 02… | One task per page section (adjacent small sections grouped to about one screen), page by page | `section.md` |
+| … | One task per CMS collection: list page + detail template + all items as MDX | `collection.md` |
+| last | Review and cleanup | `review.md` |
 
-Small adjacent sections of one page may be grouped into one task so that a task covers roughly
-one screen of design. Each task prompt states: goal; reference files to read; files to create
-or change; shared components to reuse; done checks.
+Expected for nudge-folio: about 17 tasks (setup, shell, ~5 home, ~3 about, ~2 services, contact,
+playground, blog, case studies, review).
 
-User loop (in `README.md`): run one task (`Do tasks/03-home-featured-works.md`) → `npm run dev`
-and look at desktop and mobile → read the compare image → `git commit` → next task. A bad
-result is discarded (`git checkout .`) and the task re-run with a note.
+User loop (in `ai-guide/README.md`): ask the agent "Do the next task" (or name one) → `npm run
+dev` in `nextjs-app/` and look at desktop and mobile → read the compare image → `git commit` →
+next task. A bad result is discarded (`git checkout .`) and the task re-run with a note.
 
-## 8. Works for any Framer site — limits
+## 8. Tool changes
+
+- New flag `--ai-guide` on the Framer export: after a successful export, run the guide step.
+  Without the flag nothing changes.
+- New command `framer-export ai-guide <export-dir>`: the guide step on an existing export.
+- New module `src/ai-guide/` (capture of screenshots, section crops and animation recording;
+  writers for `site.md`, `files.md`, `content.md`, `tokens.md`, outlines, `motion.md`, tasks;
+  templates). It reuses the existing capture, page-structure, collection-detection and token code
+  from `src/nextjs/` but none of its JSX/Tailwind emitters.
+- A failure in the guide step never breaks the export: it writes `ai-guide/ERROR.md` and the
+  export stays usable.
+
+Out of scope: automatically driving agy/Claude through the tasks; platforms other than Framer.
+
+## 9. Works for any Framer site — limits
 
 The rules, templates, checklist and compare script are site-independent; the outline,
-screenshots, motion notes and task list are generated per site. Known limits:
+screenshots, motion notes, file map and task list are generated per site. Known limits:
 
-- **Section names** come from Framer layer names; badly named layers give generic names that the AI renames.
-- **CMS collections** are detected automatically (as in the current converter); an unusual layout may need the user to state which pages are list pages and which are detail pages.
-- **Custom behaviour** (3D, canvas, complex code components) is recorded and flagged, but rebuilt by eye and may not match exactly.
+- **Section names** come from Framer layer names; badly named layers give generic names the AI renames.
+- **CMS collections** are detected from repeated page layouts; an unusual layout may need the user to say which pages are list pages and which are detail pages.
+- **Custom behaviour** (3D, canvas, complex code components) is recorded and flagged but rebuilt by eye and may not match exactly.
 - **Password-protected pages** cannot be captured.
 
-## 9. Success criteria (nudge-folio, after the review task)
+## 10. Success criteria (nudge-folio, after the review task)
 
 - `npm run build` and `npm run lint` pass.
 - Every page looks close to the original at 1440, 1024 and 390, and stays sensible between those widths.
 - Navigation works, including the mobile menu.
 - The loader, entrances, typing text, clock and scroll effects are rebuilt.
 - All content is editable in `content/` and MDX.
-- No component file is over about 200 lines; no raw hex colours; no pixel-copied positions.
+- No component file is over about 200 lines; no raw hex colours; no pixel-copied positions; no Framer runtime or class names.
 
-## 10. Testing the tool change (next phase)
+## 11. Testing the tool change
 
-- Unit tests for outline generation, task-list generation and `motion.md` writing from sampled values.
-- Integration test: `prepare-ai` on the existing fixture export produces the kit layout of section 4, and the starter project builds.
-- Manual acceptance: run tasks 00 and 01 on nudge-folio with Claude Code and with agy.
+- Unit tests: outline, `site.md`, `files.md`, `content.md` and task-list generation from fixture
+  pages; `motion.md` from sampled values.
+- Integration test: `framer-export ai-guide` on the existing fixture export writes the layout of
+  section 4; an export without `--ai-guide` is byte-for-byte as before.
+- Manual acceptance: on nudge-folio, run tasks 00–02 with Claude Code and with agy.
