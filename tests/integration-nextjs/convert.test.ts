@@ -75,6 +75,10 @@ test(
     for (const cls of ['pointer-events-none', 'pointer-events-auto', 'w-full', 'h-screen', 'w-[1px]', 'w-auto']) {
       assert.ok(source.includes(cls), `${cls} in the generated components`);
     }
+    // The badge is pinned by right/bottom only; the computed top/left of one window size are not kept.
+    const badge = source.split('\n').find((l) => l.includes('pointer-events-auto')) ?? '';
+    assert.match(badge, /right-4/);
+    assert.doesNotMatch(badge, /\b(top|left)-\[/, badge);
     // Review Focus 3: JSX-significant characters survive into the built HTML.
     const html = await fs.readFile(path.join(next, '.next', 'server', 'app', 'index.html'), 'utf8');
     assert.ok(html.includes('Build {curly} &lt;tag&gt;'), 'braces and angle brackets rendered as text');

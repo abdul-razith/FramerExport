@@ -336,6 +336,11 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
       } else if (a === 'none' && p.startsWith('max')) delete node.styles[p];
       else if (!/^[a-z-]+$/.test(a) || ['min-content', 'max-content', 'fit-content'].includes(a)) node.styles[p] = a;
     }
+    // A side of an absolute/fixed element that no rule sets is auto; its computed pixels belong to
+    // this window width only (a button pinned right/bottom would stop following the edge).
+    if (sizeRules.length && (cs.position === 'absolute' || cs.position === 'fixed')) {
+      for (const p of ['top', 'right', 'bottom', 'left']) if (!authored[p]) delete node.styles[p];
+    }
     if (el instanceof HTMLElement && !(el instanceof HTMLImageElement)) {
       // A pixel size no rule authored is the browser's auto size: keep it out of the code.
       for (const p of ['width', 'height'] as const) {
