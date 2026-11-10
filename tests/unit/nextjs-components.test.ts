@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { planComponents, structuralHash } from '../../src/nextjs/components.js';
+import { pageStructure, planComponents, structuralHash } from '../../src/nextjs/components.js';
 import { emptyReport } from '../../src/nextjs/report.js';
 import type { Node, PageModel, Style } from '../../src/nextjs/model.js';
 
@@ -152,4 +152,13 @@ test('real Framer pages: sections are found inside #main, overlays go to the lay
   assert.deepEqual(plan.layout.overlays?.map((o) => o.name).sort(), ['BuyButton', 'Cursor']);
   const all = JSON.stringify(plan, (k, v) => (k === 'children' && Array.isArray(v) ? v.map((c: Node) => c.attrs?.id) : v));
   assert.doesNotMatch(all, /__framer-badge|__framer-editorbar/);
+});
+
+test('absolutely positioned content stops the search for the section container', () => {
+  const board = n('div', { framerName: 'Board', styles: { base: { position: 'absolute' } } }, [image('photo.png')]);
+  const wrapper = n('div', { styles: { base: { position: 'relative' } } }, [text('p', 'Hint', 'Drag the photos'), text('p', 'Hint2', 'Have fun')]);
+  const root = n('body', {}, [n('div', { attrs: { id: 'main' } }, [n('div', { framerName: 'Desktop' }, [board, wrapper])])]);
+  const s = pageStructure(root);
+  assert.equal(s.content.framerName, 'Desktop');
+  assert.deepEqual(s.overlays, []);
 });

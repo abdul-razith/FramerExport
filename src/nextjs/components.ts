@@ -75,7 +75,9 @@ export function isFramerChrome(node: Node): boolean {
 }
 
 const isEmptyNode = (n: Node) => !n.children.length && !n.text && !n.asset && !n.inline;
-const isOutOfFlow = (n: Node) => /^(fixed|absolute)$/.test(n.styles.base.position ?? '');
+/** Fixed elements belong to the viewport (overlays); absolute ones belong to their container's content. */
+const isOverlay = (n: Node) => n.styles.base.position === 'fixed';
+const isInFlow = (n: Node) => !/^(fixed|absolute)$/.test(n.styles.base.position ?? '');
 
 /**
  * Walks from <body> to the element that holds the page sections, through wrappers that have a
@@ -88,10 +90,10 @@ export function pageStructure(root: Node): { content: Node; path: Node[]; overla
   const overlays: Node[] = [];
   for (;;) {
     const kids = node.children.filter((c) => !isFramerChrome(c) && !isEmptyNode(c));
-    const flow = kids.filter((c) => !isOutOfFlow(c));
-    if (flow.length !== 1 || !flow[0].children.length) break;
-    overlays.push(...kids.filter(isOutOfFlow));
-    node = flow[0];
+    const content = kids.filter((c) => !isOverlay(c));
+    if (content.length !== 1 || !isInFlow(content[0]) || !content[0].children.length) break;
+    overlays.push(...kids.filter(isOverlay));
+    node = content[0];
     path.push(node);
   }
   return { content: node, path, overlays };
