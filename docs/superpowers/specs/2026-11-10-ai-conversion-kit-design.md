@@ -23,8 +23,9 @@ theme, design). Clean code matters more than pixel identity.
    **plus** an AI guide: documents that explain the site and a step-by-step task list for turning
    the HTML export into a Next.js project.
 3. The user opens the export folder in Claude Code or agy.
-4. The AI executes the tasks one by one — task 00 creates the Next.js project, later tasks build
-   the shell, each page's sections and the CMS pages. The user checks and commits after each task.
+4. The AI executes the plan's tasks one by one with the superpowers skills — task 00 creates the
+   Next.js project, task 01 the shell, then one task per page and per CMS collection. The user
+   checks and commits after each task.
 
 For an export that already exists (e.g. `nudge-folio/`): `framer-export ai-guide <export-dir>`
 adds the guide without exporting again.
@@ -37,7 +38,8 @@ adds the guide without exporting again.
 | How the AI is run | The user runs Claude Code or agy in the export folder and asks it to do the tasks in order; the user checks each task. No automatic orchestration. |
 | What the AI starts from | The HTML export plus the guide. The AI creates the Next.js project itself (task 00) and moves content into content files and MDX as part of its tasks. The tool describes the site; it does not convert it. |
 | How the AI learns animations | Recorded frames of the live site (load, scroll, hover) plus a measured `motion.md`. |
-| How work is split | Project setup, then the shared shell, then one task per page section (small adjacent sections grouped), one task per CMS collection, and a final review task. |
+| How work is split | Project setup, the shared shell, then **one task per page** (each section of the page is a checkbox step inside it), one task per CMS collection, and a final review task. |
+| How tasks are run and tracked | The task list is a **superpowers implementation plan** (`ai-guide/plan.md`). The agent runs it with the superpowers plugin skills and ticks its checkboxes as it goes. |
 | Scope | Any Framer site; nudge-folio is the first test site. Other platforms later. |
 | Rule-based converter | Stays in the repo untouched; not used or referenced by the guide. |
 
@@ -55,7 +57,7 @@ adds the guide without exporting again.
     content.md              CMS collections and their items and fields (see 4.3)
     tokens.md               colours, fonts, font sizes, radii, shadows with proposed token names
     checklist.md            what the user checks after each task
-    tasks/NN-<name>.md      this site's tasks, in order (section 7)
+    plan.md                 this site's tasks as a superpowers implementation plan (section 7)
     pages/<route-slug>/
       outline.md            the page's sections (see 4.4)
       motion.md             the page's measured animations (section 5)
@@ -139,8 +141,13 @@ frame references; the AI writes a small component for it (e.g. `TypingText`, `Li
 
 ## 6. AI rules (`AGENTS.md` / `CLAUDE.md`)
 
-1. **Work order.** Do one task file at a time, in number order; read the files the task lists
-   before writing code; stop after the task and report.
+1. **Work order and tracking (superpowers).** The work is `ai-guide/plan.md`, a superpowers
+   implementation plan. Execute it with `superpowers:executing-plans` (or
+   `superpowers:subagent-driven-development` when the agent supports subagents): one task at a
+   time, in order; read the files the task lists before writing code; tick each step's checkbox
+   in `plan.md` when it is done; use `superpowers:verification-before-completion` before marking
+   a task complete; use `superpowers:systematic-debugging` when a build, lint or visual check
+   fails. Stop after each task and report, unless the user asked to continue.
 2. **Stack.** The Next.js project lives in `nextjs-app/`. Next.js 16 App Router, React 19,
    TypeScript; server components by default, `'use client'` only where there is animation or
    interaction. Tailwind 4 with the tokens from `tokens.md`. motion for load, hover and in-view
@@ -167,26 +174,30 @@ frame references; the AI writes a small component for it (e.g. `TypingText`, `Li
 9. **Never.** Add a dependency the task does not name without saying why; edit the export or
    `ai-guide/`; invent content; leave placeholder text or `TODO`s.
 
-## 7. Tasks
+## 7. Tasks (`ai-guide/plan.md`)
 
-Generated per site into `ai-guide/tasks/` from templates kept in the repo
-(`src/ai-guide/templates/`). Each task file states: goal; files to read; files to create or
-change; shared components to reuse; done checks.
+`plan.md` follows the superpowers plan format (header with goal, architecture and tech stack;
+`### Task N` sections; `- [ ]` checkbox steps; the files each task creates or changes; a
+verification step). It is generated per site from templates kept in the repo
+(`src/ai-guide/templates/`).
 
-| # | Task | Template |
+| # | Task | Steps inside the task |
 | --- | --- | --- |
-| 00 | Create `nextjs-app/`: Next.js 16 + Tailwind 4 + motion + GSAP + Lenis + MDX, ESLint, Prettier; tokens into `globals.css`; fonts; copy images; `compare` script; route stubs for every page | `setup.md` |
-| 01 | Shell: Navbar (desktop + mobile menu), Footer, Loader (with its intro), Cursor, smooth scroll, root layout | `shell.md` |
-| 02… | One task per page section (adjacent small sections grouped to about one screen), page by page | `section.md` |
-| … | One task per CMS collection: list page + detail template + all items as MDX | `collection.md` |
-| last | Review and cleanup | `review.md` |
+| 0 | Create `nextjs-app/` | Next.js 16 + Tailwind 4 + motion + GSAP + Lenis + MDX, ESLint, Prettier; tokens into `globals.css`; fonts; copy images with readable names; `compare` script; route stubs for every page; build passes |
+| 1 | Shell | Navbar (desktop + mobile menu); Footer; Loader with its intro; Cursor; smooth scroll; root layout; check on two pages |
+| 2… | **One task per page** (Home, About, Services, …) | Content file for the page; one step per section in reading order (from `outline.md`); the page's animations from `motion.md`; compare at 3 widths |
+| … | One task per CMS collection | MDX for every item; list page; detail template; compare a list page and one item |
+| last | Review | Duplicates into `components/ui`; naming; file sizes; no raw hex / pixel positions / Framer leftovers; accessibility basics; build, lint, compare all routes |
 
-Expected for nudge-folio: about 17 tasks (setup, shell, ~5 home, ~3 about, ~2 services, contact,
-playground, blog, case studies, review).
+Expected for nudge-folio: 10 tasks — setup, shell, Home, About, Services, Contact, Playground,
+Blog collection, Case-study collection, review.
 
-User loop (in `ai-guide/README.md`): ask the agent "Do the next task" (or name one) → `npm run
-dev` in `nextjs-app/` and look at desktop and mobile → read the compare image → `git commit` →
-next task. A bad result is discarded (`git checkout .`) and the task re-run with a note.
+User loop (in `ai-guide/README.md`): in the export folder, ask the agent "Execute
+`ai-guide/plan.md` with superpowers, next task" → `npm run dev` in `nextjs-app/` and look at
+desktop and mobile → read the compare image → `git commit` → next task. A bad result is
+discarded (`git checkout .`), its checkboxes unticked, and the task re-run with a note.
+The README also says how to install the superpowers plugin in Claude Code and in agy, and how
+to proceed without it (follow `plan.md` by hand, same order and checks).
 
 ## 8. Tool changes
 
@@ -194,7 +205,7 @@ next task. A bad result is discarded (`git checkout .`) and the task re-run with
   Without the flag nothing changes.
 - New command `framer-export ai-guide <export-dir>`: the guide step on an existing export.
 - New module `src/ai-guide/` (capture of screenshots, section crops and animation recording;
-  writers for `site.md`, `files.md`, `content.md`, `tokens.md`, outlines, `motion.md`, tasks;
+  writers for `site.md`, `files.md`, `content.md`, `tokens.md`, outlines, `motion.md`, `plan.md`;
   templates). It reuses the existing capture, page-structure, collection-detection and token code
   from `src/nextjs/` but none of its JSX/Tailwind emitters.
 - A failure in the guide step never breaks the export: it writes `ai-guide/ERROR.md` and the
@@ -223,8 +234,8 @@ screenshots, motion notes, file map and task list are generated per site. Known 
 
 ## 11. Testing the tool change
 
-- Unit tests: outline, `site.md`, `files.md`, `content.md` and task-list generation from fixture
-  pages; `motion.md` from sampled values.
+- Unit tests: outline, `site.md`, `files.md`, `content.md` and `plan.md` generation from fixture
+  pages (one task per page, one step per section, superpowers plan format); `motion.md` from sampled values.
 - Integration test: `framer-export ai-guide` on the existing fixture export writes the layout of
   section 4; an export without `--ai-guide` is byte-for-byte as before.
-- Manual acceptance: on nudge-folio, run tasks 00–02 with Claude Code and with agy.
+- Manual acceptance: on nudge-folio, run tasks 0–2 (setup, shell, Home) with Claude Code and with agy, using the superpowers skills.
