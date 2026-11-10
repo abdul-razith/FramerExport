@@ -179,3 +179,14 @@ test('images without a content binding use a local path, never the remote Framer
   const c = ctx({ bindings: undefined, localImage: (src, alt) => (src.includes('a.png') ? `/images/${alt.toLowerCase()}.png` : '') });
   assert.equal(renderNode(img, c), '<Image src="/images/logo.png" alt="Logo" width={4} height={2} />');
 });
+
+test('inline content renders in order with its spaces', () => {
+  const link = n('a', { text: 'full story', attrs: { href: 'https://example.com/x' } });
+  const para = n('p', { text: 'Read the today.', inline: ['Read the ', 0, ' today.'] }, [link]);
+  const c = ctx();
+  c.bindings!.text.set(`${para.id}~0`, 'read');
+  assert.equal(
+    renderNode(para, c),
+    '<p>{content.read}{" "}<a href="https://example.com/x">full story</a>{" today."}</p>'
+  );
+});

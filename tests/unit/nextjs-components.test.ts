@@ -114,3 +114,10 @@ test('generic repeated siblings still become a list component', () => {
   assert.equal(plan.ui.length, 1);
   assert.equal(plan.ui[0].instances.length, 3);
 });
+
+test('nodes that differ only by their SVG drawing are not the same component', () => {
+  const icon = (svg: string) => n('svg', { asset: { kind: 'svg', src: '', width: 16, height: 16 }, attrs: { 'data-svg': svg } });
+  const a = n('a', { framerName: 'Nav Item' }, [icon('<svg><path d="M0 0h1"/></svg>'), text('span', 'Label', 'Home')]);
+  const b = n('a', { framerName: 'Nav Item' }, [icon('<svg><path d="M1 1h2"/></svg>'), text('span', 'Label', 'About')]);
+  assert.notEqual(structuralHash(a), structuralHash(b));
+});

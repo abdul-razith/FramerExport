@@ -150,3 +150,28 @@ test('zero insets on relatively positioned elements are not recorded', () => {
   walk(home.trees.base);
   assert.deepEqual(withZeroInset, []);
 });
+
+test('inline content keeps its order and the spaces between elements', () => {
+  const home = captured.find((p) => p.route === '/')!;
+  const status = find(home.trees.base, (n) => n.framerName === 'Status')!;
+  assert.deepEqual(status.inline, [0, ' ', 1, ' ', 2]);
+  const readMore = find(home.trees.base, (n) => n.framerName === 'Read More')!;
+  assert.deepEqual(readMore.inline, ['Read the ', 0, ' today.']);
+});
+
+test("Framer's ::after borders are captured", () => {
+  const home = captured.find((p) => p.route === '/')!;
+  const bordered = find(home.trees.base, (n) => n.framerName === 'Bordered')!;
+  assert.deepEqual(bordered.afterBorder, {
+    widths: ['2px', '2px', '2px', '2px'],
+    style: 'solid',
+    color: 'rgb(19, 51, 36)',
+  });
+});
+
+test('an element whose only children are absolutely positioned keeps its explicit size', () => {
+  const home = captured.find((p) => p.route === '/')!;
+  const avatar = find(home.trees.base, (n) => n.framerName === 'Avatar')!;
+  assert.equal(avatar.styles.width, '40px');
+  assert.equal(avatar.styles.height, '40px');
+});

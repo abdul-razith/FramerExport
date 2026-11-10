@@ -138,3 +138,42 @@ test('children do not repeat the visibility they inherit from their parent', () 
   assert.deepEqual(nav.visibility, ['base', 'tablet']);
   assert.equal(nav.children[0].visibility, undefined);
 });
+
+test('inline order and Framer borders survive the merge; invisible inline children drop out', () => {
+  const tree = (showIcon: boolean) =>
+    raw('body:0', 'body', {}, [
+      {
+        ...raw('body:0/p[Status]:0', 'p', { name: 'Status', text: 'Hi there' }, [
+          raw('body:0/p[Status]:0/b:0', 'b', { text: 'Hi' }),
+          raw('body:0/p[Status]:0/i:1', 'i', { text: 'icon', visible: showIcon }),
+          raw('body:0/p[Status]:0/b:2', 'b', { text: 'there' }),
+        ]),
+        inline: [0, ' ', 1, ' ', 2],
+        afterBorder: { widths: ['1px', '1px', '1px', '1px'], style: 'solid', color: 'rgb(0, 0, 0)' },
+      },
+    ]);
+  const root = mergeBreakpoints(page(tree(false), tree(false), tree(false)), new Map(), emptyReport());
+  const p = find(root, (n) => n.framerName === 'Status')!;
+  assert.deepEqual(p.inline, [0, ' ', 1]);
+  assert.deepEqual(p.afterBorder, { widths: ['1px', '1px', '1px', '1px'], style: 'solid', color: 'rgb(0, 0, 0)' });
+});
+
+test('a paragraph split into visual lines is merged back into one paragraph', () => {
+  const line = (k: number, text: string, extra: RawNode[] = [], inline?: (string | number)[]) =>
+    raw(`body:0/p:0/div:${k}`, 'div', {}, [
+      { ...raw(`body:0/p:0/div:${k}/div:0`, 'div', { text, attrs: { class: 'gsap-line' } }, extra), ...(inline ? { inline } : {}) },
+    ]);
+  const img = (k: number) => raw(`body:0/p:0/div:${k}/div:0/img:0`, 'img', { attrs: { src: 'x.png', alt: 'me' }, styles: { display: 'inline-block' } });
+  const base = raw('body:0', 'body', {}, [
+    raw('body:0/p:0', 'p', {}, [line(0, "I'm Bejaman a product designer"), line(1, 'in Chicago who gets', [img(1)], ['in Chicago', 0, 'who gets'])]),
+  ]);
+  const mobile = raw('body:0', 'body', {}, [
+    raw('body:0/p:0', 'p', {}, [line(0, "I'm Bejaman a"), line(1, 'product designer in'), line(2, 'Chicago who gets', [img(2)], ['Chicago', 0, 'who gets'])]),
+  ]);
+  const root = mergeBreakpoints(page(base, base, mobile), new Map(), emptyReport());
+  const p = find(root, (n) => n.tag === 'p')!;
+  assert.equal(p.children.length, 1, 'only the inline image remains as a child');
+  assert.equal(p.children[0].tag, 'img');
+  assert.deepEqual(p.inline, ["I'm Bejaman a product designer in Chicago", 0, 'who gets']);
+  assert.equal(p.visibility, undefined);
+});

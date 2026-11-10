@@ -36,8 +36,20 @@ export interface Box {
   h: number;
 }
 
+/** Framer draws borders with an absolutely positioned ::after overlay. */
+export interface AfterBorder {
+  widths: string[];
+  style: string;
+  color: string;
+}
+
+/** Ordered inline content: text segments and child indexes, e.g. ['Read the ', 0, ' today.']. */
+export type InlineContent = (string | number)[];
+
 export interface RawNode {
   key: string;
+  inline?: InlineContent;
+  afterBorder?: AfterBorder;
   tag: string;
   attrs: Record<string, string>;
   framerName?: string;
@@ -57,6 +69,8 @@ export interface Asset {
 }
 
 export interface Node {
+  inline?: InlineContent;
+  afterBorder?: AfterBorder;
   id: string;
   key: string;
   tag: string;

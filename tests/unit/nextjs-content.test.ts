@@ -143,3 +143,15 @@ test('ImageNamer treats resize variants of one image as the same file', () => {
     namer.publicPath('https://framerusercontent.com/images/a.jpg', 'Other')
   );
 });
+
+test('inline text segments are bound one by one around inline elements', () => {
+  const link = n('a', { text: 'full story', attrs: { href: '/story' } });
+  const para = n('p', { framerName: 'Read More', text: 'Read the today.', inline: ['Read the ', 0, ' today.'] }, [link]);
+  const pages = [page('/', [n('section', { framerName: 'Hero Section' }, [para]), n('section', { framerName: 'Outro' }, [text('p', 'Note', 'Bye')])])];
+  const report = emptyReport();
+  const { files, bindings } = extractContent(planComponents(pages, report), report, new ImageNamer());
+  assert.deepEqual(files[0].data.hero, { readMore: 'Read the', readMore2: 'today.', link: { label: 'full story', href: '/story' } });
+  assert.equal(bindings.text.get(`${para.id}~0`), 'readMore');
+  assert.equal(bindings.text.get(`${para.id}~2`), 'readMore2');
+  assert.equal(bindings.text.has(para.id), false);
+});

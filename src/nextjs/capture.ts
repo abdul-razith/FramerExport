@@ -56,8 +56,9 @@ const INHERITED = [
 ];
 
 const VIEWPORT_HEIGHT = 900;
-const SCROLL_STEP = 600;
-const SCROLL_DELAY = 100;
+/** Half a screen per step, paused long enough for in-view (JavaScript-driven) animations to play. */
+const SCROLL_STEP_FRACTION = 0.5;
+const SCROLL_DELAY = 350;
 
 function routeSlug(route: string): string {
   return route === '/' ? 'index' : route.slice(1).replace(/\//g, '_');
@@ -111,14 +112,14 @@ export async function settlePage(page: Page): Promise<void> {
       let y = 0;
       while (Date.now() - started < 20000) {
         const max = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-        y += step;
+        y += Math.max(200, Math.round(window.innerHeight * step));
         window.scrollTo({ top: y, behavior: 'instant' });
         await new Promise((r) => setTimeout(r, delay));
         if (y >= max) break;
       }
       window.scrollTo({ top: 0, behavior: 'instant' });
     },
-    { step: SCROLL_STEP, delay: SCROLL_DELAY }
+    { step: SCROLL_STEP_FRACTION, delay: SCROLL_DELAY }
   );
   await page.evaluate(async () => {
     const finite = document
@@ -128,7 +129,8 @@ export async function settlePage(page: Page): Promise<void> {
       Promise.all(finite.map((a) => a.finished.catch(() => undefined))),
       new Promise((r) => setTimeout(r, 5000)),
     ]);
-    await new Promise((r) => setTimeout(r, 300));
+    // Framer animates with JavaScript, which getAnimations() cannot see: give it time to finish.
+    await new Promise((r) => setTimeout(r, 1500));
   });
 }
 
@@ -252,9 +254,24 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
       if (p === 'display' && v === 'block' && /flex|grid/.test(parentDisplay) && defs.display.startsWith('inline')) continue;
       node.styles[p] = v;
     }
-    if (el instanceof HTMLElement && !(el instanceof HTMLImageElement)) {
+    // Elements with no in-flow content cannot size themselves: their explicit size is authored.
+    const hasFlowContent =
+      Array.from(el.childNodes).some((c) => c.nodeType === Node.TEXT_NODE && (c.textContent ?? '').trim()) ||
+      Array.from(el.children).some((c) => {
+        const s = getComputedStyle(c);
+        return s.display !== 'none' && s.position !== 'absolute' && s.position !== 'fixed';
+      });
+    if (el instanceof HTMLElement && !(el instanceof HTMLImageElement) && hasFlowContent) {
       if (node.styles.width && isAuto(el, 'width')) delete node.styles.width;
       if (node.styles.height && isAuto(el, 'height')) delete node.styles.height;
+    }
+    const after = getComputedStyle(el, '::after');
+    if (after.content && after.content !== 'none' && after.content !== 'normal') {
+      const widths = ['top', 'right', 'bottom', 'left'].map((s) => after.getPropertyValue(`border-${s}-width`));
+      const style = after.getPropertyValue('border-top-style');
+      if (widths.some((w) => parseFloat(w) > 0) && style !== 'none') {
+        node.afterBorder = { widths, style, color: after.getPropertyValue('border-top-color') };
+      }
     }
 
     if (tag === 'svg') {
@@ -262,16 +279,38 @@ function serializeInPage(args: { props: string[]; inherited: string[]; withHover
       return node;
     }
     let text = '';
+    const inline: (string | number)[] = [];
+    let hasText = false;
+    const skip = ['script', 'style', 'link', 'meta', 'noscript', 'template'];
+    const elements = Array.from(el.children);
     for (const child of Array.from(el.childNodes)) {
-      if (child.nodeType === Node.TEXT_NODE) text += child.textContent ?? '';
+      if (child.nodeType === Node.TEXT_NODE) {
+        const t = (child.textContent ?? '').replace(/\s+/g, ' ');
+        text += child.textContent ?? '';
+        if (t.trim()) hasText = true;
+        if (!t) continue;
+        if (typeof inline[inline.length - 1] === 'string') inline[inline.length - 1] += t;
+        else inline.push(t);
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const c = child as Element;
+        if (c === frame || skip.includes(c.tagName.toLowerCase())) continue;
+        inline.push(node.children.length);
+        node.children.push(walk(c, key, elements.indexOf(c), cs));
+      }
     }
     const trimmed = text.replace(/\s+/g, ' ').trim();
     if (trimmed) node.text = trimmed;
-    Array.from(el.children).forEach((child, i) => {
-      if (child === frame) return;
-      if (['script', 'style', 'link', 'meta', 'noscript', 'template'].includes(child.tagName.toLowerCase())) return;
-      node.children.push(walk(child, key, i, cs));
-    });
+    // Keep the ordered form only where text and inline elements share a line.
+    const INLINE_TAGS = ['span', 'a', 'img', 'strong', 'em', 'b', 'i', 'br', 'svg', 'code', 'small'];
+    const inlineChildren = node.children.some(
+      (c: any) => c.visible && /^inline/.test(c.styles.display ?? (INLINE_TAGS.includes(c.tag) ? 'inline' : ''))
+    );
+    if (node.children.length && (hasText || inlineChildren)) {
+      if (typeof inline[0] === 'string') inline[0] = inline[0].replace(/^ /, '');
+      const last = inline.length - 1;
+      if (typeof inline[last] === 'string') inline[last] = (inline[last] as string).replace(/ $/, '');
+      node.inline = inline.filter((x) => x !== '');
+    }
     return node;
   };
 

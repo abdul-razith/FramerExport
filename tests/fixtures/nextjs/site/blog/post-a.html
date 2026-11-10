@@ -21,6 +21,12 @@ body{font-family:"Inter Display",sans-serif;background-color:var(--token-b2);col
 .card img{width:100%;height:120px;object-fit:cover;border-radius:16px}
 .card h3{margin:0;font-size:24px}
 .card p{margin:0;font-size:16px}
+.status{margin:0;font-size:14px}
+[data-border="true"]::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;border-radius:inherit;border-width:var(--border-top-width,0) var(--border-right-width,0) var(--border-bottom-width,0) var(--border-left-width,0);border-color:var(--border-color,none);border-style:var(--border-style,none)}
+.bordered{position:relative;padding:8px;width:120px}
+.avatar-wrap{width:40px}
+.avatar{position:relative;width:40px;height:40px}
+.avatar-inner{position:absolute;top:0;right:0;bottom:0;left:0;border-radius:40px;background-color:#a1dfc5}
 .content{padding:24px;font-size:18px}
 .footer{padding:24px;border-radius:16px;background-color:var(--token-a1);color:#ffffff}
 .footer a{color:var(--token-b2)}

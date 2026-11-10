@@ -43,6 +43,8 @@ export function structuralHash(node: Node): string {
     node.tag,
     node.framerName ?? '',
     node.asset?.kind ?? '',
+    node.attrs['data-svg'] ? sha(node.attrs['data-svg']) : '',
+    node.afterBorder ? JSON.stringify(node.afterBorder) : '',
     (node.visibility ?? []).join(','),
     styleSig(node.styles.base),
     styleSig(node.styles.tablet),

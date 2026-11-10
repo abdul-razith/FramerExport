@@ -1,9 +1,9 @@
-import type { Breakpoint, Node, Style } from './model.js';
+import type { AfterBorder, Breakpoint, Node, Style } from './model.js';
 import { normalizeColor, type ThemeTokens } from './tokens.js';
 
 export interface TailwindResult {
   classes: string[];
-  leftover: Partial<Record<Breakpoint | 'hover', Style>>;
+  leftover: Partial<Record<Breakpoint | 'hover' | 'after', Style>>;
 }
 
 const PREFIX: Record<Breakpoint | 'hover', string> = {
@@ -368,10 +368,27 @@ export function toTailwind(
   styles: Node['styles'],
   hover: Style | undefined,
   tokens: ThemeTokens,
-  visibility?: Breakpoint[]
+  visibility?: Breakpoint[],
+  afterBorder?: AfterBorder
 ): TailwindResult {
   const classes: string[] = [];
   const leftover: TailwindResult['leftover'] = {};
+  if (afterBorder) {
+    // Framer's ::after overlay border does not affect layout; an inset ring renders the same.
+    const w = afterBorder.widths;
+    const px = num(w[0]);
+    const colorName = tokens.colorByValue.get(normalizeColor(afterBorder.color));
+    if (w.every((x) => x === w[0]) && afterBorder.style === 'solid' && px !== undefined && colorName) {
+      const width = px === 1 ? 'ring' : Number.isInteger(px) ? `ring-${px}` : `ring-[${px}px]`;
+      classes.push(width, 'ring-inset', `ring-${colorName}`);
+    } else {
+      leftover.after = {
+        'border-width': w.join(' '),
+        'border-style': afterBorder.style,
+        'border-color': afterBorder.color,
+      };
+    }
+  }
   const vis = visibilityClasses(visibility, styles);
   const sources: [Breakpoint | 'hover', Style | undefined][] = [
     ['base', styles.base],
@@ -388,5 +405,5 @@ export function toTailwind(
     classes.push(...ctx.classes.map((c) => PREFIX[bp] + c));
     if (Object.keys(ctx.leftover).length) leftover[bp] = ctx.leftover;
   }
-  return { classes: [...new Set([...vis, ...classes])], leftover };
+  return { classes: [...new Set([...vis, ...classes.filter((c) => !c.startsWith('ring')), ...classes.filter((c) => c.startsWith('ring'))])], leftover };
 }

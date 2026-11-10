@@ -73,7 +73,7 @@ function cssModule(tokens: ThemeTokens, images: ImageNamer) {
   return {
     importName: 'styles',
     classFor(node: Node): string | undefined {
-      const { leftover } = toTailwind(node.styles, node.hover, tokens, node.visibility);
+      const { leftover } = toTailwind(node.styles, node.hover, tokens, node.visibility, node.afterBorder);
       if (!Object.keys(leftover).length) return undefined;
       const cls = names.unique(toCamel(node.framerName ?? node.tag));
       if (leftover.base) rules.push(`.${cls} {\n${decls(leftover.base)}\n}`);
@@ -81,6 +81,12 @@ function cssModule(tokens: ThemeTokens, images: ImageNamer) {
         if (leftover[bp]) rules.push(`${MEDIA[bp]} {\n  .${cls} {\n${decls(leftover[bp]!)}\n  }\n}`);
       }
       if (leftover.hover) rules.push(`.${cls}:hover {\n${decls(leftover.hover)}\n}`);
+      if (leftover.after) {
+        // Framer's border overlay: drawn on top, does not change the element's size.
+        rules.push(
+          `.${cls}::after {\n  content: '';\n  position: absolute;\n  inset: 0;\n  pointer-events: none;\n  border-radius: inherit;\n${decls(leftover.after)}\n}`
+        );
+      }
       return cls;
     },
     css: () => rules.join('\n\n'),
@@ -319,7 +325,7 @@ function writePages(model: ProjectModel, files: Files, listings: Listing[]): voi
 }
 
 function classesFor(node: Node, tokens: ThemeTokens): string {
-  return toTailwind(node.styles, node.hover, tokens, node.visibility).classes.join(' ');
+  return toTailwind(node.styles, node.hover, tokens, node.visibility, node.afterBorder).classes.join(' ');
 }
 
 function colorClass(prefix: string, value: string | undefined, tokens: ThemeTokens): string | undefined {

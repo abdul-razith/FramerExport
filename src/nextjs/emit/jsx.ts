@@ -78,7 +78,7 @@ function svgToJsx(svg: string): string {
 }
 
 function classNameAttr(node: Node, ctx: JsxContext): string {
-  const { classes } = toTailwind(node.styles, node.hover, ctx.tokens, node.visibility);
+  const { classes } = toTailwind(node.styles, node.hover, ctx.tokens, node.visibility, node.afterBorder);
   const moduleClass = ctx.cssModule?.classFor(node);
   if (moduleClass) {
     const rest = classes.length ? ' ' + classes.join(' ') : '';
@@ -95,6 +95,25 @@ function localPath(href: string, ctx: JsxContext): string {
   if (!href.startsWith(ctx.siteOrigin)) return href;
   const u = new URL(href);
   return (u.pathname.replace(/\/+$/, '') || '/') + u.search + u.hash;
+}
+
+/** Text and inline elements in their original order; spaces at segment edges are kept explicitly. */
+function renderInline(node: Node, ctx: JsxContext, state: RenderState, inText: boolean): string {
+  return node
+    .inline!.map((x, i) => {
+      if (typeof x === 'number') {
+        const child = node.children[x];
+        return child ? render(child, ctx, state, inText) : '';
+      }
+      const bound = ctx.bindings?.text.get(`${node.id}~${i}`);
+      if (bound) {
+        const lead = /^\s/.test(x) ? '{" "}' : '';
+        const trail = /\s$/.test(x) ? '{" "}' : '';
+        return `${lead}{${ctx.contentVar}.${bound}}${trail}`;
+      }
+      return /^\s|\s$|[{}<>`]/.test(x) ? `{${JSON.stringify(x)}}` : x;
+    })
+    .join('');
 }
 
 function textExpr(node: Node, ctx: JsxContext): string | undefined {
@@ -236,7 +255,9 @@ function render(original: Node, ctx: JsxContext, state: RenderState, inText = fa
     const childrenOverride = ctx.overrides?.get(node.id)?.children;
     const inner = childrenOverride
       ? `{${childrenOverride}}`
-      : (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state, childInText);
+      : node.inline
+        ? renderInline(node, ctx, state, childInText)
+        : (textExpr(node, ctx) ?? '') + renderChildren(node, ctx, state, childInText);
     element = VOID.has(node.tag) || !inner ? `${open} />` : `${open}>${inner}</${tag}>`;
   }
 

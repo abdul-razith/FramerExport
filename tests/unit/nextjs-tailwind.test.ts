@@ -130,3 +130,13 @@ test('aspect-ratio derived from width/height attributes is not emitted', () => {
   assert.deepEqual(toTailwind({ base: { 'aspect-ratio': 'auto 240 / 120' } }, undefined, NO_TOKENS).classes, []);
   assert.deepEqual(toTailwind({ base: { 'aspect-ratio': '16 / 9' } }, undefined, NO_TOKENS).classes, ['aspect-[16/9]']);
 });
+
+test("Framer ::after borders become inset rings, or leftover CSS when they can't", () => {
+  const tokens = tokensFor({ color: 'rgb(19, 51, 36)' });
+  const solid = { widths: ['2px', '2px', '2px', '2px'], style: 'solid', color: 'rgb(19, 51, 36)' };
+  assert.deepEqual(toTailwind({ base: {} }, undefined, tokens, undefined, solid).classes, ['ring-2', 'ring-inset', 'ring-green-900']);
+  const dashed = { widths: ['1px', '0px', '1px', '0px'], style: 'dashed', color: 'rgb(19, 51, 36)' };
+  const r = toTailwind({ base: {} }, undefined, tokens, undefined, dashed);
+  assert.deepEqual(r.classes, []);
+  assert.deepEqual(r.leftover.after, { 'border-width': '1px 0px 1px 0px', 'border-style': 'dashed', 'border-color': 'rgb(19, 51, 36)' });
+});

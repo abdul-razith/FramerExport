@@ -5,6 +5,7 @@ import {
   type AnimationSpec,
   type Asset,
   type Breakpoint,
+  type InlineContent,
   type Node,
   type RawNode,
   type Style,
@@ -16,9 +17,79 @@ type Variants = Partial<Record<Breakpoint, RawNode>>;
 const HIDDEN_CLASS = /\bhidden-[a-z0-9]+\b/;
 const WRAPPER_NEUTRAL_PROPS = new Set(['display']);
 
+/** Merges adjacent text segments and collapses runs of spaces. */
+export function normalizeInline(inline: InlineContent): InlineContent {
+  const out: InlineContent = [];
+  for (const x of inline) {
+    if (typeof x === 'string' && typeof out[out.length - 1] === 'string') out[out.length - 1] += x;
+    else out.push(x);
+  }
+  return out.map((x) => (typeof x === 'string' ? x.replace(/ {2,}/g, ' ') : x)).filter((x) => x !== '');
+}
+
+function remapInline(inline: InlineContent, map: (i: number) => number | undefined): InlineContent {
+  return normalizeInline(
+    inline.flatMap((x): InlineContent => {
+      if (typeof x === 'string') return [x];
+      const to = map(x);
+      return to === undefined ? [] : [to];
+    })
+  );
+}
+
 function prune(node: RawNode): RawNode | null {
   if (!node.visible) return null;
-  return { ...node, children: node.children.map(prune).filter((c): c is RawNode => c !== null) };
+  const kept: RawNode[] = [];
+  const positions = new Map<number, number>();
+  node.children.forEach((child, i) => {
+    const p = prune(child);
+    if (p) {
+      positions.set(i, kept.length);
+      kept.push(p);
+    }
+  });
+  const out: RawNode = { ...node, children: kept };
+  if (node.inline) out.inline = remapInline(node.inline, (i) => positions.get(i));
+  return mergeLines(out);
+}
+
+const TEXT_PARENT = /^(p|h[1-6])$/;
+const INLINE_LEVEL = new Set(['img', 'span', 'a', 'br', 'svg', 'strong', 'em', 'b', 'i', 'small', 'code']);
+
+/** The text-bearing node inside a single-child wrapper chain, if it holds only inline content. */
+function lineOf(node: RawNode): RawNode | undefined {
+  let x = node;
+  while (x.children.length === 1 && !x.text && !x.inline) x = x.children[0];
+  if (x.tag !== 'div' && x.tag !== 'span') return undefined;
+  if (!x.text && !x.inline) return undefined;
+  const inlineOnly = x.children.every((c) => /^inline/.test(c.styles.display ?? '') || INLINE_LEVEL.has(c.tag));
+  return inlineOnly ? x : undefined;
+}
+
+/**
+ * Text effects (GSAP SplitText and similar) wrap each visual line of a paragraph in its own block.
+ * Line breaks depend on the viewport width, so the split cannot be reproduced; merge the lines
+ * back into one paragraph and let the browser wrap it.
+ */
+function mergeLines(node: RawNode): RawNode {
+  if (!TEXT_PARENT.test(node.tag) || node.children.length < 2 || node.text) return node;
+  const lines = node.children.map(lineOf);
+  if (lines.some((l) => !l)) return node;
+  const signature = JSON.stringify(lines[0]!.styles);
+  if (!lines.every((l) => JSON.stringify(l!.styles) === signature)) return node;
+  const children: RawNode[] = [];
+  const inline: InlineContent = [];
+  lines.forEach((l, i) => {
+    if (i) inline.push(' ');
+    for (const x of l!.inline ?? [l!.text!]) {
+      if (typeof x === 'number') {
+        inline.push(children.length);
+        children.push(l!.children[x]);
+      } else inline.push(x);
+    }
+  });
+  const text = lines.map((l) => l!.text).filter(Boolean).join(' ');
+  return { ...node, children, inline: normalizeInline(inline), ...(text ? { text } : {}) };
 }
 
 function sameElement(a: RawNode, b: RawNode): boolean {
@@ -109,14 +180,24 @@ function mergeVariants(v: Variants, ctx: MergeCtx): Node {
     if (d) styles[bp as 'tablet' | 'mobile'] = d;
     effective = v[bp]!.styles;
   }
+  const aligned = alignChildren(v);
   const node: Node = {
     id: `${ctx.route}|${rep.key}`,
     key: rep.key,
     tag: rep.tag,
     attrs: { ...rep.attrs },
     styles,
-    children: alignChildren(v).map((child) => mergeVariants(child, ctx)),
+    children: aligned.map((child) => mergeVariants(child, ctx)),
   };
+  if (rep.inline) {
+    const repBp = present[0];
+    const positions = new Map<RawNode, number>();
+    aligned.forEach((entry, i) => {
+      if (entry[repBp]) positions.set(entry[repBp]!, i);
+    });
+    node.inline = remapInline(rep.inline, (i) => positions.get(rep.children[i]));
+  }
+  if (rep.afterBorder) node.afterBorder = rep.afterBorder;
   if (rep.framerName) node.framerName = rep.framerName;
   if (rep.text) node.text = rep.text;
   if (present.length < BREAKPOINTS.length) {

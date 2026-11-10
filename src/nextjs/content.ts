@@ -137,8 +137,9 @@ function sectionContent(section: Node, sectionName: string, ctx: Ctx): Record<st
     }
     if (node.animation?.kind === 'split-text') {
       const text = (function joined(n: Node): string {
+        if (n.inline) return n.inline.map((x) => (typeof x === 'number' ? joined(n.children[x]) : x)).join('');
         return (n.text ?? '') + n.children.map(joined).join('');
-      })(node);
+      })(node).trim();
       const key = keys.unique(leafKey(node));
       data[key] = text;
       ctx.bindings.text.set(node.id, key);
@@ -150,7 +151,24 @@ function sectionContent(section: Node, sectionName: string, ctx: Ctx): Record<st
       ctx.bindings.image.set(node.id, key);
     }
     const href = node.attrs.href;
-    if (node.text !== undefined) {
+    if (node.inline) {
+      // Text interleaved with inline elements: one content value per text segment.
+      node.inline.forEach((segment, i) => {
+        if (typeof segment !== 'string' || !segment.trim()) return;
+        if (isDecorative(segment)) {
+          ctx.report.textExceptions.push({ route: ctx.route, text: segment.trim() });
+          return;
+        }
+        const key = keys.unique(leafKey(node));
+        data[key] = segment.trim();
+        ctx.bindings.text.set(`${node.id}~${i}`, key);
+      });
+      if (href) {
+        const key = keys.unique(leafKey(node) + 'Href');
+        data[key] = normalizeHref(href, ctx.siteOrigin);
+        ctx.bindings.href.set(node.id, key);
+      }
+    } else if (node.text !== undefined) {
       if (isDecorative(node.text)) {
         ctx.report.textExceptions.push({ route: ctx.route, text: node.text });
       } else if (href) {
