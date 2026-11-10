@@ -62,7 +62,9 @@ export function summarizeLoad(samples: TimelineSample[], frameEveryMs: number, f
     const last = series[series.length - 1];
     const frames = (a: number, b: number) => `${framesDir}/${frame(a, frameEveryMs)}–${frame(b, frameEveryMs)}`;
     const label = labelOf(key, last.v.text);
-    if (series.some((s) => s.v.text !== first.v.text)) {
+    // Text that only empties (moved into child spans when Framer splits it for an animation) is not behaviour.
+    const texts = series.map((s) => s.v.text).filter(Boolean);
+    if (texts.some((t) => t !== texts[0])) {
       entries.push({ key, label, section: '', trigger: 'custom', note: `text changes: "${first.v.text}" → "${last.v.text}"`, frames: frames(first.t, last.t) });
       continue;
     }

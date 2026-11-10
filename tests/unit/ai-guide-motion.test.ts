@@ -130,3 +130,8 @@ test('the recorder keeps going while the page still moves, up to the limit', () 
   assert.equal(needsMoreTime([at(0, '0'), at(2000, '1'), at(6000, '1')], 6000, 12000), false);
   assert.equal(needsMoreTime([at(0, '0'), at(11800, '0.5'), at(12000, '0.6')], 12000, 12000), false);
 });
+
+test('text that moves into child spans (Framer splitting it for an animation) is not custom behaviour', () => {
+  const samples = [s(0, '1', 'none', 'I design outstanding'), s(200, '1', 'none', ''), s(400, '1', 'none', '')];
+  assert.deepEqual(summarizeLoad(samples, 200), []);
+});
