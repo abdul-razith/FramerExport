@@ -138,3 +138,12 @@ test('the tablet variant is the 810–1199 range and the rules explain the CSS w
   assert.ok(renderPlan(fixtureSite()).includes('`tablet` = `@media (min-width: 810px) and (max-width: 1199px)`'));
   for (const s of ['tablet 810–1199px', 'tablet + mobile ≤1199px', 'both `tablet:` and `mobile:`']) assert.ok(AGENTS_MD.includes(s), s);
 });
+
+test('the shell task covers shell parts of every page, compared on the page that owns them', () => {
+  const site = fixtureSite();
+  const header = site.pages[0].shell![0];
+  const menu = { ...header, id: 'S2', name: 'About Menu', key: 'k:menu', ownerRoute: '/about' };
+  const md = renderPlan({ ...site, shell: [{ ...header, ownerRoute: '/' }, menu] });
+  assert.match(md, /- \[ \] \*\*Step \d+: S2 About Menu\*\* — read `ai-guide\/shell\/S2-about-menu\/`/);
+  assert.ok(md.includes('`npm run compare -- /about --section S2`'));
+});

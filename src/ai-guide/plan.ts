@@ -95,7 +95,7 @@ function setupTask(site: GuideSite): string[] {
 
 function shellTask(site: GuideSite): string[] {
   const home = site.pages.find((p) => p.route === '/') ?? site.pages[0];
-  const parts = home.shell ?? [];
+  const parts = site.shell ?? home.shell ?? [];
   const lines = [
     '**Files:** `src/components/layout/*` (Navbar, Footer, Loader, page background…), `src/components/motion/*`, `src/app/layout.tsx`, `src/content/layout.ts`.',
     `**Read first:** \`ai-guide/site.md\` (navigation, footer, shared sections), the folders in \`ai-guide/shell/\`, \`ai-guide/pages/${home.slug}/motion.md\` (the "Custom behaviour" and "Page-wide" parts), \`ai-guide/pages/${home.slug}/frames/load/\`.`,
@@ -103,7 +103,7 @@ function shellTask(site: GuideSite): string[] {
     step(1, 'Layout content', '`src/content/layout.ts` with the navigation and footer links and texts from `ai-guide/site.md` and the shell `ref.md` files.'),
   ];
   parts.forEach((s, i) => {
-    lines.push(sectionStep(i + 2, s, `ai-guide/shell/${sectionDirName(s)}`, `src/components/layout/${pascal(s.name) || `Part${i + 1}`}.tsx`, 'src/content/layout.ts', '/'));
+    lines.push(sectionStep(i + 2, s, `ai-guide/shell/${sectionDirName(s)}`, `src/components/layout/${pascal(s.name) || `Part${i + 1}`}.tsx`, 'src/content/layout.ts', s.ownerRoute ?? '/'));
   });
   let n = parts.length + 2;
   lines.push(step(n++, 'Mobile menu and smooth scroll', 'a working mobile menu (button + panel, see the `## Interactive` part of the header ref.md); Lenis smooth scroll; only the custom behaviour `motion.md` lists.'));

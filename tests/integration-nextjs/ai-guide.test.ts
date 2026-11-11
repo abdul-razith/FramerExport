@@ -46,7 +46,7 @@ after(async () => {
 test('ai-guide v2 writes section references next to an unchanged export', { timeout: 900000 }, async () => {
   const dir = await exportCopy(server.url + '/');
   const before = await hashTree(dir);
-  process.env.FRAMER_AIGUIDE_TEST_FAIL = 'record:/services';
+  process.env.FRAMER_AIGUIDE_TEST_FAIL = 'record:/services,section:/';
   let ok = false;
   try {
     ({ ok } = await runAiGuide(dir, server.url + '/', () => {}));
@@ -94,8 +94,33 @@ test('ai-guide v2 writes section references next to an unchanged export', { time
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'ai-guide/README.md', 'ai-guide/site.md', 'ai-guide/tokens.md', 'ai-guide/pages/index/motion.md', 'ai-guide/pages/index/desktop.png']) {
     assert.ok(existsSync(path.join(dir, f)), f);
   }
+  // One section failing does not fail the guide; its ref.md says so.
+  const shellRefs = await Promise.all(shell.map((f) => read(dir, `ai-guide/shell/${f}/ref.md`)));
+  assert.equal(shellRefs.filter((r) => r.includes('could not be written')).length, 1, shellRefs.join('
+---
+'));
+  // Shell ids are unique per page in sections.json.
+  for (const route of Object.keys(json)) {
+    const sIds = json[route].sections.map((x: { id: string }) => x.id).filter((id: string) => id.startsWith('S'));
+    assert.equal(new Set(sIds).size, sIds.length, `${route}: ${sIds.join(',')}`);
+  }
   // One page's recording failing does not fail the guide; that page says so.
   assert.match(await read(dir, 'ai-guide/pages/services/motion.md'), /recording failed/);
+});
+
+test('one page failing writes a note in its folder and the rest of the guide', { timeout: 900000 }, async () => {
+  const dir = await exportCopy(server.url + '/');
+  process.env.FRAMER_AIGUIDE_TEST_FAIL = 'page:/services';
+  let ok = false;
+  try {
+    ({ ok } = await runAiGuide(dir, server.url + '/', () => {}));
+  } finally {
+    delete process.env.FRAMER_AIGUIDE_TEST_FAIL;
+  }
+  assert.equal(ok, true);
+  assert.match(await read(dir, 'ai-guide/pages/services/ERROR.md'), /Simulated page failure/);
+  assert.ok(existsSync(path.join(dir, 'ai-guide/pages/index/motion.md')));
+  assert.ok(existsSync(path.join(dir, 'ai-guide/plan.md')));
 });
 
 test('a failure writes ai-guide/ERROR.md and leaves the export and the previous guide', async () => {

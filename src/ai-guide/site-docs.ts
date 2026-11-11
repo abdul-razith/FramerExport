@@ -32,7 +32,8 @@ export function renderSiteMd(site: GuideSite): string {
   out.push('## Navigation', ...(site.nav.length ? site.nav.map((l) => `- ${l.text} → ${l.href}`) : ['None found.']), '');
   out.push('## Footer links', ...(site.footer.length ? site.footer.map((l) => `- ${l.text} → ${l.href}`) : ['None found.']), '');
   const home = site.pages.find((p) => p.route === '/') ?? site.pages[0];
-  out.push('## Shell parts (ai-guide/shell/)', ...(home?.shell?.length ? home.shell.map((s) => `- ${s.id} ${s.name}`) : ['None found.']), '');
+  const shell = site.shell ?? home?.shell ?? [];
+  out.push('## Shell parts (ai-guide/shell/)', ...(shell.length ? shell.map((s) => `- ${s.id} ${s.name}${s.ownerRoute && s.ownerRoute !== '/' ? ` (first on ${s.ownerRoute})` : ''}`) : ['None found.']), '');
   out.push(
     '## Sections shared between pages',
     ...(site.sharedSections.length ? site.sharedSections.map((s) => `- ${s.name}: ${s.routes.join(', ')}`) : ['None.']),

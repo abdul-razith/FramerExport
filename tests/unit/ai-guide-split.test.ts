@@ -76,3 +76,23 @@ test('a page-high absolute layer goes to the shell even when it holds text (back
   assert.deepEqual(names(sections), ['Hero', 'Works']);
   assert.equal(shell.length, 1);
 });
+
+test('a tall wrapper of full-width parts stacked one under another is opened, even below 90% of the page', () => {
+  const intro = n('Intro', [0, 0, 1440, 800], [], { text: 'Intro' });
+  const bio = n('Bio', [0, 800, 1440, 1200], [], { text: 'Bio' });
+  const timeline = n('Timeline', [0, 2000, 1440, 2000], [], { text: 'Time' });
+  const contain = n('Contain', [0, 0, 1440, 4000], [intro, bio, timeline]);
+  const all = n('All Content', [0, 0, 1440, 4000], [contain]);
+  const cta = n('CTA', [0, 4000, 1440, 1200], [], { text: 'Talk' });
+  const root = n('body', [0, 0, 1440, 5200], [all, cta], { tag: 'body' });
+  const { sections } = splitPage(root, boxes, new Set(), 5200);
+  assert.deepEqual(names(sections), ['All Content — Intro', 'All Content — Bio', 'All Content — Timeline', 'CTA']);
+});
+
+test('a tall section laid out side by side is not opened', () => {
+  const left = n('Left', [0, 0, 700, 2000], [], { text: 'L' });
+  const right = n('Right', [740, 0, 700, 2000], [], { text: 'R' });
+  const gallery = n('Gallery', [0, 0, 1440, 2000], [left, right]);
+  const root = n('body', [0, 0, 1440, 3000], [gallery, n('End', [0, 2000, 1440, 1000], [], { text: 'E' })], { tag: 'body' });
+  assert.deepEqual(names(splitPage(root, boxes, new Set(), 3000).sections), ['Gallery', 'End']);
+});

@@ -53,10 +53,32 @@ function panelHolder(section: Node, boxes: Boxes): Node[] | undefined {
   return undefined;
 }
 
-/** A tall section with similar panels becomes its panels plus what sits around them, in order. */
+/**
+ * The node (through single-child wrappers, ≤ 3 levels down) whose 2+ parts are full width and
+ * stacked one under another, each at least 150px tall: Framer's "All Content" wrapper.
+ */
+function stackHolder(section: Node, boxes: Boxes): Node[] | undefined {
+  const width = boxes(section).base?.w ?? 0;
+  const path = [section];
+  for (let depth = 0; depth <= 3; depth++) {
+    const node = path[path.length - 1];
+    const kids = node.children.filter((c) => !isEmpty(c, boxes) && !/^(absolute|fixed)$/.test(c.styles.base.position ?? ''));
+    if (kids.length === 1) {
+      path.push(kids[0]);
+      continue;
+    }
+    if (kids.length < 2) return undefined;
+    const bs = kids.map((c) => boxes(c).base);
+    const stacked = bs.every((b, i) => !!b && b.w >= width * 0.9 && b.h >= 150 && (i === 0 || b.y >= bs[i - 1]!.y + bs[i - 1]!.h - 2));
+    return stacked ? path : undefined;
+  }
+  return undefined;
+}
+
+/** A tall section becomes its parts, in order: similar panels, or the stacked parts of a wrapper. */
 function explode(section: Node, boxes: Boxes): SplitPart[] | undefined {
   if (height(section, boxes) <= TALL) return undefined;
-  const path = panelHolder(section, boxes);
+  const path = panelHolder(section, boxes) ?? stackHolder(section, boxes);
   if (!path || path.length < 1) return undefined;
   const onPath = new Set(path);
   const holder = path[path.length - 1];

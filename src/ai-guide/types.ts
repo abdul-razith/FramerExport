@@ -28,6 +28,8 @@ export interface GuideSection {
   parent?: string;
   /** A shared part (header, footer, loader, overlay, page background): built once in the shell. */
   shell?: boolean;
+  /** For shell parts: the route of the first page they appear on (where they are built and compared). */
+  ownerRoute?: string;
   /** The widths showing each text, link href or image exportPath (absent = all widths). */
   widthsOf: Record<string, Breakpoint[]>;
   /** Text the page generates (clock, changing values): not content, masked in comparisons. */
@@ -80,6 +82,8 @@ export interface GuideSite {
   collections: GuideCollection[];
   nav: GuideLink[];
   footer: GuideLink[];
+  /** Every shell part of the site, once, in id order (each with its ownerRoute). */
+  shell?: GuideSection[];
   /** Sections that look the same on several pages (shared header, footer, CTA…). */
   sharedSections: { name: string; routes: string[] }[];
   tokens: ThemeTokens;
