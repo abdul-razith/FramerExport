@@ -86,8 +86,8 @@ widths use the same markup, one `markup.html` is written.
 
 ### `styles.css`
 
-Taken from the export's own stylesheets through the browser (`document.styleSheets`, export served
-locally, as the capture already does for size rules). Kept: rules whose selector uses a class of the
+Taken from the export's own stylesheets: the `<style>` blocks of the page's export HTML, read with a
+small rule parser (no browser, no new dependency). Kept: rules whose selector uses a class of the
 section's elements (including `framer-styles-preset-*` text presets and `:hover` rules). Grouped as
 `/* all widths */`, `/* tablet ≤1199px */`, `/* mobile ≤809px */` by their media query; rules for
 other media queries keep their own heading. Framer variables (`var(--token-…)`, font variables) are
