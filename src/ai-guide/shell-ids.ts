@@ -1,3 +1,16 @@
+import { looseHash } from '../nextjs/components.js';
+import type { Node } from '../nextjs/model.js';
+
+/**
+ * What makes two shell parts on different pages the same part: Framer gives a shared component the
+ * same class on every page (its size can differ, e.g. a page-high background); without a class, the
+ * structure hash.
+ */
+export function shellKey(node: Node): string {
+  const cls = (node.attrs.class ?? '').split(/\s+/).find((c) => /^framer-[a-z0-9]+(-container)?$/i.test(c) && c !== 'framer-text');
+  return cls ? `class:${cls}` : `hash:${looseHash(node)}`;
+}
+
 /** Where a shell part is built: the first page it appears on, and its position in that page's shell list. */
 export interface ShellOwner {
   route: string;

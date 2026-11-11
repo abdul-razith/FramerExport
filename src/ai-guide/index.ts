@@ -43,7 +43,7 @@ import { buildGuidePage } from './outline.js';
 import { markupFileNames, renderSectionRef, sectionDirName } from './section-ref.js';
 import { sectionsJson, WIDTH_KEY, type WidthKey } from './sections-json.js';
 import { splitPage } from './split.js';
-import { assignShellIds } from './shell-ids.js';
+import { assignShellIds, shellKey } from './shell-ids.js';
 import { swapIn } from './swap.js';
 import { renderPlan, writePlanFile } from './plan.js';
 import { recordPage } from './record.js';
@@ -339,7 +339,7 @@ async function build(
       const collection = itemOf.get(p.route);
       built.push({
         page: collection ? { ...page, collection } : page,
-        shellHashes: shellParts.map((s) => looseHash(s.node)),
+        shellHashes: shellParts.map((s) => shellKey(s.node)),
       });
     } catch (e) {
       // One page whose structure cannot be read must not cost the whole guide.
@@ -352,26 +352,34 @@ async function build(
     }
   }
   if (!built.length) throw new Error('No page could be analysed.');
-  // Shell ids by structure, home page first; each part is built once, on the first page it appears on.
-  const order = [...built].sort((a, b) =>
-    a.page.route === '/' ? -1 : b.page.route === '/' ? 1 : 0
-  );
-  const { ids, owners } = assignShellIds(
-    order.map((b) => ({ route: b.page.route, hashes: b.shellHashes }))
-  );
+  // Shell ids by Framer class (else structure), home page first; each part is built once, on the
+  // first page it appears on. Only pages that get section folders own shell parts (CMS items other
+  // than the first share their collection's template); the others keep only parts already known.
+  const firstItems = new Set(collections.map((c) => c.itemRoutes[0]));
+  const owning = (route: string) => !itemOf.has(route) || firstItems.has(route);
+  const order = built.filter((b) => owning(b.page.route)).sort((a, b) => (a.page.route === '/' ? -1 : b.page.route === '/' ? 1 : 0));
+  const { ids, owners } = assignShellIds(order.map((b) => ({ route: b.page.route, hashes: b.shellHashes })));
   order.forEach((b, i) => (b.page.shell ?? []).forEach((s, k) => (s.id = ids[i][k])));
   const siteShell: GuideSection[] = owners.map((o) => {
     const s = order.find((b) => b.page.route === o.route)!.page.shell![o.index];
     s.ownerRoute = o.route;
     return s;
   });
-  for (const b of built)
-    for (const s of b.page.shell ?? [])
-      s.ownerRoute = siteShell.find((x) => x.id === s.id)?.ownerRoute;
+  const idByKey = new Map<string, string>();
+  order.forEach((b, i) => b.shellHashes.forEach((h, k) => idByKey.set(h, ids[i][k])));
+  for (const b of built) {
+    if (!owning(b.page.route) && b.page.shell) {
+      b.page.shell = b.page.shell.filter((s, k) => {
+        const id = idByKey.get(b.shellHashes[k]);
+        if (id) s.id = id;
+        return !!id;
+      });
+    }
+    for (const s of b.page.shell ?? []) s.ownerRoute = siteShell.find((x) => x.id === s.id)?.ownerRoute;
+  }
   const guidePages: GuidePage[] = built.map((b) => b.page);
 
   // Screenshots, recordings, motion notes and the per-section references, page by page.
-  const firstItems = new Set(collections.map((c) => c.itemRoutes[0]));
   const modules = loadVendorModules(exportDir);
   const allRules: CssRule[] = [];
   const presets = new Set<string>();

@@ -96,3 +96,12 @@ test('a tall section laid out side by side is not opened', () => {
   const root = n('body', [0, 0, 1440, 3000], [gallery, n('End', [0, 2000, 1440, 1000], [], { text: 'E' })], { tag: 'body' });
   assert.deepEqual(names(splitPage(root, boxes, new Set(), 3000).sections), ['Gallery', 'End']);
 });
+
+test('stacked parts are full width of their own container, not of the page', () => {
+  const a = n('Intro', [120, 0, 1200, 900], [], { text: 'Intro' });
+  const b = n('Bio', [120, 900, 1200, 1200], [], { text: 'Bio' });
+  const contain = n('Contain', [120, 0, 1200, 2100], [a, b]);
+  const all = n('All Content', [0, 0, 1440, 2100], [contain]);
+  const root = n('body', [0, 0, 1440, 3000], [all, n('CTA', [0, 2100, 1440, 900], [], { text: 'T' })], { tag: 'body' });
+  assert.deepEqual(names(splitPage(root, boxes, new Set(), 3000).sections), ['All Content — Intro', 'All Content — Bio', 'CTA']);
+});

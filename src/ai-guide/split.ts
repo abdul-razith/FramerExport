@@ -58,10 +58,10 @@ function panelHolder(section: Node, boxes: Boxes): Node[] | undefined {
  * stacked one under another, each at least 150px tall: Framer's "All Content" wrapper.
  */
 function stackHolder(section: Node, boxes: Boxes): Node[] | undefined {
-  const width = boxes(section).base?.w ?? 0;
   const path = [section];
   for (let depth = 0; depth <= 3; depth++) {
     const node = path[path.length - 1];
+    const width = boxes(node).base?.w ?? 0;
     const kids = node.children.filter((c) => !isEmpty(c, boxes) && !/^(absolute|fixed)$/.test(c.styles.base.position ?? ''));
     if (kids.length === 1) {
       path.push(kids[0]);
