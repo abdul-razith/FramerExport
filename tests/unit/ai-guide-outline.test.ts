@@ -112,3 +112,24 @@ test('letters split into divs are one text too', () => {
   const loader = n('body:0/main:0/div[Loader]:0', 'div', { framerName: 'Loader' }, [n('w', 'div', {}, letters)]);
   assert.deepEqual(buildGuidePage(args([loader, projects()])).sections[0].texts, ['Welcome!']);
 });
+
+test('sections come from the split parts with ids, shell parts get S ids, texts carry their widths', () => {
+  const a = homeArgs();
+  const desktop = n('c:1', 'h1', { text: 'Big desktop title', visibility: ['base'] });
+  const small = n('c:2', 'h1', { text: 'Small title', visibility: ['tablet', 'mobile'] });
+  const heroNode = n('body:0/main:0/section[Hero Section]:0', 'section', { framerName: 'Hero Section', attrs: { class: 'framer-text framer-abc12 hidden-x' } }, [desktop, small]);
+  const header = n('hdr', 'header', { framerName: 'Header', text: 'Nudge' });
+  const page = buildGuidePage({
+    ...a,
+    parts: [
+      { node: heroNode, name: 'Hero Section' },
+      { node: projects(), name: 'Projects' },
+    ],
+    shellParts: [{ node: header, name: 'Header' }],
+  });
+  assert.deepEqual(page.sections.map((s) => s.id), ['01', '02']);
+  assert.equal(page.sections[0].className, 'framer-abc12');
+  assert.deepEqual(page.sections[0].widthsOf['Small title'], ['tablet', 'mobile']);
+  assert.deepEqual(page.sections[0].widthsOf['Big desktop title'], ['base']);
+  assert.deepEqual(page.shell?.map((s) => [s.id, s.name, s.shell]), [['S1', 'Header', true]]);
+});

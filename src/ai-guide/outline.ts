@@ -2,6 +2,8 @@ import { pageStructure } from '../nextjs/components.js';
 import type { ImageNamer } from '../nextjs/content.js';
 import { fullText } from '../nextjs/framer/collections.js';
 import { BREAKPOINTS, type Box, type Breakpoint, type Node, type RawNode } from '../nextjs/model.js';
+import type { SplitPart } from './split.js';
+import { cleanTexts, type TextItem } from './text-clean.js';
 import { pageSlug, type GuideImage, type GuidePage, type GuideSection } from './types.js';
 
 export interface BuildPageArgs {
@@ -46,27 +48,53 @@ function siteRelative(href: string, origin: string): string {
   }
 }
 
-/** Text, images and links of one section, in reading order. Link text is listed under links only. */
-function collect(node: Node, args: BuildPageArgs) {
-  const texts: string[] = [];
+/** Every raw node by key, per width (to see what each capture showed). */
+function rawIndex(trees: Record<Breakpoint, RawNode>): Map<string, Partial<Record<Breakpoint, RawNode>>> {
+  const out = new Map<string, Partial<Record<Breakpoint, RawNode>>>();
+  for (const bp of BREAKPOINTS) {
+    const walk = (r: RawNode) => {
+      const e = out.get(r.key) ?? {};
+      e[bp] = r;
+      out.set(r.key, e);
+      r.children.forEach(walk);
+    };
+    if (trees[bp]) walk(trees[bp]);
+  }
+  return out;
+}
+
+const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+
+/** Text, images and links of one section, in reading order, with the widths that show them. Link text is listed under links only. */
+function collect(node: Node, args: BuildPageArgs, raws: Map<string, Partial<Record<Breakpoint, RawNode>>>) {
+  const items: TextItem[] = [];
   const images: GuideImage[] = [];
   const links: { text: string; href: string }[] = [];
-  const seen = new Set<string>();
-  const addText = (t: string) => {
-    const v = t.replace(/\s+/g, ' ').trim();
-    if (v && !seen.has(v)) {
-      seen.add(v);
-      texts.push(v);
-    }
+  const widthsOf: Record<string, Breakpoint[]> = {};
+  const addWidths = (key: string, widths: Breakpoint[]) => {
+    widthsOf[key] = BREAKPOINTS.filter((bp) => widthsOf[key]?.includes(bp) || widths.includes(bp));
   };
-  const walk = (n: Node) => {
+  const variants = new Map<string, string[]>();
+  const addText = (t: string, n: Node, widths: Breakpoint[]) => {
+    const v = norm(t);
+    if (!v) return;
+    items.push({ text: v, widths, key: n.key });
+    const seen = Object.values(raws.get(n.key) ?? {}).map((r) => norm(r?.text ?? '')).filter(Boolean);
+    if (seen.length) variants.set(n.key, seen);
+  };
+  const walk = (n: Node, inherited: Breakpoint[]) => {
+    const widths = n.visibility ? inherited.filter((bp) => n.visibility!.includes(bp)) : inherited;
+    if (!widths.length) return;
     if (n.tag === 'a' && n.attrs.href) {
-      const text = fullText(n).replace(/\s+/g, ' ').trim();
-      if (text) links.push({ text, href: siteRelative(n.attrs.href, args.origin) });
+      const text = norm(fullText(n));
+      const href = siteRelative(n.attrs.href, args.origin);
+      if (text && !links.some((l) => l.text === text && l.href === href)) links.push({ text, href });
+      if (text) addWidths(href, widths);
     }
     if (n.asset?.kind === 'image') {
       const alt = n.attrs.alt ?? '';
       const exportPath = args.localAsset?.(n.asset.src) ?? n.asset.src;
+      addWidths(exportPath, widths);
       if (images.some((i) => i.exportPath === exportPath)) return;
       images.push({
         exportPath,
@@ -81,19 +109,26 @@ function collect(node: Node, args: BuildPageArgs) {
     // A word Framer split into one element per letter (spans or divs): at least 3 leaf children of ≤ 2 characters.
     const letters = n.children.length >= 3 && n.children.every((c) => !c.children.length && !c.asset && (c.text ?? '').trim().length <= 2);
     const splitText = letters || (n.inline && (TEXT_TAGS.test(n.tag) || (n.children.length > 0 && n.children.every((c) => c.tag === 'span' && !c.children.length))));
-    if (splitText && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n));
-    if (n.text) addText(n.text);
-    n.children.forEach(walk);
+    if (splitText && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n), n, widths);
+    if (n.text) addText(n.text, n, widths);
+    n.children.forEach((c) => walk(c, widths));
   };
-  walk(node);
-  return { texts, images, links };
+  walk(node, [...BREAKPOINTS]);
+  const clean = cleanTexts(items, variants);
+  for (const t of clean.texts) addWidths(t.text, t.widths);
+  return { texts: clean.texts.map((t) => t.text), images, links, widthsOf, generated: clean.generated, liveKeys: clean.liveKeys, decorations: clean.decorations };
 }
 
-export function buildGuidePage(args: BuildPageArgs): GuidePage {
-  let nodes = pageStructure(args.root).sections;
-  if (!nodes.length) nodes = [args.root];
-  const sections: GuideSection[] = nodes.map((node, i) => {
-    const name = node.framerName?.trim() || `Section ${i + 1}`;
+/** The element's own Framer class: the first `framer-*` that is not a text, preset or variant class. */
+function ownClass(n: Node): string | undefined {
+  return (n.attrs.class ?? '').split(/\s+/).find((c) => /^framer-[a-z0-9]+$/i.test(c) && c !== 'framer-text' && !/^framer-v-/.test(c));
+}
+
+export function buildGuidePage(args: BuildPageArgs & { parts?: SplitPart[]; shellParts?: SplitPart[] }): GuidePage {
+  const raws = rawIndex(args.trees);
+  const toSection = (part: SplitPart, i: number, shell: boolean): GuideSection => {
+    const node = part.node;
+    const name = part.name.trim() || `Section ${i + 1}`;
     const boxes: Partial<Record<Breakpoint, Box>> = {};
     for (const bp of BREAKPOINTS) {
       const b = args.trees[bp] && findBox(args.trees[bp], node.key);
@@ -101,15 +136,33 @@ export function buildGuidePage(args: BuildPageArgs): GuidePage {
     }
     return {
       index: i + 1,
+      id: shell ? `S${i + 1}` : String(i + 1).padStart(2, '0'),
       name,
-      generic: !node.framerName || GENERIC.test(name),
+      generic: !node.framerName || GENERIC.test(node.framerName.trim()),
       key: node.key,
+      className: ownClass(node),
+      framerName: node.framerName?.trim() || undefined,
+      ...(part.parent ? { parent: part.parent } : {}),
+      ...(shell ? { shell: true } : {}),
       boxes,
-      ...collect(node, args),
+      ...collect(node, args, raws),
       motionKeys: [],
     };
-  });
-  return { route: args.route, slug: pageSlug(args.route), title: args.title, exportFile: args.exportFile, sections };
+  };
+  let parts = args.parts;
+  if (!parts) {
+    const nodes = pageStructure(args.root).sections;
+    parts = (nodes.length ? nodes : [args.root]).map((node, i) => ({ node, name: node.framerName?.trim() || `Section ${i + 1}` }));
+  }
+  const page: GuidePage = {
+    route: args.route,
+    slug: pageSlug(args.route),
+    title: args.title,
+    exportFile: args.exportFile,
+    sections: parts.map((p, i) => toSection(p, i, false)),
+  };
+  if (args.shellParts) page.shell = args.shellParts.map((p, i) => toSection(p, i, true));
+  return page;
 }
 
 const size = (b?: Box) => (b ? `${Math.round(b.w)}×${Math.round(b.h)}` : '?');

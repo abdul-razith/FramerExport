@@ -19,6 +19,23 @@ export interface GuideImage {
 
 export interface GuideSection {
   index: number;
+  /** `01`, `02`… for page sections; `S1`, `S2`… for shell parts. */
+  id: string;
+  /** The section element's own Framer class (`framer-19ielic`), used to find it in the export. */
+  className?: string;
+  framerName?: string;
+  /** Set when a tall section was split: the section's own name. */
+  parent?: string;
+  /** A shared part (header, footer, loader, overlay, page background): built once in the shell. */
+  shell?: boolean;
+  /** The widths showing each text, link href or image exportPath (absent = all widths). */
+  widthsOf: Record<string, Breakpoint[]>;
+  /** Text the page generates (clock, changing values): not content, masked in comparisons. */
+  generated: { text: string; kind: 'clock' | 'date' | 'counter' | 'changing' }[];
+  /** Node keys of the generated elements. */
+  liveKeys: string[];
+  /** Decoration noted once instead of listed (e.g. `ruler 0–2800`). */
+  decorations: string[];
   name: string;
   /** The Framer layer name says nothing (missing, "Frame 12"): the AI must name the component. */
   generic: boolean;
@@ -36,6 +53,8 @@ export interface GuidePage {
   title: string;
   exportFile: string;
   sections: GuideSection[];
+  /** Shell parts found on this page (header, loader, page background…). */
+  shell?: GuideSection[];
   /** Set on the detail pages of a CMS collection. */
   collection?: string;
 }
