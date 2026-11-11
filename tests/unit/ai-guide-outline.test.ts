@@ -156,3 +156,9 @@ test('texts come from each width’s capture, so a copy shown only on mobile is 
   assert.deepEqual(s.decorations, ['ruler 0–300']);
   assert.ok(!s.texts.some((t) => /^\d+$/.test(t) || t.includes('0100')), s.texts.join(' | '));
 });
+
+test('a code component container class is the section class', () => {
+  const node = n('cc', 'div', { attrs: { class: 'framer-b1hv7o-container' } }, [n('cc/t', 'p', { text: 'x' })]);
+  const page = buildGuidePage({ ...homeArgs(), parts: [{ node, name: 'Grid' }] });
+  assert.equal(page.sections[0].className, 'framer-b1hv7o-container');
+});

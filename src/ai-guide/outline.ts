@@ -153,7 +153,7 @@ function mergedTexts(n: Node, inherited: Breakpoint[], items: TextItem[]): void 
 
 /** The element's own Framer class: the first `framer-*` that is not a text, preset or variant class. */
 function ownClass(n: Node): string | undefined {
-  return (n.attrs.class ?? '').split(/\s+/).find((c) => /^framer-[a-z0-9]+$/i.test(c) && c !== 'framer-text' && !/^framer-v-/.test(c));
+  return (n.attrs.class ?? '').split(/\s+/).find((c) => /^framer-[a-z0-9]+(-container)?$/i.test(c) && c !== 'framer-text' && !/^framer-v-/.test(c));
 }
 
 export function buildGuidePage(args: BuildPageArgs & { parts?: SplitPart[]; shellParts?: SplitPart[] }): GuidePage {

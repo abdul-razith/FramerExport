@@ -212,11 +212,15 @@ The guide adds `AGENTS.md` and `CLAUDE.md` (the agent's rules) and an `ai-guide/
 | `ai-guide/files.md` | Which export file holds what, with readable names for images |
 | `ai-guide/content.md` | CMS collections, their items and fields, suggested MDX front matter |
 | `ai-guide/tokens.md` | Colours, fonts, radii and shadows with token names |
-| `ai-guide/pages/<page>/` | `outline.md`, `motion.md` (animations measured on the live site), screenshots at 1440/1024/390, section crops, recorded frames |
-| `ai-guide/plan.md` | The tasks as a [superpowers](https://github.com/obra/superpowers) plan: project setup, site shell, one task per page, one per CMS collection, review |
-| `ai-guide/scripts/compare.mjs` | Screenshots a page of the new project next to the original |
+| `ai-guide/text-styles.css` | Framer's text styles (presets), once for the whole site |
+| `ai-guide/pages/<page>/` | `motion.md` (animations measured on the live site), screenshots at 1440/1024/390, recorded frames |
+| `ai-guide/pages/<page>/sections/<id>-<name>/` | Per section, mapped to the export's own code: `ref.md` (export file, line and element; which width shows what; cleaned content; Framer's exact animation settings read from the export's JS; hover/click states), `markup*.html` (the section's export markup per width), `styles.css` (only its export CSS rules, by width, colours as tokens), 900px screenshot slices, `states/` |
+| `ai-guide/shell/` | The same for parts shared by every page: header, footer, loader, overlays, page background |
+| `ai-guide/sections.json` | Section boxes per width, used by the compare script |
+| `ai-guide/plan.md` | The tasks as a [superpowers](https://github.com/obra/superpowers) plan: project setup (`create-next-app@latest` with a `src/` folder), site shell, one task per page with one step per section, one task per CMS collection, review |
+| `ai-guide/scripts/compare.mjs` | Scrolls a page of the new project (so on-scroll animations play) and scores each section against the original at 1440, 1024 and 390, with live parts such as clocks masked |
 
-Then make the export folder a git repository, open it in Claude Code or agy with the superpowers plugin installed, and say "Execute ai-guide/plan.md with superpowers, next task". The agent builds `nextjs-app/` (Next.js 16, React 19, Tailwind 4, motion, GSAP, Lenis, MDX), ticks the plan's checkboxes, and stops after each task for you to check and commit. Re-running the guide never touches `nextjs-app/`, and keeps a `plan.md` that has ticked steps (the new plan goes to `plan.new.md`). Design: `docs/superpowers/specs/2026-11-10-ai-conversion-kit-design.md`.
+Then make the export folder a git repository, open it in Claude Code or agy with the superpowers plugin installed, and say "Execute ai-guide/plan.md with superpowers, next task". The agent creates `nextjs-app/` with `npx create-next-app@latest` (TypeScript, Tailwind, ESLint, App Router, `src/` folder) and installs motion, GSAP, Lenis and MDX at their latest versions. It builds each section from its export markup and CSS with exact values, runs `npm run compare -- <route> --section <id>`, and fixes the section until it reaches 90% at 1440, 1024 and 390 (at most 3 rounds, otherwise it lists the scores and the reason). It ticks the plan's checkboxes and stops after each task for you to check and commit. Re-running the guide never touches `nextjs-app/`, and keeps a `plan.md` that has ticked steps (the new plan goes to `plan.new.md`). Design: `docs/superpowers/specs/2026-11-10-ai-conversion-kit-design.md` and `docs/superpowers/specs/2026-11-11-ai-guide-export-references-design.md`.
 
 ## Convert a Framer site to Next.js automatically
 

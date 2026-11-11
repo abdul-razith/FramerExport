@@ -97,8 +97,8 @@ export function splitPage(root: Node, boxes: Boxes, sharedHashes: Set<string>, p
           visit(kids);
           continue;
         }
-        if (!hasContent(n)) {
-          shell.push({ node: n, name: nameOf(n) }); // page background or decoration
+        if (!inFlow || !hasContent(n)) {
+          shell.push({ node: n, name: nameOf(n) }); // page background, grid or decoration layer
           continue;
         }
       }

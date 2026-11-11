@@ -292,8 +292,9 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
       const rules = parseExportCss(html);
       allRules.push(...rules);
       const isHome = page.route === '/';
+      // CMS item pages share one template: only the first item of each collection gets section folders.
       const targets: { section: GuideSection; dir: string }[] = [
-        ...page.sections.map((s) => ({ section: s, dir: path.join(dir, 'sections', sectionDirName(s)) })),
+        ...(recorded ? page.sections : []).map((s) => ({ section: s, dir: path.join(dir, 'sections', sectionDirName(s)) })),
         ...(isHome ? (page.shell ?? []).map((s) => ({ section: s, dir: path.join(guideDir, 'shell', sectionDirName(s)) })) : []),
       ];
       log(`AI guide: section references for ${page.route} (${targets.length})`);

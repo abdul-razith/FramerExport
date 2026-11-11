@@ -66,3 +66,13 @@ test('plain sections under body stay as they are', () => {
   assert.deepEqual(names(sections), ['A', 'B', 'C']);
   assert.deepEqual(shell, []);
 });
+
+test('a page-high absolute layer goes to the shell even when it holds text (background grids, rulers)', () => {
+  const grid = n('', [0, 0, 1440, 3000], [n('Ruler', [0, 0, 1440, 40], [], { text: '100' })], { position: 'absolute' });
+  const hero = n('Hero', [0, 0, 1440, 1500], [], { text: 'Hi' });
+  const works = n('Works', [0, 1500, 1440, 1500], [], { text: 'Work' });
+  const root = n('body', [0, 0, 1440, 3000], [grid, hero, works], { tag: 'body' });
+  const { sections, shell } = splitPage(root, boxes, new Set(), 3000);
+  assert.deepEqual(names(sections), ['Hero', 'Works']);
+  assert.equal(shell.length, 1);
+});
