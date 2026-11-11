@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { PNG } from 'pngjs';
-import { cropPng } from '../../src/ai-guide/crops.js';
+import { cropPng, sliceSection } from '../../src/ai-guide/crops.js';
 import { COMPARE_MJS } from '../../src/ai-guide/templates/compare.js';
 
 const tmpDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'ai-guide-crops-'));
@@ -66,4 +66,13 @@ test('compare.mjs reads the route even after Git Bash rewrote it into a Windows 
   assert.match(run('C:/Program Files/Git/about').stderr, /http:\/\/127\.0\.0\.1:9\/about/);
   assert.match(run('about').stderr, /http:\/\/127\.0\.0\.1:9\/about/);
   assert.match(run('--bogus').stderr, /Unknown argument/);
+});
+
+test('sliceSection cuts a tall box into 900px slices', async () => {
+  const src = await writeTestPng(100, 2400);
+  const out = await tmpDir();
+  const files = await sliceSection(src, { x: 0, y: 200, w: 100, h: 2000 }, out, 'shot-1440');
+  assert.deepEqual(files.map((f) => path.basename(f)), ['shot-1440-1.png', 'shot-1440-2.png', 'shot-1440-3.png']);
+  assert.equal(PNG.sync.read(await fs.readFile(files[2])).height, 200);
+  assert.equal(PNG.sync.read(await fs.readFile(files[0])).height, 900);
 });
