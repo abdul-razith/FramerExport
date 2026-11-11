@@ -15,6 +15,8 @@ function raw(node: Node, boxes: Record<string, { x: number; y: number; w: number
     key: node.key,
     tag: node.tag,
     attrs: node.attrs,
+    ...(node.text ? { text: node.text } : {}),
+    ...(node.inline ? { inline: node.inline } : {}),
     box: boxes[node.key] ?? { x: 0, y: 0, w: 0, h: 0 },
     styles: {},
     visible: true,
@@ -117,7 +119,7 @@ test('sections come from the split parts with ids, shell parts get S ids, texts 
   const a = homeArgs();
   const desktop = n('c:1', 'h1', { text: 'Big desktop title', visibility: ['base'] });
   const small = n('c:2', 'h1', { text: 'Small title', visibility: ['tablet', 'mobile'] });
-  const heroNode = n('body:0/main:0/section[Hero Section]:0', 'section', { framerName: 'Hero Section', attrs: { class: 'framer-text framer-abc12 hidden-x' } }, [desktop, small]);
+  const heroNode = n('not-captured', 'section', { framerName: 'Hero Section', attrs: { class: 'framer-text framer-abc12 hidden-x' } }, [desktop, small]);
   const header = n('hdr', 'header', { framerName: 'Header', text: 'Nudge' });
   const page = buildGuidePage({
     ...a,
@@ -132,4 +134,25 @@ test('sections come from the split parts with ids, shell parts get S ids, texts 
   assert.deepEqual(page.sections[0].widthsOf['Small title'], ['tablet', 'mobile']);
   assert.deepEqual(page.sections[0].widthsOf['Big desktop title'], ['base']);
   assert.deepEqual(page.shell?.map((s) => [s.id, s.name, s.shell]), [['S1', 'Header', true]]);
+});
+
+test('texts come from each width’s capture, so a copy shown only on mobile is kept with its widths', () => {
+  const a = homeArgs();
+  const heroNode = n('S', 'section', { framerName: 'Hero' }, [n('S/d', 'h1', { text: 'Big desktop title' })]);
+  const rawHero = (bp: 'base' | 'tablet' | 'mobile'): RawNode => ({
+    key: 'S', tag: 'section', attrs: {}, box: { x: 0, y: 0, w: 100, h: 100 }, styles: {}, visible: true,
+    children: [
+      { key: 'S/d', tag: 'h1', attrs: {}, text: 'Big desktop title', box: { x: 0, y: 0, w: 10, h: 10 }, styles: {}, visible: bp === 'base', children: [] },
+      { key: 'S/m', tag: 'h1', attrs: {}, text: 'Small title', box: { x: 0, y: 0, w: 10, h: 10 }, styles: {}, visible: bp !== 'base', children: [] },
+      { key: 'S/r', tag: 'div', attrs: {}, box: { x: 0, y: 0, w: 10, h: 10 }, styles: {}, visible: true, inline: [0, ' ', 1, ' ', 2, ' ', 3],
+        children: ['0', '100', '200', '300'].map((t, i) => ({ key: `S/r/${i}`, tag: 'span', attrs: {}, text: t, box: { x: 0, y: 0, w: 5, h: 5 }, styles: {}, visible: true, children: [] })) },
+    ],
+  });
+  const trees = { base: rawHero('base'), tablet: rawHero('tablet'), mobile: rawHero('mobile') };
+  const page = buildGuidePage({ ...a, trees, parts: [{ node: heroNode, name: 'Hero' }] });
+  const s = page.sections[0];
+  assert.deepEqual(s.widthsOf['Small title'], ['tablet', 'mobile']);
+  assert.deepEqual(s.widthsOf['Big desktop title'], ['base']);
+  assert.deepEqual(s.decorations, ['ruler 0–300']);
+  assert.ok(!s.texts.some((t) => /^\d+$/.test(t) || t.includes('0100')), s.texts.join(' | '));
 });

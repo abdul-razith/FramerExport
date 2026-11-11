@@ -46,7 +46,8 @@ export function cleanTexts(
   const decorations: string[] = [];
   const drop = new Set<number>();
   for (const [a, b] of rulerRuns(items)) {
-    decorations.push(`ruler ${items[a].text}–${items[b].text}`);
+    const label = `ruler ${items[a].text}–${items[b].text}`;
+    if (!decorations.includes(label)) decorations.push(label);
     for (let k = a; k <= b; k++) drop.add(k);
   }
   const generated: Generated[] = [];

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
 import { warn } from '../logger/index.js';
-import { capturePages, listExportPages, type CapturedPage } from '../nextjs/capture.js';
+import { capturePages, listExportPages } from '../nextjs/capture.js';
 import { looseHash, pageStructure } from '../nextjs/components.js';
 import { ImageNamer } from '../nextjs/content.js';
 import { extractStartStates } from '../nextjs/framer/animations.js';
@@ -11,12 +11,19 @@ import { mergeBreakpoints } from '../nextjs/framer/breakpoints.js';
 import { detectCollections, fullText, toIsoDate, type Collection } from '../nextjs/framer/collections.js';
 import { attachMotion } from '../nextjs/framer/motion-map.js';
 import { extractFontFaces } from '../nextjs/fonts.js';
-import type { Breakpoint, ConversionContext, Node, PageModel } from '../nextjs/model.js';
+import { BREAKPOINTS, type Box, type Breakpoint, type ConversionContext, type Node, type PageModel, type RawNode } from '../nextjs/model.js';
 import { emptyReport } from '../nextjs/report.js';
-import { collectTokens } from '../nextjs/tokens.js';
-import { cropPng } from './crops.js';
+import { collectTokens, type ThemeTokens } from '../nextjs/tokens.js';
+import { sliceSection } from './crops.js';
+import { hiddenClassWidths, parseExportCss, stylesForClasses, textStyles, type CssRule } from './export-css.js';
+import { classesIn, presetClassesIn, sectionMarkup, type MarkupCopy } from './export-markup.js';
+import { findAnimations, loadVendorModules, type ExportAnimation } from './export-motion.js';
+import { recordInteractions, type InteractionState } from './interactions.js';
 import { motionFromNodes, renderMotionMd, summarizeLoad } from './motion.js';
-import { buildGuidePage, renderOutline, sectionStem } from './outline.js';
+import { buildGuidePage } from './outline.js';
+import { markupFileNames, renderSectionRef, sectionDirName } from './section-ref.js';
+import { sectionsJson, WIDTH_KEY, type WidthKey } from './sections-json.js';
+import { splitPage } from './split.js';
 import { renderPlan, writePlanFile } from './plan.js';
 import { recordPage } from './record.js';
 import { renderContentMd, renderFilesMd, renderSiteMd, renderTokensMd } from './site-docs.js';
@@ -24,7 +31,7 @@ import { AGENTS_MD } from './templates/agents.js';
 import { CHECKLIST_MD } from './templates/checklist.js';
 import { COMPARE_MJS } from './templates/compare.js';
 import { renderReadme } from './templates/readme.js';
-import type { GuideCollection, GuideLink, GuidePage, GuideSite, MotionEntry } from './types.js';
+import type { GuideCollection, GuideLink, GuidePage, GuideSection, GuideSite, MotionEntry } from './types.js';
 
 export { takeAiGuideFlag } from './flag.js';
 
@@ -112,13 +119,78 @@ function guideCollection(c: Collection, byRoute: Map<string, PageModel>, lookup:
   };
 }
 
-async function writeCrops(dir: string, page: GuidePage, captured: CapturedPage): Promise<void> {
-  for (const s of page.sections) {
-    for (const [bp, name] of Object.entries(SHOT_NAMES) as [Breakpoint, string][]) {
-      const box = s.boxes[bp];
-      if (box) await cropPng(captured.screenshots[bp], box, path.join(dir, 'sections', `${sectionStem(s)}-${name}.png`));
+/** Box of a node (by key) at each width, from the three captures. */
+function boxLookup(trees: Record<Breakpoint, RawNode>): (n: Node) => Partial<Record<Breakpoint, Box>> {
+  const index = new Map<string, Partial<Record<Breakpoint, Box>>>();
+  for (const bp of BREAKPOINTS) {
+    const walk = (r: RawNode) => {
+      const e = index.get(r.key) ?? {};
+      if (r.visible !== false) e[bp] = r.box;
+      index.set(r.key, e);
+      r.children.forEach(walk);
+    };
+    if (trees[bp]) walk(trees[bp]);
+  }
+  return (n) => index.get(n.key) ?? {};
+}
+
+/** Structure hashes of parts found on two or more pages (top-level sections and their children). */
+function sharedPartHashes(pages: PageModel[]): Set<string> {
+  const seenOn = new Map<string, Set<string>>();
+  for (const p of pages) {
+    for (const s of pageStructure(p.root).sections) {
+      for (const n of [s, ...s.children]) {
+        const h = looseHash(n);
+        if (!seenOn.has(h)) seenOn.set(h, new Set());
+        seenOn.get(h)!.add(p.route);
+      }
     }
   }
+  return new Set([...seenOn].filter(([, routes]) => routes.size > 1).map(([h]) => h));
+}
+
+/** Gives a shell part the same id on every page as on the home page (by name); new ones continue the numbering. */
+function alignShellIds(pages: GuidePage[]): void {
+  const home = pages.find((p) => p.route === '/') ?? pages[0];
+  const known = new Map((home?.shell ?? []).map((s) => [s.name, s.id]));
+  let next = known.size;
+  for (const p of pages) {
+    if (p === home) continue;
+    for (const s of p.shell ?? []) {
+      if (!known.has(s.name)) known.set(s.name, `S${++next}`);
+      s.id = known.get(s.name)!;
+    }
+  }
+}
+
+/** Everything the export says about one section; each part fails on its own. */
+async function sectionReference(s: GuideSection, html: string, rules: CssRule[], tokens: ThemeTokens, modules: { file: string; text: string }[], entries: MotionEntry[]) {
+  const hidden = hiddenClassWidths(rules);
+  let markup: MarkupCopy[] | Error;
+  try {
+    markup = await sectionMarkup(html, { framerName: s.framerName, className: s.className }, hidden);
+    if (!markup.length) markup = new Error('the element was not found in the export file');
+  } catch (e) {
+    markup = e as Error;
+  }
+  const copies = markup instanceof Error ? [] : markup;
+  const classes = [...new Set([...(s.className ? [s.className] : []), ...copies.flatMap((c) => classesIn(c.html))])];
+  const presets = [...new Set(copies.flatMap((c) => presetClassesIn(c.html)))];
+  let css: string | Error;
+  try {
+    css = stylesForClasses(rules, classes, tokens);
+  } catch (e) {
+    css = e as Error;
+  }
+  let animations: ExportAnimation[] | Error;
+  try {
+    animations = findAnimations(modules, classes);
+  } catch (e) {
+    animations = e as Error;
+  }
+  const hoverClasses = classes.filter((c) => rules.some((r) => r.selector.includes(':hover') && new RegExp(`\\.${c}(?![\\w-])`).test(r.selector)));
+  const recorded = entries.filter((e) => e.key === s.key || e.key.startsWith(s.key + '/'));
+  return { markup, css, presets, animations, recorded, hoverClasses, selectorClasses: s.className ? [s.className] : [] };
 }
 
 /**
@@ -171,15 +243,24 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
   const images = new ImageNamer();
   const lookup = assetLookup(exportDir);
 
+  // Parts shared by several pages (header, footer, CTA…) belong to the shell, built once.
+  const sharedHashes = sharedPartHashes(pages.filter((p) => !itemOf.has(p.route)));
+  const tokens = collectTokens(pages.map((p) => p.root));
   const guidePages: GuidePage[] = pages.map((p) => {
     const c = capturedBy.get(p.route)!;
-    const page = buildGuidePage({ route: p.route, title: p.title, exportFile: files.get(p.route) ?? '', root: p.root, trees: c.trees, images, origin, localAsset: lookup });
+    const boxes = boxLookup(c.trees);
+    const { sections: parts, shell: shellParts } = splitPage(p.root, boxes, sharedHashes, c.trees.base.box.h || 1);
+    const page = buildGuidePage({ route: p.route, title: p.title, exportFile: files.get(p.route) ?? '', root: p.root, trees: c.trees, images, origin, localAsset: lookup, parts, shellParts });
     const collection = itemOf.get(p.route);
     return collection ? { ...page, collection } : page;
   });
+  alignShellIds(guidePages);
 
-  // Section screenshots, reference screenshots, recordings and motion notes, page by page.
+  // Screenshots, recordings, motion notes and the per-section references, page by page.
   const firstItems = new Set(collections.map((c) => c.itemRoutes[0]));
+  const modules = loadVendorModules(exportDir);
+  const allRules: CssRule[] = [];
+  const presets = new Set<string>();
   const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   try {
     for (const page of guidePages) {
@@ -189,10 +270,10 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
       for (const [bp, name] of Object.entries(SHOT_NAMES) as [Breakpoint, string][]) {
         await fs.copyFile(c.screenshots[bp], path.join(dir, `${name}.png`));
       }
-      await writeCrops(dir, page, c);
       const entries: MotionEntry[] = motionFromNodes(byRoute.get(page.route)!.root, c.hover);
       let recordingNote = '';
-      if (!page.collection || firstItems.has(page.route)) {
+      const recorded = !page.collection || firstItems.has(page.route);
+      if (recorded) {
         log(`AI guide: recording ${page.route}`);
         try {
           if (process.env.FRAMER_AIGUIDE_TEST_FAIL === `record:${page.route}`) throw new Error('Simulated recording failure');
@@ -205,12 +286,98 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
           recordingNote = `\n> The recording failed for this page (${(e as Error).message}), so its load and loop animations are not listed here; only what the page's CSS and markup show is. Check the live site for the rest.\n`;
         }
       }
-      await fs.writeFile(path.join(dir, 'outline.md'), renderOutline(page));
       await fs.writeFile(path.join(dir, 'motion.md'), renderMotionMd(page, entries) + recordingNote);
+
+      const html = exportHtml.get(page.route) ?? '';
+      const rules = parseExportCss(html);
+      allRules.push(...rules);
+      const isHome = page.route === '/';
+      const targets: { section: GuideSection; dir: string }[] = [
+        ...page.sections.map((s) => ({ section: s, dir: path.join(dir, 'sections', sectionDirName(s)) })),
+        ...(isHome ? (page.shell ?? []).map((s) => ({ section: s, dir: path.join(guideDir, 'shell', sectionDirName(s)) })) : []),
+      ];
+      log(`AI guide: section references for ${page.route} (${targets.length})`);
+      const refs = await Promise.all(targets.map((t) => sectionReference(t.section, html, rules, tokens, modules, entries)));
+      let states: InteractionState[] = [];
+      if (recorded) {
+        try {
+          const interactionTargets = refs.map((r, i) => ({ id: targets[i].section.id, selectorClasses: r.selectorClasses, hoverClasses: r.hoverClasses })).filter((t) => t.selectorClasses.length);
+          const tmp = path.join(dir, '.states');
+          states = await recordInteractions(browser, c.url, interactionTargets, tmp, 1440);
+          if (isHome) {
+            const shellIds = new Set((page.shell ?? []).map((s) => s.id));
+            states.push(...(await recordInteractions(browser, c.url, interactionTargets.filter((t) => shellIds.has(t.id)), path.join(tmp, '390'), 390)).map((s) => ({ ...s, before: `390/${s.before}`, after: `390/${s.after}` })));
+          }
+          for (const st of states) {
+            const t = targets.find((x) => x.section.id === st.section)!;
+            for (const f of [st.before, st.after]) {
+              const target = path.join(t.dir, 'states', path.basename(f).replace(/^/, f.startsWith('390/') ? 'mobile-' : ''));
+              await fs.mkdir(path.dirname(target), { recursive: true });
+              await fs.rename(path.join(tmp, f), target);
+            }
+            const prefix = st.before.startsWith('390/') ? 'mobile-' : '';
+            st.before = `states/${prefix}${path.basename(st.before)}`;
+            st.after = `states/${prefix}${path.basename(st.after)}`;
+          }
+          await fs.rm(tmp, { recursive: true, force: true });
+        } catch (e) {
+          log(`AI guide: interaction states for ${page.route} failed (${(e as Error).message})`);
+          states = [];
+        }
+      }
+      for (const [i, t] of targets.entries()) {
+        const r = refs[i];
+        for (const p of r.presets) presets.add(p);
+        await fs.mkdir(t.dir, { recursive: true });
+        if (!(r.markup instanceof Error)) {
+          const names = markupFileNames(r.markup);
+          for (const [k, copy] of r.markup.entries()) await fs.writeFile(path.join(t.dir, names[k]), copy.html);
+        }
+        if (!(r.css instanceof Error)) await fs.writeFile(path.join(t.dir, 'styles.css'), r.css || '/* no rules of its own */\n');
+        const slices: Partial<Record<WidthKey, string[]>> = {};
+        for (const bp of BREAKPOINTS) {
+          const box = t.section.boxes[bp];
+          if (box && box.w > 0 && box.h > 0) slices[WIDTH_KEY[bp]] = (await sliceSection(c.screenshots[bp], box, t.dir, `shot-${WIDTH_KEY[bp]}`)).map((f) => path.basename(f));
+        }
+        await fs.writeFile(
+          path.join(t.dir, 'ref.md'),
+          renderSectionRef({
+            page,
+            section: t.section,
+            exportFile: page.exportFile,
+            markup: r.markup,
+            css: r.css,
+            presets: r.presets,
+            animations: r.animations,
+            recorded: r.recorded,
+            states: states.filter((s) => s.section === t.section.id),
+            slices,
+          })
+        );
+      }
     }
   } finally {
     await browser.close().catch(() => undefined);
   }
+  await fs.writeFile(path.join(guideDir, 'text-styles.css'), textStyles(allRules, [...presets], tokens) || '/* This site has no Framer text style presets. */\n');
+  await fs.writeFile(
+    path.join(guideDir, 'sections.json'),
+    JSON.stringify(
+      sectionsJson(guidePages, (route, id) => {
+        const page = guidePages.find((p) => p.route === route)!;
+        const s = [...(page.shell ?? []), ...page.sections].find((x) => x.id === id);
+        const boxes = boxLookup(capturedBy.get(route)!.trees);
+        const out: Partial<Record<WidthKey, Box[]>> = {};
+        for (const key of s?.liveKeys ?? []) {
+          const b = boxes({ key } as Node);
+          for (const bp of BREAKPOINTS) if (b[bp] && b[bp]!.w > 0) (out[WIDTH_KEY[bp]] ??= []).push(b[bp]!);
+        }
+        return out;
+      }),
+      null,
+      1
+    )
+  );
 
   const home = byRoute.get('/') ?? pages[0];
   const navNode = find(home.root, (n) => n.tag === 'nav' || /^(nav|navigation|menu|header)/i.test(n.framerName ?? '') || n.tag === 'header');
@@ -234,7 +401,7 @@ async function build(exportDir: string, sourceUrl: string, guideDir: string, log
     nav: navNode ? linksIn(navNode, origin) : [],
     footer: footerNode ? linksIn(footerNode, origin) : [],
     sharedSections: [...shared.values()].filter((s) => s.routes.length > 1),
-    tokens: collectTokens(pages.map((p) => p.root)),
+    tokens,
     fonts: extractFontFaces(exportDir, list.map((p) => p.exportHtml)),
     exportFiles: {
       images: listDir('assets/images')

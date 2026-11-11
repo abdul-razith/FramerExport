@@ -5,14 +5,15 @@ import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { serveFixture, FIXTURE_ROOT } from '../fixtures/nextjs/serve.js';
+import { serveFixture } from '../fixtures/nextjs/serve.js';
+import { FIXTURE_V2 } from '../fixtures/ai-guide/build-fixture.js';
 import { runAiGuide } from '../../src/ai-guide/index.js';
 
 let server: { url: string; close(): Promise<void> };
 
 async function exportCopy(sourceUrl: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'fexport-aiguide-'));
-  await fs.cp(path.join(FIXTURE_ROOT, 'export'), dir, { recursive: true });
+  await fs.cp(path.join(FIXTURE_V2, 'export'), dir, { recursive: true });
   const reportFile = path.join(dir, 'export-report.json');
   const report = JSON.parse(await fs.readFile(reportFile, 'utf8'));
   report.source = sourceUrl;
@@ -32,63 +33,82 @@ async function hashTree(dir: string, exclude: string[] = []): Promise<string> {
   return h.digest('hex');
 }
 
+const read = (dir: string, f: string) => fs.readFile(path.join(dir, f), 'utf8');
+
 before(async () => {
-  server = await serveFixture(path.join(FIXTURE_ROOT, 'site'));
+  server = await serveFixture(path.join(FIXTURE_V2, 'site'));
 });
 
 after(async () => {
   await server?.close();
 });
 
-test('ai-guide writes the guide next to an unchanged export', { timeout: 600000 }, async () => {
+test('ai-guide v2 writes section references next to an unchanged export', { timeout: 900000 }, async () => {
   const dir = await exportCopy(server.url + '/');
   const before = await hashTree(dir);
-  process.env.FRAMER_AIGUIDE_TEST_FAIL = 'record:/about';
+  process.env.FRAMER_AIGUIDE_TEST_FAIL = 'record:/services';
   let ok = false;
   try {
     ({ ok } = await runAiGuide(dir, server.url + '/', () => {}));
   } finally {
     delete process.env.FRAMER_AIGUIDE_TEST_FAIL;
   }
-  assert.equal(ok, true, existsSync(path.join(dir, 'ai-guide/ERROR.md')) ? await fs.readFile(path.join(dir, 'ai-guide/ERROR.md'), 'utf8') : '');
-  for (const f of [
-    'AGENTS.md', 'CLAUDE.md', 'ai-guide/README.md', 'ai-guide/site.md', 'ai-guide/files.md', 'ai-guide/content.md',
-    'ai-guide/tokens.md', 'ai-guide/checklist.md', 'ai-guide/plan.md', 'ai-guide/scripts/compare.mjs',
-    'ai-guide/pages/index/outline.md', 'ai-guide/pages/index/motion.md', 'ai-guide/pages/index/desktop.png',
-    'ai-guide/pages/index/sections/02-hero-section-desktop.png', 'ai-guide/pages/index/frames/scroll/000.png',
-  ]) {
-    assert.ok(existsSync(path.join(dir, f)), f);
-  }
+  assert.equal(ok, true, existsSync(path.join(dir, 'ai-guide/ERROR.md')) ? await read(dir, 'ai-guide/ERROR.md') : '');
   assert.equal(await hashTree(dir, ['AGENTS.md', 'CLAUDE.md', 'ai-guide', '.nextjs-cache']), before);
   assert.equal(existsSync(path.join(dir, 'nextjs-app')), false);
-  // Frames are only saved when the page repaints, so a mostly static page has few of them.
-  assert.ok((await fs.readdir(path.join(dir, 'ai-guide/pages/index/frames/load'))).length >= 1, 'load frames recorded');
-  const outline = await fs.readFile(path.join(dir, 'ai-guide/pages/index/outline.md'), 'utf8');
-  assert.match(outline, /links: "Home" → \/ · "About" → \/about · "Blog" → \/blog/);
-  const plan = await fs.readFile(path.join(dir, 'ai-guide/plan.md'), 'utf8');
-  assert.match(plan, /### Task 2: Home page \(\/\)/);
-  assert.match(plan, /### Task \d+: Blog collection \(\/blog\)/);
+
+  const sectionsDir = path.join(dir, 'ai-guide/pages/index/sections');
+  const folders = (await fs.readdir(sectionsDir)).sort();
+  const hero = folders.find((f) => /^\d\d-hero$/.test(f));
+  assert.ok(hero, folders.join(', '));
+  for (const f of ['ref.md', 'markup.desktop.html', 'markup.tablet-mobile.html', 'styles.css', 'shot-1440-1.png']) {
+    assert.ok(existsSync(path.join(sectionsDir, hero!, f)), `${hero}/${f}`);
+  }
+  assert.ok(folders.some((f) => /works-panel-1$/.test(f)), folders.join(', '));
+  assert.ok(!folders.some((f) => /ghost|loader|header|desktop/.test(f)), folders.join(', '));
+
+  const shell = (await fs.readdir(path.join(dir, 'ai-guide/shell'))).sort();
+  assert.ok(shell.some((f) => /^S\d-header$/.test(f)), shell.join(', '));
+  assert.ok(shell.some((f) => /^S\d-loader$/.test(f)), shell.join(', '));
+
+  const ref = await read(sectionsDir, `${hero}/ref.md`);
+  assert.ok(ref.includes('opacity 0→1'), ref);
+  assert.ok(ref.includes('"Small title" (tablet, mobile)'), ref);
+  assert.ok(ref.includes('generated (clock)'), ref);
+  assert.ok(ref.includes('ruler 0–1400'), ref);
+  assert.doesNotMatch(ref.split('## Content')[1].split('## Animations')[0], /"100"/);
+  assert.match(await read(sectionsDir, `${hero}/styles.css`), /font-size:\s*72px/);
+
+  const faq = folders.find((f) => /faq$/.test(f))!;
+  assert.match(await read(sectionsDir, `${faq}/ref.md`), /question \(click\)/);
+
+  const json = JSON.parse(await read(dir, 'ai-guide/sections.json'));
+  assert.ok(json['/'].sections.some((s: { id: string }) => s.id.startsWith('S')));
+  assert.ok(json['/'].sections.find((s: { name: string }) => s.name === 'Hero').live['1440'].length >= 1);
+
+  const plan = await read(dir, 'ai-guide/plan.md');
+  assert.ok(plan.includes('npx create-next-app@latest'));
+  assert.ok(plan.includes('npm run compare -- / --section 01'));
+  assert.ok(existsSync(path.join(dir, 'ai-guide/text-styles.css')));
+  assert.ok(existsSync(path.join(dir, 'ai-guide/scripts/compare.mjs')));
+  for (const f of ['AGENTS.md', 'CLAUDE.md', 'ai-guide/README.md', 'ai-guide/site.md', 'ai-guide/tokens.md', 'ai-guide/pages/index/motion.md', 'ai-guide/pages/index/desktop.png']) {
+    assert.ok(existsSync(path.join(dir, f)), f);
+  }
   // One page's recording failing does not fail the guide; that page says so.
-  assert.match(await fs.readFile(path.join(dir, 'ai-guide/pages/about/motion.md'), 'utf8'), /recording failed/);
-  const motion = await fs.readFile(path.join(dir, 'ai-guide/pages/index/motion.md'), 'utf8');
-  assert.match(motion, /^## Custom behaviour$/m, motion);
-  assert.match(motion, /text changes/, motion);
+  assert.match(await read(dir, 'ai-guide/pages/services/motion.md'), /recording failed/);
 });
 
-test('a failure writes ai-guide/ERROR.md and leaves the export usable', async () => {
+test('a failure writes ai-guide/ERROR.md and leaves the export and the previous guide', async () => {
   const dir = await exportCopy(server.url + '/');
-  // A guide from an earlier run survives a failed re-run.
   await fs.mkdir(path.join(dir, 'ai-guide/pages/index'), { recursive: true });
   await fs.writeFile(path.join(dir, 'ai-guide/site.md'), 'previous guide');
-  await fs.writeFile(path.join(dir, 'ai-guide/pages/index/outline.md'), 'previous outline');
   process.env.FRAMER_AIGUIDE_TEST_FAIL = '1';
   try {
     assert.equal((await runAiGuide(dir, server.url + '/', () => {})).ok, false);
   } finally {
     delete process.env.FRAMER_AIGUIDE_TEST_FAIL;
   }
-  assert.match(await fs.readFile(path.join(dir, 'ai-guide/ERROR.md'), 'utf8'), /FRAMER_AIGUIDE_TEST_FAIL/);
+  assert.match(await read(dir, 'ai-guide/ERROR.md'), /FRAMER_AIGUIDE_TEST_FAIL/);
   assert.ok(existsSync(path.join(dir, 'index.html')));
-  assert.equal(await fs.readFile(path.join(dir, 'ai-guide/site.md'), 'utf8'), 'previous guide');
-  assert.equal(await fs.readFile(path.join(dir, 'ai-guide/pages/index/outline.md'), 'utf8'), 'previous outline');
+  assert.equal(await read(dir, 'ai-guide/site.md'), 'previous guide');
 });

@@ -74,14 +74,6 @@ function collect(node: Node, args: BuildPageArgs, raws: Map<string, Partial<Reco
   const addWidths = (key: string, widths: Breakpoint[]) => {
     widthsOf[key] = BREAKPOINTS.filter((bp) => widthsOf[key]?.includes(bp) || widths.includes(bp));
   };
-  const variants = new Map<string, string[]>();
-  const addText = (t: string, n: Node, widths: Breakpoint[]) => {
-    const v = norm(t);
-    if (!v) return;
-    items.push({ text: v, widths, key: n.key });
-    const seen = Object.values(raws.get(n.key) ?? {}).map((r) => norm(r?.text ?? '')).filter(Boolean);
-    if (seen.length) variants.set(n.key, seen);
-  };
   const walk = (n: Node, inherited: Breakpoint[]) => {
     const widths = n.visibility ? inherited.filter((bp) => n.visibility!.includes(bp)) : inherited;
     if (!widths.length) return;
@@ -105,18 +97,58 @@ function collect(node: Node, args: BuildPageArgs, raws: Map<string, Partial<Reco
       });
     }
     if (n.tag === 'a') return;
-    // Split text (words/letters as spans) is one value; block containers can carry `inline` too.
-    // A word Framer split into one element per letter (spans or divs): at least 3 leaf children of ≤ 2 characters.
-    const letters = n.children.length >= 3 && n.children.every((c) => !c.children.length && !c.asset && (c.text ?? '').trim().length <= 2);
-    const splitText = letters || (n.inline && (TEXT_TAGS.test(n.tag) || (n.children.length > 0 && n.children.every((c) => c.tag === 'span' && !c.children.length))));
-    if (splitText && !n.children.some((c) => c.tag === 'a')) return addText(fullText(n), n, widths);
-    if (n.text) addText(n.text, n, widths);
     n.children.forEach((c) => walk(c, widths));
   };
   walk(node, [...BREAKPOINTS]);
+
+  // Texts come from each width's own capture: Framer's per-width copies can differ in text, and the
+  // merged tree keeps only one of them.
+  const variants = new Map<string, string[]>();
+  for (const bp of BREAKPOINTS) {
+    const raw = raws.get(node.key)?.[bp];
+    if (raw) rawTexts(raw, bp, items, variants);
+  }
+  if (!raws.has(node.key)) mergedTexts(node, [...BREAKPOINTS], items);
   const clean = cleanTexts(items, variants);
   for (const t of clean.texts) addWidths(t.text, t.widths);
   return { texts: clean.texts.map((t) => t.text), images, links, widthsOf, generated: clean.generated, liveKeys: clean.liveKeys, decorations: clean.decorations };
+}
+
+/** A raw node's text in reading order (inline content keeps text and child order). */
+function rawFullText(r: RawNode): string {
+  if (r.inline) return r.inline.map((x) => (typeof x === 'string' ? x : r.children[x] ? rawFullText(r.children[x]) : '')).join('');
+  return (r.text ?? '') + r.children.map(rawFullText).join('');
+}
+
+/**
+ * Visible texts of one capture, in reading order. Text Framer split into one span per letter or word
+ * is one value; numbers are kept apart (rulers and scales are recognised later). Link text is
+ * listed under links only.
+ */
+function rawTexts(r: RawNode, bp: Breakpoint, items: TextItem[], variants: Map<string, string[]>): void {
+  if (r.visible === false || r.tag === 'a') return;
+  const add = (t: string) => {
+    const v = norm(t);
+    if (!v) return;
+    items.push({ text: v, widths: [bp], key: r.key });
+    variants.set(r.key, [...(variants.get(r.key) ?? []), v]);
+  };
+  const kids = r.children.filter((c) => c.visible !== false);
+  const leaf = (c: RawNode) => !c.children.length && c.tag !== 'img' && c.tag !== 'svg';
+  const numeric = kids.length > 0 && kids.every((c) => /^\s*-?\d+(\.\d+)?\s*$/.test(c.text ?? ''));
+  const letters = kids.length >= 3 && kids.every((c) => leaf(c) && (c.text ?? '').trim().length <= 2);
+  const split = !numeric && (letters || (r.inline && (TEXT_TAGS.test(r.tag) || (kids.length > 0 && kids.every((c) => c.tag === 'span' && leaf(c))))));
+  if (split && !kids.some((c) => c.tag === 'a')) return add(rawFullText(r));
+  if (r.text) add(r.text);
+  for (const c of kids) rawTexts(c, bp, items, variants);
+}
+
+/** Fallback when a node is not in the captures: texts of the merged tree, with its visibility as widths. */
+function mergedTexts(n: Node, inherited: Breakpoint[], items: TextItem[]): void {
+  const widths = n.visibility ? inherited.filter((bp) => n.visibility!.includes(bp)) : inherited;
+  if (!widths.length || n.tag === 'a') return;
+  if (n.text && norm(n.text)) items.push({ text: norm(n.text), widths, key: n.key });
+  for (const c of n.children) mergedTexts(c, widths, items);
 }
 
 /** The element's own Framer class: the first `framer-*` that is not a text, preset or variant class. */
