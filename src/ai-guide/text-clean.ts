@@ -56,7 +56,9 @@ export function cleanTexts(
   items.forEach((it, idx) => {
     if (drop.has(idx)) return;
     const others = variants.get(it.key) ?? [];
-    const changes = others.some((o) => o !== it.text);
+    // A live value (counter, time) differs only in its digits; text that wraps into other lines per width is content.
+    const digitsOnly = (t: string) => t.replace(/\d/g, '0');
+    const changes = others.some((o) => o !== it.text && digitsOnly(o) === digitsOnly(it.text));
     if (CLOCK.test(it.text) || changes) {
       if (!liveKeys.includes(it.key)) liveKeys.push(it.key);
       if (!generated.some((g) => g.text === it.text)) generated.push({ text: it.text, kind: CLOCK.test(it.text) ? 'clock' : 'changing' });

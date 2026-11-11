@@ -26,11 +26,6 @@ test('clock text is generated and its element is live', () => {
   assert.deepEqual(out.texts, []);
 });
 
-test('text that differs between captures is changing', () => {
-  const out = cleanTexts([item('12 visitors', all, 'v')], new Map([['v', ['12 visitors', '15 visitors']]]));
-  assert.equal(out.generated[0].kind, 'changing');
-});
-
 test('a fixed date is content', () => {
   const out = cleanTexts([item('Mar 19, 2026')], new Map());
   assert.deepEqual(out.texts.map((t) => t.text), ['Mar 19, 2026']);
@@ -39,4 +34,15 @@ test('a fixed date is content', () => {
 test('text at two widths is listed once', () => {
   const out = cleanTexts([item('Hi', ['base'], 'a'), item('Hi', ['mobile'], 'b')], new Map());
   assert.deepEqual(out.texts, [{ text: 'Hi', widths: ['base', 'mobile'] }]);
+});
+
+test('a paragraph split into different lines per width is content, not a changing value', () => {
+  const out = cleanTexts([item('I am a designer', ['base'], 'p')], new Map([['p', ['I am a designer', 'I am a', 'designer']]]));
+  assert.deepEqual(out.generated, []);
+  assert.deepEqual(out.texts.map((t) => t.text), ['I am a designer']);
+});
+
+test('values that differ only in their digits are changing', () => {
+  const out = cleanTexts([item('12 visitors', all, 'v')], new Map([['v', ['12 visitors', '15 visitors']]]));
+  assert.equal(out.generated[0].kind, 'changing');
 });

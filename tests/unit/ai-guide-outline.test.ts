@@ -162,3 +162,14 @@ test('a code component container class is the section class', () => {
   const page = buildGuidePage({ ...homeArgs(), parts: [{ node, name: 'Grid' }] });
   assert.equal(page.sections[0].className, 'framer-b1hv7o-container');
 });
+
+test('an element with opacity 0 in a width’s capture is not shown at that width', () => {
+  const a = homeArgs();
+  const node = n('O', 'section', { framerName: 'Hero' }, [n('O/t', 'p', { text: 'Mobile line' })]);
+  const raw = (opacity: string): RawNode => ({
+    key: 'O', tag: 'section', attrs: {}, box: { x: 0, y: 0, w: 100, h: 100 }, styles: {}, visible: true,
+    children: [{ key: 'O/t', tag: 'p', attrs: {}, text: 'Mobile line', box: { x: 0, y: 0, w: 10, h: 10 }, styles: { opacity }, visible: true, children: [] }],
+  });
+  const page = buildGuidePage({ ...a, trees: { base: raw('0'), tablet: raw('0'), mobile: raw('1') }, parts: [{ node, name: 'Hero' }] });
+  assert.deepEqual(page.sections[0].widthsOf['Mobile line'], ['mobile']);
+});

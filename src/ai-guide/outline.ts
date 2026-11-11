@@ -126,14 +126,15 @@ function rawFullText(r: RawNode): string {
  * listed under links only.
  */
 function rawTexts(r: RawNode, bp: Breakpoint, items: TextItem[], variants: Map<string, string[]>): void {
-  if (r.visible === false || r.tag === 'a') return;
+  // Captured after scrolling through the page, so opacity 0 means not shown at this width.
+  if (r.visible === false || r.tag === 'a' || Number(r.styles?.opacity ?? 1) < 0.05) return;
   const add = (t: string) => {
     const v = norm(t);
     if (!v) return;
     items.push({ text: v, widths: [bp], key: r.key });
     variants.set(r.key, [...(variants.get(r.key) ?? []), v]);
   };
-  const kids = r.children.filter((c) => c.visible !== false);
+  const kids = r.children.filter((c) => c.visible !== false && Number(c.styles?.opacity ?? 1) >= 0.05);
   const leaf = (c: RawNode) => !c.children.length && c.tag !== 'img' && c.tag !== 'svg';
   const numeric = kids.length > 0 && kids.every((c) => /^\s*-?\d+(\.\d+)?\s*$/.test(c.text ?? ''));
   const letters = kids.length >= 3 && kids.every((c) => leaf(c) && (c.text ?? '').trim().length <= 2);
