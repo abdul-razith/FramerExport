@@ -24,6 +24,7 @@ import { buildGuidePage } from './outline.js';
 import { markupFileNames, renderSectionRef, sectionDirName } from './section-ref.js';
 import { sectionsJson, WIDTH_KEY, type WidthKey } from './sections-json.js';
 import { splitPage } from './split.js';
+import { swapIn } from './swap.js';
 import { renderPlan, writePlanFile } from './plan.js';
 import { recordPage } from './record.js';
 import { renderContentMd, renderFilesMd, renderSiteMd, renderTokensMd } from './site-docs.js';
@@ -191,22 +192,6 @@ async function sectionReference(s: GuideSection, html: string, rules: CssRule[],
   const hoverClasses = classes.filter((c) => rules.some((r) => r.selector.includes(':hover') && new RegExp(`\\.${c}(?![\\w-])`).test(r.selector)));
   const recorded = entries.filter((e) => e.key === s.key || e.key.startsWith(s.key + '/'));
   return { markup, css, presets, animations, recorded, hoverClasses, selectorClasses: s.className ? [s.className] : [] };
-}
-
-/**
- * Replaces ai-guide/ with the finished build: everything except plan.md (writePlanFile decides
- * about that one, so ticked progress survives). Runs only after a successful build, so a failed
- * re-run leaves the previous guide as it was.
- */
-async function swapIn(buildDir: string, guideDir: string): Promise<void> {
-  await fs.mkdir(guideDir, { recursive: true });
-  for (const entry of await fs.readdir(guideDir)) {
-    if (entry !== 'plan.md') await fs.rm(path.join(guideDir, entry), { recursive: true, force: true });
-  }
-  for (const entry of await fs.readdir(buildDir)) {
-    await fs.rename(path.join(buildDir, entry), path.join(guideDir, entry));
-  }
-  await fs.rm(buildDir, { recursive: true, force: true });
 }
 
 /** Writes the guide into `guideDir` (a build folder) and returns the plan's text. */
@@ -433,10 +418,13 @@ export async function runAiGuide(
 ): Promise<{ ok: boolean; guideDir: string }> {
   const guideDir = path.join(exportDir, 'ai-guide');
   const buildDir = path.join(exportDir, '.ai-guide-build');
+  let built = false;
   try {
     log('Writing the AI guide...');
     const plan = await build(exportDir, sourceUrl, buildDir, log);
+    built = true;
     await swapIn(buildDir, guideDir);
+    built = false;
     await fs.rm(path.join(guideDir, 'ERROR.md'), { force: true });
     const planFile = await writePlanFile(guideDir, plan);
     if (planFile === 'plan.new.md') log('AI guide: plan.md has ticked steps, so the new plan was written to ai-guide/plan.new.md');
@@ -453,7 +441,8 @@ export async function runAiGuide(
     warn(`AI guide failed: ${err.message} (see ai-guide/ERROR.md)`);
     return { ok: false, guideDir };
   } finally {
-    await fs.rm(buildDir, { recursive: true, force: true }).catch(() => undefined);
+    // A guide that was built but could not be moved in is kept, so nothing is lost.
+    if (!built) await fs.rm(buildDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
