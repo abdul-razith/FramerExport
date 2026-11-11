@@ -96,9 +96,7 @@ test('ai-guide v2 writes section references next to an unchanged export', { time
   }
   // One section failing does not fail the guide; its ref.md says so.
   const shellRefs = await Promise.all(shell.map((f) => read(dir, `ai-guide/shell/${f}/ref.md`)));
-  assert.equal(shellRefs.filter((r) => r.includes('could not be written')).length, 1, shellRefs.join('
----
-'));
+  assert.equal(shellRefs.filter((r) => r.includes('could not be written')).length, 1, shellRefs.join('\n---\n'));
   // Shell ids are unique per page in sections.json.
   for (const route of Object.keys(json)) {
     const sIds = json[route].sections.map((x: { id: string }) => x.id).filter((id: string) => id.startsWith('S'));
