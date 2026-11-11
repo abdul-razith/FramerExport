@@ -8,8 +8,11 @@ export interface CssRule {
   media?: string;
 }
 
-/** `all` (no media), `desktop` (≥1200), `tablet` (≤1199), `mobile` (≤809), `other` (anything else). */
-export type WidthGroup = 'all' | 'desktop' | 'tablet' | 'mobile' | 'other';
+/**
+ * `all` (no media), `desktop` (≥1200), `tablet` (810–1199 only), `tablet-mobile` (≤1199),
+ * `mobile` (≤809), `other` (anything else).
+ */
+export type WidthGroup = 'all' | 'desktop' | 'tablet' | 'tablet-mobile' | 'mobile' | 'other';
 
 /** Skips a quoted string or comment starting at `i`; returns the index after it, or `i` when there is none. */
 function skipQuoted(text: string, i: number): number {
@@ -85,7 +88,7 @@ function mediaMatches(media: string, width: number): boolean {
   const parts = media.split(/\s+and\s+/i);
   let understood = false;
   for (const p of parts) {
-    const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)px\s*\)/i);
+    const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)(px)?\s*\)/i);
     if (!m) {
       if (/^\s*(only\s+)?(screen|all)\s*$/i.test(p)) continue;
       return false;
@@ -108,7 +111,8 @@ export function widthGroup(media?: string): WidthGroup {
   const key = mediaWidths(media).join(',');
   if (key === 'base,tablet,mobile') return media ? 'other' : 'all';
   if (key === 'base') return 'desktop';
-  if (key === 'tablet,mobile') return 'tablet';
+  if (key === 'tablet') return 'tablet';
+  if (key === 'tablet,mobile') return 'tablet-mobile';
   if (key === 'mobile') return 'mobile';
   return 'other';
 }
@@ -150,7 +154,8 @@ function withTokens(body: string, vars: Map<string, string>, tokens: ThemeTokens
 const HEADINGS: Record<Exclude<WidthGroup, 'other'>, string> = {
   all: '/* all widths */',
   desktop: '/* desktop ≥1200px */',
-  tablet: '/* tablet ≤1199px */',
+  tablet: '/* tablet 810–1199px */',
+  'tablet-mobile': '/* tablet + mobile ≤1199px */',
   mobile: '/* mobile ≤809px */',
 };
 
@@ -176,7 +181,7 @@ function collect(rules: CssRule[], keep: (part: string) => boolean, tokens: Them
     seen.add(heading + block);
     groups.set(heading, [...(groups.get(heading) ?? []), block]);
   }
-  const order = [HEADINGS.all, HEADINGS.desktop, HEADINGS.tablet, HEADINGS.mobile];
+  const order = [HEADINGS.all, HEADINGS.desktop, HEADINGS['tablet-mobile'], HEADINGS.tablet, HEADINGS.mobile];
   const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   return keys.map((k) => `${k}\n${groups.get(k)!.join('\n')}`).join('\n\n') + (keys.length ? '\n' : '');
 }

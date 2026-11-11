@@ -133,3 +133,8 @@ test('site docs no longer point at outline.md', () => {
   assert.doesNotMatch(renderSiteMd(site), /outline\.md/);
   assert.doesNotMatch(renderContentMd({ ...site, collections: [] }), /outline\.md/);
 });
+
+test('the tablet variant is the 810–1199 range and the rules explain the CSS width groups', () => {
+  assert.ok(renderPlan(fixtureSite()).includes('`tablet` = `@media (min-width: 810px) and (max-width: 1199px)`'));
+  for (const s of ['tablet 810–1199px', 'tablet + mobile ≤1199px', 'both `tablet:` and `mobile:`']) assert.ok(AGENTS_MD.includes(s), s);
+});

@@ -24,7 +24,9 @@ test('parseExportCss unwraps media rules', () => {
 
 test('widthGroup sorts media queries into width groups', () => {
   assert.equal(widthGroup(undefined), 'all');
-  assert.equal(widthGroup('(max-width:1199px)'), 'tablet');
+  assert.equal(widthGroup('(max-width:1199px)'), 'tablet-mobile');
+  assert.equal(widthGroup('(min-width: 810px) and (max-width: 1199.98px)'), 'tablet');
+  assert.equal(widthGroup('(min-width: 0) and (max-width: 809.98px)'), 'mobile');
   assert.equal(widthGroup('(max-width: 809.98px)'), 'mobile');
   assert.equal(widthGroup('(min-width: 810px)'), 'other');
   assert.equal(widthGroup('(min-width:1200px)'), 'desktop');
@@ -41,7 +43,7 @@ test('stylesForClasses keeps only matching rules grouped by width', () => {
   const out = stylesForClasses(rules, ['framer-hero-title'], tokens());
   assert.match(out, /\/\* all widths \*\//);
   assert.match(out, /font-size:72px/);
-  assert.match(out, /\/\* tablet ≤1199px \*\//);
+  assert.match(out, /\/\* tablet \+ mobile ≤1199px \*\//);
   assert.match(out, /font-size:56px/);
   assert.doesNotMatch(out, /framer-works/);
   const hero = stylesForClasses(rules, ['framer-hero'], tokens());
@@ -67,4 +69,10 @@ test('text style presets are left to the site-level text styles', () => {
   const rules = parseExportCss(css);
   assert.doesNotMatch(stylesForClasses(rules, ['framer-x', 'framer-styles-preset-k1'], tokens()), /font-size/);
   assert.match(textStyles(rules, ['framer-styles-preset-k1'], tokens()), /font-size:20px/);
+});
+
+test('the Framer tablet range gets its own heading', () => {
+  const css = '<style>.framer-x{gap:4px}@media (min-width: 810px) and (max-width: 1199.98px){.framer-x{gap:8px}}</style>';
+  const out = stylesForClasses(parseExportCss(css), ['framer-x'], tokens());
+  assert.match(out, /\/\* tablet 810–1199px \*\/\n\.framer-x \{\n  gap:8px;/);
 });

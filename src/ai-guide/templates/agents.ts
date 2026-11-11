@@ -34,8 +34,10 @@ clean, editable Next.js project that looks and moves like the original. You buil
    width). Keep the element structure of the markup and convert its CSS to Tailwind classes with
    **exact values** (\`text-[52px]\`, \`gap-[18px]\`, \`rotate-[-4deg]\`): flex, grid and absolute
    positioning exactly where the export uses them. Colours and fonts only through the tokens; the
-   text styles from \`ai-guide/text-styles.css\` through the utilities made in Task 0. Desktop first,
-   with \`tablet:\` (max 1199px) and \`mobile:\` (max 809px) variants from the CSS groups. Where a
+   text styles from \`ai-guide/text-styles.css\` through the utilities made in Task 0. Desktop first:
+   rules under "all widths" (and "desktop ≥1200px") are the plain classes; "tablet 810–1199px" rules
+   become \`tablet:\` classes; "mobile ≤809px" rules become \`mobile:\` classes; "tablet + mobile
+   ≤1199px" rules apply to both, so write them with both \`tablet:\` and \`mobile:\`. Where a
    section has different markup per width (\`markup.desktop.html\`, \`markup.tablet-mobile.html\`), show
    the right one per width.
 5. **Clean code.** Meaningful component and prop names; anything used twice becomes a
