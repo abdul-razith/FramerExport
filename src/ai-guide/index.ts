@@ -339,7 +339,7 @@ async function build(
       const collection = itemOf.get(p.route);
       built.push({
         page: collection ? { ...page, collection } : page,
-        shellHashes: shellParts.map((s) => shellKey(s.node)),
+        shellHashes: shellParts.map((s) => shellKey(s.node, boxes(s.node).base)),
       });
     } catch (e) {
       // One page whose structure cannot be read must not cost the whole guide.

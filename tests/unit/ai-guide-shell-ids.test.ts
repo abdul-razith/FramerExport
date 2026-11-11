@@ -32,3 +32,14 @@ test('a shell part is recognised across pages by its Framer class, even when its
   assert.notEqual(shellKey(node('framer-aaa', '1px')), shellKey(node('framer-bbb', '1px')));
   assert.equal(shellKey(node('', '1px')), shellKey(node('', '1px')));
 });
+
+test('a shell part without a Framer class is recognised by its name, text and size', async () => {
+  const { shellKey } = await import('../../src/ai-guide/shell-ids.js');
+  const badge = (top: string) => ({
+    id: 'b', key: 'b', tag: 'a', framerName: 'Section', attrs: { href: '/buy' }, styles: { base: { top } },
+    children: [{ id: 't', key: 't', tag: 'span', text: 'BUY NUDGE', attrs: {}, styles: { base: {} }, children: [] }],
+  });
+  const box = { x: 0, y: 0, w: 150, h: 40 };
+  assert.equal(shellKey(badge('10px'), box), shellKey(badge('900px'), box));
+  assert.notEqual(shellKey(badge('10px'), box), shellKey(badge('10px'), { ...box, w: 300 }));
+});

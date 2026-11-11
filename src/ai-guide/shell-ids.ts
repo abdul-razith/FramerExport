@@ -1,14 +1,18 @@
 import { looseHash } from '../nextjs/components.js';
-import type { Node } from '../nextjs/model.js';
+import type { Box, Node } from '../nextjs/model.js';
 
 /**
  * What makes two shell parts on different pages the same part: Framer gives a shared component the
- * same class on every page (its size can differ, e.g. a page-high background); without a class, the
- * structure hash.
+ * same class on every page (its size can differ, e.g. a page-high background); without a class, its
+ * layer name, text and size (when the box is known), else the structure hash.
  */
-export function shellKey(node: Node): string {
+export function shellKey(node: Node, box?: Box): string {
   const cls = (node.attrs.class ?? '').split(/\s+/).find((c) => /^framer-[a-z0-9]+(-container)?$/i.test(c) && c !== 'framer-text');
-  return cls ? `class:${cls}` : `hash:${looseHash(node)}`;
+  if (cls) return `class:${cls}`;
+  // Without a class: the same layer name, text and size is the same part (its position may differ).
+  const text = (n: Node): string => (n.text ?? '') + n.children.map(text).join('');
+  if (box) return `part:${node.tag}|${node.framerName ?? ''}|${text(node).replace(/\s+/g, ' ').trim()}|${Math.round(box.w)}x${Math.round(box.h)}`;
+  return `hash:${looseHash(node)}`;
 }
 
 /** Where a shell part is built: the first page it appears on, and its position in that page's shell list. */
