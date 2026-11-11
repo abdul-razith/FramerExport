@@ -154,13 +154,16 @@ const HEADINGS: Record<Exclude<WidthGroup, 'other'>, string> = {
   mobile: '/* mobile ≤809px */',
 };
 
-/** The export's rules that use any of `classes`, grouped by width, with Framer colour variables as tokens. */
-export function stylesForClasses(rules: CssRule[], classes: string[], tokens: ThemeTokens): string {
-  const tests = classes.map(classRe);
+const PRESET = /\.framer-styles-preset-/;
+
+/** Rules whose selector parts pass `keep`, list parts trimmed to those, identical rules once, grouped by width. */
+function collect(rules: CssRule[], keep: (part: string) => boolean, tokens: ThemeTokens): string {
   const vars = rootVariables(rules);
   const groups = new Map<string, string[]>();
+  const seen = new Set<string>();
   for (const r of rules) {
-    if (!tests.some((t) => t.test(r.selector))) continue;
+    const parts = r.selector.split(/,(?![^(]*\))/).map((p) => p.trim()).filter(keep);
+    if (!parts.length) continue;
     const g = widthGroup(r.media);
     const heading = g === 'other' ? `/* @media ${r.media} */` : HEADINGS[g];
     const body = withTokens(r.body, vars, tokens)
@@ -168,9 +171,24 @@ export function stylesForClasses(rules: CssRule[], classes: string[], tokens: Th
       .map((d) => d.trim())
       .filter(Boolean)
       .join(';\n  ');
-    groups.set(heading, [...(groups.get(heading) ?? []), `${r.selector} {\n  ${body};\n}`]);
+    const block = `${parts.join(',\n')} {\n  ${body};\n}`;
+    if (seen.has(heading + block)) continue;
+    seen.add(heading + block);
+    groups.set(heading, [...(groups.get(heading) ?? []), block]);
   }
   const order = [HEADINGS.all, HEADINGS.desktop, HEADINGS.tablet, HEADINGS.mobile];
   const keys = [...groups.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   return keys.map((k) => `${k}\n${groups.get(k)!.join('\n')}`).join('\n\n') + (keys.length ? '\n' : '');
+}
+
+/** The export's rules that use any of `classes` (text style presets excluded: see `textStyles`). */
+export function stylesForClasses(rules: CssRule[], classes: string[], tokens: ThemeTokens): string {
+  const tests = classes.map(classRe);
+  return collect(rules, (part) => !PRESET.test(part) && tests.some((t) => t.test(part)), tokens);
+}
+
+/** The rules of Framer's text style presets (`framer-styles-preset-*`), written once for the whole site. */
+export function textStyles(rules: CssRule[], presets: string[], tokens: ThemeTokens): string {
+  const tests = presets.map(classRe);
+  return collect(rules, (part) => tests.some((t) => t.test(part)), tokens);
 }

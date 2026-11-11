@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FIXTURE_V2 } from '../fixtures/ai-guide/build-fixture.js';
-import { hiddenClassWidths, parseExportCss, stylesForClasses, widthGroup } from '../../src/ai-guide/export-css.js';
+import { hiddenClassWidths, parseExportCss, stylesForClasses, textStyles, widthGroup } from '../../src/ai-guide/export-css.js';
 import type { ThemeTokens } from '../../src/nextjs/tokens.js';
 
 const html = readFileSync(path.join(FIXTURE_V2, 'export/index.html'), 'utf8');
@@ -52,4 +52,19 @@ test('stylesForClasses keeps only matching rules grouped by width', () => {
 test('tokens replace Framer variables', () => {
   const out = stylesForClasses(rules, ['framer-hero-title'], tokens({ '#141414': 'ink' }));
   assert.match(out, /var\(--color-ink\) \/\* var\(--token-ink,#141414\) \*\//);
+});
+
+test('selector lists keep only the parts for these classes, and repeated rules come once', () => {
+  const css = '<style>.a .framer-x, .a .framer-other { color: red } .framer-x{gap:4px}</style><style>.framer-x{gap:4px}</style>';
+  const out = stylesForClasses(parseExportCss(css), ['framer-x'], tokens());
+  assert.match(out, /^\.a \.framer-x \{/m);
+  assert.doesNotMatch(out, /framer-other/);
+  assert.equal(out.match(/gap:4px/g)?.length, 1);
+});
+
+test('text style presets are left to the site-level text styles', () => {
+  const css = '<style>.framer-styles-preset-k1:not(.rich-text-wrapper){font-size:20px}.framer-x{gap:4px}</style>';
+  const rules = parseExportCss(css);
+  assert.doesNotMatch(stylesForClasses(rules, ['framer-x', 'framer-styles-preset-k1'], tokens()), /font-size/);
+  assert.match(textStyles(rules, ['framer-styles-preset-k1'], tokens()), /font-size:20px/);
 });
