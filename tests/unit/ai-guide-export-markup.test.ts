@@ -68,3 +68,18 @@ test('classesIn leaves out framer-text and presets; presetClassesIn lists the pr
   assert.deepEqual(classesIn(html), ['framer-a']);
   assert.deepEqual(presetClassesIn(html), ['framer-styles-preset-k1']);
 });
+
+test('static transforms and opacity stay; only Framer motion start states are dropped', async () => {
+  const src = `<section class="framer-s">
+    <div class="framer-a" style="transform:rotate(-45deg)">a</div>
+    <div class="framer-b" style="transform:translate(-50%, -50%)">b</div>
+    <div class="framer-c" style="opacity:0.5">c</div>
+    <div class="framer-d" style="opacity:0.001;transform:translateX(40px) translateY(0px) scale(0.9) rotate(0deg) skewX(0deg) skewY(0deg)">d</div>
+    <div class="framer-e" style="transform:none;opacity:1;will-change:transform">e</div>
+  </section>`;
+  const [copy] = await sectionMarkup(src, { className: 'framer-s' }, new Map());
+  assert.match(copy.html, /rotate\(-45deg\)/);
+  assert.match(copy.html, /translate\(-50%, -50%\)/);
+  assert.match(copy.html, /opacity: ?0\.5/);
+  assert.doesNotMatch(copy.html, /0\.001|translateX\(40px\)|will-change|transform: ?none/);
+});

@@ -41,13 +41,33 @@ function hiddenAt(n: P5Node, bp: Breakpoint, hidden: Map<string, Breakpoint[]>):
   return false;
 }
 
-/** Inline animation start states (opacity, transform, will-change) are dropped: motion is documented separately. */
+/**
+ * Framer writes an animated element's start state inline: `opacity: 0.001` and a full motion chain
+ * (`translateX(..) translateY(..) scale(..) rotate(..) skewX(..) skewY(..)`). Those are dropped
+ * (the animation is documented in ref.md), as are no-ops (`transform: none`, `opacity: 1`,
+ * `will-change`). Static transforms such as `rotate(-45deg)` or centring translates are kept.
+ */
+function isStartState(decl: string): boolean {
+  const m = decl.match(/^([\w-]+)\s*:\s*([\s\S]*)$/);
+  if (!m) return false;
+  const [, prop, value] = m;
+  const p = prop.toLowerCase();
+  if (p === 'will-change') return true;
+  if (p === 'opacity') return Number(value) <= 0.001 || Number(value) === 1;
+  if (p === 'transform') {
+    if (/^none$/i.test(value.trim())) return true;
+    const fns = value.match(/\b(translateX|translateY|scale|rotate|skewX|skewY)\(/g) ?? [];
+    return new Set(fns).size >= 4;
+  }
+  return false;
+}
+
+/** Inline animation start states are dropped (see isStartState); everything else is kept. */
 function cleanStyle(style: string): string {
-  return style
-    .split(';')
-    .map((d) => d.trim())
-    .filter((d) => d && !/^(transform|opacity|will-change)\s*:/i.test(d))
-    .join(';');
+  const decls = style.split(';').map((d) => d.trim()).filter(Boolean);
+  // A transform on an element that starts invisible is part of its entrance, too.
+  const hiddenStart = decls.some((d) => /^opacity\s*:\s*0(\.0+1?)?\s*$/i.test(d));
+  return decls.filter((d) => !isStartState(d) && !(hiddenStart && /^transform\s*:/i.test(d))).join(';');
 }
 
 const textOf = (n: P5Node): string => (n.nodeName === '#text' ? (n.value ?? '') : (n.childNodes ?? []).map(textOf).join(''));
