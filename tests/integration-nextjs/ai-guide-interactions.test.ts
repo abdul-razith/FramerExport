@@ -29,6 +29,7 @@ test('records the FAQ click and the CTA hover without following links', { timeou
     [
       { id: '03', selectorClasses: ['framer-faq'], hoverClasses: [] },
       { id: '04', selectorClasses: ['framer-cta'], hoverClasses: ['framer-cta-btn'] },
+      { id: '05', selectorClasses: ['framer-form'], hoverClasses: [] },
     ],
     out,
     1440
@@ -43,5 +44,7 @@ test('records the FAQ click and the CTA hover without following links', { timeou
     assert.ok(existsSync(path.join(out, s.before)) && existsSync(path.join(out, s.after)));
     assert.match(s.before, /^states\//);
   }
-  assert.ok(!states.some((s) => s.element === 'contact'), 'links are never clicked');
+  assert.ok(!states.some((s) => s.element === 'contact' && s.action === 'click'), 'links are never clicked');
+  assert.ok(states.some((s) => s.element === 'contact' && s.action === 'hover'), 'hover effects on links are recorded');
+  assert.ok(!states.some((s) => s.section === '05'), 'form submit buttons are never clicked');
 });

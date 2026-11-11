@@ -37,6 +37,9 @@ body{font-family:"Inter Display",sans-serif;background-color:var(--token-paper,#
 .framer-cta-btn{padding:16px 24px;background-color:#ffffff;border-radius:12px}
 .framer-cta-btn:hover{background-color:var(--token-accent,#36c5f0)}
 .framer-services-hero{padding:80px 24px}
+.framer-cta-link{display:inline-block;padding:16px 24px;border-radius:12px;background-color:#ffffff;cursor:pointer}
+.framer-form{padding:48px 24px}
+.framer-send{cursor:pointer;padding:12px 24px;font-size:20px}
 @media (max-width:1199px){.hidden-m1{display:none!important}.framer-hero-title{font-size:56px}.framer-panel{height:600px}}
 @media (max-width:809px){.framer-hero-title{font-size:40px}.framer-ruler{gap:12px}}
 @media (min-width:1200px){.hidden-d1{display:none!important}}
@@ -86,7 +89,18 @@ ${loader(v)}
 <section class="framer-cta" data-framer-name="CTA">
   <div class="framer-cta-btn" data-framer-name="Say Hi">Say hi</div>
   <a class="framer-cta-link" data-framer-name="Contact" href="${link}services">Contact</a>
-</section>`;
+</section>${
+  v === 'site'
+    ? `<script>(()=>{const a=document.querySelector('.framer-cta-link');a.addEventListener('mouseenter',()=>{a.style.backgroundColor='#141414';a.style.color='#ffffff'});a.addEventListener('mouseleave',()=>{a.style.backgroundColor='';a.style.color=''})})()</script>`
+    : ''
+}
+<section class="framer-form" data-framer-name="Form">
+  <form data-framer-name="Contact Form" method="post" action="/never"><input name="email" type="email"><button class="framer-send" data-framer-name="Send" type="submit">Send</button></form>
+</section>${
+  v === 'site'
+    ? `<script>document.querySelector('.framer-form form').addEventListener('submit',(e)=>{e.preventDefault();document.querySelector('.framer-form').style.backgroundColor='#ff0000'})</script>`
+    : ''
+}`;
 
 const services = () => `
 <section class="framer-services-hero" data-framer-name="Services Hero"><h1>Services</h1><p>Design, build and care.</p></section>`;

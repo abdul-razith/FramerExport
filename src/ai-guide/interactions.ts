@@ -35,42 +35,51 @@ interface Candidate {
   name: string;
 }
 
-/** Runs in the page: the section's reacting elements, in document order (hover classes, then clickable non-links). */
-function candidatesInPage(selectorClasses: string[], hoverClasses: string[]): { action: 'hover' | 'click'; name: string }[] {
-  const section = selectorClasses.map((c) => document.querySelector('.' + CSS.escape(c))).find(Boolean);
-  if (!section) return [];
-  const all = Array.from(section.querySelectorAll('*'));
-  const visible = (el: Element) => {
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-  };
-  const label = (el: Element) => el.getAttribute('data-framer-name') || Array.from(el.classList).find((c) => c.startsWith('framer-')) || el.tagName.toLowerCase();
-  const out: { action: 'hover' | 'click'; name: string }[] = [];
-  for (const el of all) {
-    if (!visible(el) || el.closest('a')) continue;
-    if (hoverClasses.some((c) => el.classList.contains(c))) out.push({ action: 'hover', name: label(el) });
-    else if (getComputedStyle(el).cursor === 'pointer' && !(el.parentElement && getComputedStyle(el.parentElement).cursor === 'pointer')) {
-      out.push({ action: 'click', name: label(el) });
+/**
+ * Runs in the page (installed once per load): the section's reacting elements in document order.
+ * Hover: elements with a `:hover` rule, and links (Framer's hover effects are usually JS variants
+ * on link cards). Click: elements with a pointer cursor that are not links, not inside a link and
+ * not inside a form (a click there could submit a real form). One function serves both the listing
+ * and the handle lookup, so the indexes always agree.
+ */
+function installPicker(): void {
+  (window as unknown as Record<string, unknown>).__aiguidePick = (selectorClasses: string[], hoverClasses: string[]) => {
+    const section = selectorClasses.map((c) => document.querySelector('.' + CSS.escape(c))).find(Boolean);
+    if (!section) return [];
+    const visible = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+    };
+    const label = (el: Element) => el.getAttribute('data-framer-name') || Array.from(el.classList).find((c) => c.startsWith('framer-')) || el.tagName.toLowerCase();
+    const pointer = (el: Element | null) => !!el && getComputedStyle(el).cursor === 'pointer';
+    const out: { el: Element; action: 'hover' | 'click'; name: string }[] = [];
+    for (const el of [section, ...Array.from(section.querySelectorAll('*'))]) {
+      if (!visible(el)) continue;
+      const link = el.closest('a');
+      if (hoverClasses.some((c) => el.classList.contains(c)) || (el.tagName === 'A' && !el.parentElement?.closest('a'))) {
+        out.push({ el, action: 'hover', name: label(el) });
+      } else if (!link && !el.closest('form') && !/^(INPUT|SELECT|TEXTAREA|LABEL|OPTION)$/.test(el.tagName) && pointer(el) && !pointer(el.parentElement)) {
+        out.push({ el, action: 'click', name: label(el) });
+      }
     }
-  }
-  return out;
+    return out;
+  };
 }
 
-/** The handle of candidate `index` of a section (same order as candidatesInPage). */
+type Pick = (s: string[], h: string[]) => { el: Element; action: 'hover' | 'click'; name: string }[];
+
+async function candidates(page: Page, t: InteractionTarget): Promise<{ action: 'hover' | 'click'; name: string }[]> {
+  return page.evaluate(
+    (s: string[], h: string[]) => ((window as unknown as { __aiguidePick: Pick }).__aiguidePick(s, h)).map(({ action, name }) => ({ action, name })),
+    t.selectorClasses,
+    t.hoverClasses
+  );
+}
+
+/** The handle of candidate `index` of a section (same order as `candidates`). */
 async function candidateHandle(page: Page, t: InteractionTarget, index: number) {
   const handle = await page.evaluateHandle(
-    (selectorClasses: string[], hoverClasses: string[], i: number) => {
-      const section = selectorClasses.map((c) => document.querySelector('.' + CSS.escape(c))).find(Boolean);
-      if (!section) return null;
-      const list: Element[] = [];
-      for (const el of Array.from(section.querySelectorAll('*'))) {
-        const r = el.getBoundingClientRect();
-        if (!(r.width > 0 && r.height > 0) || getComputedStyle(el).visibility === 'hidden' || el.closest('a')) continue;
-        if (hoverClasses.some((c) => el.classList.contains(c))) list.push(el);
-        else if (getComputedStyle(el).cursor === 'pointer' && !(el.parentElement && getComputedStyle(el.parentElement).cursor === 'pointer')) list.push(el);
-      }
-      return list[i] ?? null;
-    },
+    (s: string[], h: string[], i: number) => (window as unknown as { __aiguidePick: Pick }).__aiguidePick(s, h)[i]?.el ?? null,
     t.selectorClasses,
     t.hoverClasses,
     index
@@ -101,6 +110,7 @@ async function open(page: Page, url: string): Promise<void> {
     }
     window.scrollTo(0, 0);
   });
+  await page.evaluate(installPicker);
   await new Promise((r) => setTimeout(r, 800));
 }
 
@@ -118,11 +128,12 @@ export async function recordInteractions(browser: Browser, url: string, targets:
     await open(page, url);
     const plan: { t: InteractionTarget; c: Candidate }[] = [];
     for (const t of targets) {
-      const found = (await page.evaluate(candidatesInPage, t.selectorClasses, t.hoverClasses)) as { action: 'hover' | 'click'; name: string }[];
-      found.forEach((c, index) => plan.push({ t, c: { index, ...c } }));
+      (await candidates(page, t)).forEach((c, index) => plan.push({ t, c: { index, ...c } }));
     }
     const used = new Set<string>();
-    for (const { t, c } of plan.slice(0, MAX_PER_PAGE)) {
+    // Share the budget: each section's first candidate, then each section's second, and so on.
+    const order = plan.map((p, k) => ({ p, k })).sort((a, b) => a.p.c.index - b.p.c.index || a.k - b.k).map((x) => x.p);
+    for (const { t, c } of order.slice(0, MAX_PER_PAGE)) {
       try {
         if (c.action === 'click') await open(page, url);
         const handle = await candidateHandle(page, t, c.index);

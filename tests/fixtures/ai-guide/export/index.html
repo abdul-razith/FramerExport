@@ -28,6 +28,9 @@ body{font-family:"Inter Display",sans-serif;background-color:var(--token-paper,#
 .framer-cta-btn{padding:16px 24px;background-color:#ffffff;border-radius:12px}
 .framer-cta-btn:hover{background-color:var(--token-accent,#36c5f0)}
 .framer-services-hero{padding:80px 24px}
+.framer-cta-link{display:inline-block;padding:16px 24px;border-radius:12px;background-color:#ffffff;cursor:pointer}
+.framer-form{padding:48px 24px}
+.framer-send{cursor:pointer;padding:12px 24px;font-size:20px}
 @media (max-width:1199px){.hidden-m1{display:none!important}.framer-hero-title{font-size:56px}.framer-panel{height:600px}}
 @media (max-width:809px){.framer-hero-title{font-size:40px}.framer-ruler{gap:12px}}
 @media (min-width:1200px){.hidden-d1{display:none!important}}
@@ -57,5 +60,8 @@ body{font-family:"Inter Display",sans-serif;background-color:var(--token-paper,#
 <section class="framer-cta" data-framer-name="CTA">
   <div class="framer-cta-btn" data-framer-name="Say Hi">Say hi</div>
   <a class="framer-cta-link" data-framer-name="Contact" href="services">Contact</a>
+</section>
+<section class="framer-form" data-framer-name="Form">
+  <form data-framer-name="Contact Form" method="post" action="/never"><input name="email" type="email"><button class="framer-send" data-framer-name="Send" type="submit">Send</button></form>
 </section>
 </div></div></body></html>
