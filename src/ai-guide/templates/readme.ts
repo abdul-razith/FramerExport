@@ -14,18 +14,22 @@ one page per task. You run each task and check it.
 
 | Path | What it is |
 | --- | --- |
-| \`index.html\`, \`subpages/\` | The exported pages (reference for structure and text). |
+| \`index.html\`, \`subpages/\` | The exported pages: the markup each section is built from. |
 | \`assets/\` | Images, fonts and videos. |
-| \`data/\`, \`styles/\`, \`scripts/\` | Framer CMS data, generated CSS and runtime — never copied into the project. |
+| \`data/\`, \`scripts/\` | Framer CMS data and runtime — never copied into the project (\`scripts/vendor/\` holds the animation settings the guide reads). |
 | \`AGENTS.md\`, \`CLAUDE.md\` | The rules the agent follows (same text; Claude Code reads CLAUDE.md, agy reads AGENTS.md). |
-| \`ai-guide/site.md\` | Pages, sections, navigation, footer, shared sections, CMS pages, task list. |
+| \`ai-guide/site.md\` | Pages, sections, navigation, footer, shell parts, shared sections, CMS pages, task list. |
 | \`ai-guide/files.md\` | Which export file holds what; image names for the project. |
 | \`ai-guide/content.md\` | CMS collections, their items and fields. |
 | \`ai-guide/tokens.md\` | Colours, fonts, radii and shadows with token names. |
-| \`ai-guide/pages/<page>/\` | Per page: \`outline.md\`, \`motion.md\`, screenshots at 1440/1024/390, section crops, recorded frames. |
+| \`ai-guide/text-styles.css\` | Framer's text styles (presets), once for the whole site. |
+| \`ai-guide/pages/<page>/\` | Per page: screenshots at 1440/1024/390, \`motion.md\`, recorded frames, and \`sections/<id>-<name>/\`. |
+| \`ai-guide/pages/<page>/sections/<id>-<name>/\` | Per section: \`ref.md\` (where it is in the export, widths, content, Framer animation settings, interactive states), \`markup*.html\` (its export markup per width), \`styles.css\` (its export CSS by width), 900px screenshot slices, \`states/\`. |
+| \`ai-guide/shell/\` | The same, for parts shared by every page (header, footer, loader, page background). |
+| \`ai-guide/sections.json\` | Section boxes per width, used by the compare script. |
 | \`ai-guide/plan.md\` | The tasks, as a superpowers plan with checkboxes. |
 | \`ai-guide/checklist.md\` | What to check after each task. |
-| \`ai-guide/scripts/compare.mjs\` | Screenshots your page and puts it next to the original. |
+| \`ai-guide/scripts/compare.mjs\` | Scores each section of your page against the original (90% gate) and saves side-by-side images. |
 | \`nextjs-app/\` | The Next.js project — created by the agent in task 0. |
 
 ## The tasks
@@ -39,7 +43,7 @@ ${tasks.map((t) => `${t.number}. ${t.title}`).join('\n')}
 2. Install the superpowers plugin:
    - **Claude Code:** run \`/plugin\`, find **superpowers** in the marketplace and install it.
    - **agy:** follow the superpowers README's Antigravity instructions.
-3. Node.js 20 or newer and Chrome must be installed (the compare script uses them).
+3. Node.js 20 or newer must be installed (puppeteer, used by the compare script, downloads its own browser).
 
 ## Run it
 
@@ -54,8 +58,9 @@ the same tasks, in the same order, with the same checks.
 
 ## Check each task
 
-Follow \`ai-guide/checklist.md\`: run \`npm run dev\` in \`nextjs-app/\`, compare with the
-original at desktop and mobile width, look at the images in \`ai-guide/compare/\`, then
+Follow \`ai-guide/checklist.md\`: run \`npm run dev\` in \`nextjs-app/\`, then
+\`npm run compare -- <route>\`: every section should score 90% or more at 1440, 1024 and 390 (the agent
+lists any that do not, with the reason). Look at the images in \`ai-guide/compare/\`, then
 \`git commit\` and ask for the next task.
 
 ## If a task goes wrong

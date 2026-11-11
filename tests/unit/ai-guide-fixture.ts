@@ -4,7 +4,12 @@ import type { Node } from '../../src/nextjs/model.js';
 
 const section = (index: number, name: string, extra: Partial<GuideSection> = {}): GuideSection => ({
   index,
+  id: String(index).padStart(2, '0'),
   name,
+  widthsOf: {},
+  generated: [],
+  liveKeys: [],
+  decorations: [],
   generic: false,
   key: `k:${name}`,
   boxes: { base: { x: 0, y: 0, w: 1440, h: 900 } },
@@ -21,7 +26,14 @@ const hero = section(1, 'Hero Section', {
 });
 
 export function guidePage(): GuidePage {
-  return { route: '/', slug: 'index', title: 'Nudge', exportFile: 'index.html', sections: [hero, section(2, 'Projects')] };
+  return {
+    route: '/',
+    slug: 'index',
+    title: 'Nudge',
+    exportFile: 'index.html',
+    sections: [hero, section(2, 'Projects')],
+    shell: [section(1, 'Header', { id: 'S1', shell: true, links: [{ text: 'Home', href: '/' }] })],
+  };
 }
 
 function tokens() {

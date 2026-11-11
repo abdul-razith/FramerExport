@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { NEXT_PROJECT_VERSIONS } from '../nextjs/versions.js';
-import { sectionStem } from './outline.js';
-import type { GuideCollection, GuidePage, GuideSite } from './types.js';
+import { sectionDirName } from './section-ref.js';
+import type { GuideCollection, GuidePage, GuideSection, GuideSite } from './types.js';
 
 export interface PlanTask {
   number: number;
@@ -39,79 +38,101 @@ export function planTasks(site: GuideSite): PlanTask[] {
   return tasks.map((t, i) => ({ ...t, number: i }));
 }
 
-/** What ai-guide/scripts/compare.mjs loads from the project (same versions as framer-export uses). */
-const COMPARE_DEPS = { puppeteer: '^24.43.1', pngjs: '^7.0.0', pixelmatch: '^8.0.0' };
+export const CREATE_APP = 'npx create-next-app@latest nextjs-app --ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --yes';
+export const INSTALL = 'npm i motion gsap @gsap/react lenis @next/mdx @mdx-js/loader @mdx-js/react';
+export const INSTALL_DEV = 'npm i -D @types/mdx puppeteer pngjs pixelmatch';
+export const GATE = '≥ 90% at 1440, 1024 and 390';
 
 const step = (n: number, title: string, body: string) => `- [ ] **Step ${n}: ${title}** — ${body}`;
+/** `npm run compare -- <route> --section <id>`: the `--` keeps npm from taking the flags for itself. */
+const compareCmd = (route: string, id?: string) => `\`npm run compare -- ${route}${id ? ` --section ${id}` : ''}\``;
 
 function verifyStep(n: number, routes: string[]): string {
   return step(
     n,
     'Verify',
     `Use superpowers:verification-before-completion. In \`nextjs-app/\`: \`npm run build\` and \`npm run lint\` pass; ${routes
-      .map((r) => `\`npm run compare ${r}\``)
-      .join(', ')} and read the side-by-side images in \`ai-guide/compare/\`; check the page in \`npm run dev\` at desktop and mobile width. Report the differences that remain.`
+      .map((r) => compareCmd(r))
+      .join(', ')} with \`npm run dev\` running: every section of this task shows ${GATE}; list any section still below with its scores and the reason. Check the page at desktop and mobile width.`
   );
 }
 
 const commitStep = (n: number, message: string) => step(n, 'Commit', `\`git add -A && git commit -m "${message}"\``);
 
+/** The per-section loop: read the export references, build, compare, fix (at most 3 rounds). */
+function sectionStep(n: number, s: GuideSection, dir: string, component: string, content: string, route: string): string {
+  const naming = s.generic ? ' (the layer name is generic: choose a meaningful component name)' : '';
+  return step(
+    n,
+    `${s.id} ${s.name}`,
+    `read \`${dir}/\` (ref.md, markup, styles.css, shot slices) → build \`${component}\`${naming} with its content from \`${content}\` and \`data-section="${s.id}"\` on its root → ${compareCmd(route, s.id)} → fix and compare again, at most 3 fix rounds, until ${GATE} → tick this step and write the three scores after it.`
+  );
+}
+
 function setupTask(site: GuideSite): string[] {
-  const deps = Object.entries(NEXT_PROJECT_VERSIONS.dependencies).map(([k, v]) => `${k}@${v}`).join(' ');
-  const devDeps = [...Object.entries(NEXT_PROJECT_VERSIONS.devDependencies), ...Object.entries(COMPARE_DEPS)]
-    .map(([k, v]) => `${k}@${v}`)
-    .join(' ');
   const routes = site.pages.filter((p) => !p.collection).map((p) => p.route);
-  const detailStubs = site.collections.map((c) => `\`app${c.indexRoute}/[slug]/page.tsx\``);
+  const detailStubs = site.collections.map((c) => `\`src/app${c.indexRoute}/[slug]/page.tsx\``);
   return [
-    '**Files:** create `nextjs-app/` (package.json, .gitignore, next.config.ts, tsconfig.json, postcss.config.mjs, eslint.config.mjs, .prettierrc, app/layout.tsx, app/globals.css, app/fonts.css, public/images/*, a stub `page.tsx` per route).',
-    '**Read first:** `ai-guide/site.md`, `ai-guide/tokens.md`, `ai-guide/files.md`.',
+    '**Files:** create `nextjs-app/` with create-next-app, then `next.config.ts`, `package.json` scripts, `src/app/globals.css`, `src/app/fonts.css`, `src/app/layout.tsx`, `public/fonts/*`, `public/images/*`, a stub `page.tsx` per route.',
+    '**Read first:** `ai-guide/site.md`, `ai-guide/tokens.md`, `ai-guide/text-styles.css`, `ai-guide/files.md`.',
     '',
-    step(1, 'Create the project', `in \`nextjs-app/\` with App Router, TypeScript, \`src\`-less layout and the \`@/*\` import alias, and a \`nextjs-app/.gitignore\` listing node_modules, .next, next-env.d.ts. Install exactly: \`npm install ${deps}\` and \`npm install -D ${devDeps}\`.`),
-    step(2, 'Configure', 'MDX in `next.config.ts` (`pageExtensions` includes `mdx`), Tailwind 4 via `@tailwindcss/postcss`, ESLint flat config with `eslint-config-next`, Prettier with `prettier-plugin-tailwindcss`. Scripts: `"dev": "next dev"`, `"build": "next build"`, `"start": "next start"`, `"lint": "eslint ."`, `"format": "prettier --write ."`, `"compare": "node ../ai-guide/scripts/compare.mjs"`.'),
-    step(3, 'Tokens', 'every colour, font, radius and shadow from `ai-guide/tokens.md` into `@theme` in `app/globals.css`; custom variants `tablet` = `@media (max-width: 1199px)` and `mobile` = `@media (max-width: 809px)`; base `box-sizing: border-box`.'),
-    step(4, 'Fonts', 'copy the font files listed in `ai-guide/files.md` to `public/fonts/` and declare them with `@font-face` in `app/fonts.css`.'),
-    step(5, 'Images', 'copy every image in `ai-guide/files.md` from its export path to its suggested `public/images/...` name.'),
-    step(6, 'Route stubs', `a \`page.tsx\` for each route that renders its title and "Not built yet": ${routes.join(', ')}${detailStubs.length ? `; plus ${detailStubs.join(', ')} for CMS detail pages` : ''}. Metadata (title, description) from \`ai-guide/site.md\`.`),
-    verifyStep(7, ['/']),
-    commitStep(8, 'chore: create the Next.js project'),
+    step(1, 'Create the project', `in the export folder run \`${CREATE_APP}\`. It creates \`nextjs-app/\` with TypeScript, Tailwind, ESLint, the App Router, a \`src/\` folder, the \`@/*\` alias and a \`.gitignore\`.`),
+    step(2, 'Install', `in \`nextjs-app/\`: \`${INSTALL}\` and \`${INSTALL_DEV}\` (latest versions; the last three are for \`npm run compare\`).`),
+    step(3, 'Configure', 'MDX in `next.config.ts` with `@next/mdx` (`pageExtensions` includes `md` and `mdx`) and `src/mdx-components.tsx`; add the script `"compare": "node ../ai-guide/scripts/compare.mjs"` to `package.json`.'),
+    step(4, 'Tokens', 'every colour, font, radius and shadow from `ai-guide/tokens.md` into `@theme` in `src/app/globals.css`; custom variants `tablet` = `@media (max-width: 1199px)` and `mobile` = `@media (max-width: 809px)`.'),
+    step(5, 'Text styles', 'turn each Framer text preset in `ai-guide/text-styles.css` into one Tailwind `@utility` in `src/app/globals.css`, named after its role (`text-heading-1`, `text-body`…), keeping its exact values per width; note in a comment which preset class each one replaces.'),
+    step(6, 'Fonts', 'copy the font files listed in `ai-guide/files.md` to `public/fonts/` and declare them with `@font-face` in `src/app/fonts.css`, imported by `src/app/layout.tsx`.'),
+    step(7, 'Images', 'copy every image in `ai-guide/files.md` from its export path to its suggested `public/images/...` name.'),
+    step(
+      8,
+      'Route stubs',
+      `a \`page.tsx\` under \`src/app/\` for each route that renders its title and "Not built yet": ${routes.join(', ')}${detailStubs.length ? `; plus ${detailStubs.join(', ')} for CMS detail pages` : ''}. Metadata (title, description) from \`ai-guide/site.md\`.`
+    ),
+    step(9, 'Verify', 'Use superpowers:verification-before-completion. In `nextjs-app/`: `npm run build` and `npm run lint` pass; `npm run dev` serves every route.'),
+    commitStep(10, 'chore: create the Next.js project'),
   ];
 }
 
 function shellTask(site: GuideSite): string[] {
   const home = site.pages.find((p) => p.route === '/') ?? site.pages[0];
-  return [
-    '**Files:** `components/layout/Navbar.tsx`, `components/layout/Footer.tsx`, `components/layout/Loader.tsx` (when the site has one), `components/motion/*`, `app/layout.tsx`, `content/layout.ts`.',
-    `**Read first:** \`ai-guide/site.md\` (navigation, footer, shared sections), \`ai-guide/pages/${home.slug}/outline.md\`, \`ai-guide/pages/${home.slug}/motion.md\` (the "Custom behaviour" and "Page-wide" parts), \`ai-guide/pages/${home.slug}/frames/load/\`.`,
+  const parts = home.shell ?? [];
+  const lines = [
+    '**Files:** `src/components/layout/*` (Navbar, Footer, Loader, page background…), `src/components/motion/*`, `src/app/layout.tsx`, `src/content/layout.ts`.',
+    `**Read first:** \`ai-guide/site.md\` (navigation, footer, shared sections), the folders in \`ai-guide/shell/\`, \`ai-guide/pages/${home.slug}/motion.md\` (the "Custom behaviour" and "Page-wide" parts), \`ai-guide/pages/${home.slug}/frames/load/\`.`,
     '',
-    step(1, 'Layout content', '`content/layout.ts` with the navigation and footer links and texts from `ai-guide/site.md`.'),
-    step(2, 'Navbar', 'desktop navigation and a working mobile menu (button + panel), matching the home screenshots at 1440 and 390; active link state.'),
-    step(3, 'Footer', 'from the footer section of the outline and screenshots.'),
-    step(4, 'Loader, cursor and smooth scroll', 'only what `motion.md` lists as custom behaviour (page loader, custom cursor, smooth scroll); rebuild the loader from the load frames.'),
-    step(5, 'Root layout', '`app/layout.tsx` with fonts, Navbar, Footer, Loader and Lenis; shared sections listed in `site.md` become components used by every page that has them.'),
-    verifyStep(6, ['/', site.pages.find((p) => p.route !== '/' && !p.collection)?.route ?? '/']),
-    commitStep(7, 'feat: site shell'),
+    step(1, 'Layout content', '`src/content/layout.ts` with the navigation and footer links and texts from `ai-guide/site.md` and the shell `ref.md` files.'),
   ];
+  parts.forEach((s, i) => {
+    lines.push(sectionStep(i + 2, s, `ai-guide/shell/${sectionDirName(s)}`, `src/components/layout/${pascal(s.name) || `Part${i + 1}`}.tsx`, 'src/content/layout.ts', '/'));
+  });
+  let n = parts.length + 2;
+  lines.push(step(n++, 'Mobile menu and smooth scroll', 'a working mobile menu (button + panel, see the `## Interactive` part of the header ref.md); Lenis smooth scroll; only the custom behaviour `motion.md` lists.'));
+  lines.push(step(n++, 'Root layout', '`src/app/layout.tsx` with fonts, the shell parts and Lenis; shared sections listed in `site.md` become components used by every page that has them.'));
+  lines.push(verifyStep(n++, ['/', site.pages.find((p) => p.route !== '/' && !p.collection)?.route ?? '/']));
+  lines.push(commitStep(n, 'feat: site shell'));
+  return lines;
 }
 
 function pageTask(page: GuidePage): string[] {
   const base = `ai-guide/pages/${page.slug}`;
   const folder = pageFolder(page.route);
   const prefix = pascal(pageName(page.route));
+  const content = `src/content/${folder}.ts`;
+  const appFile = `src/app${page.route === '/' ? '' : page.route}/page.tsx`;
   const lines = [
-    `**Files:** \`content/${folder}.ts\`, \`components/sections/${folder}/*.tsx\`, \`app${page.route === '/' ? '' : page.route}/page.tsx\`.`,
-    `**Read first:** \`${base}/outline.md\`, \`${base}/motion.md\`, \`${base}/desktop.png\`, \`${base}/tablet.png\`, \`${base}/mobile.png\`, the section crops in \`${base}/sections/\`.`,
+    `**Files:** \`${content}\`, \`src/components/sections/${folder}/*.tsx\`, \`${appFile}\`.`,
+    `**Read first:** \`${base}/desktop.png\`, \`${base}/tablet.png\`, \`${base}/mobile.png\`, \`${base}/motion.md\`, then each section folder in \`${base}/sections/\` when its step starts.`,
     '',
-    step(1, 'Content', `\`content/${folder}.ts\` with every text, image and link of the page from the outline, keyed by section.`),
+    step(1, 'Content', `\`${content}\` with every text, image and link of the page, from the \`## Content\` part of each section's ref.md, keyed by section.`),
   ];
   page.sections.forEach((s, i) => {
-    const component = s.generic ? `components/sections/${folder}/${prefix}<Name>.tsx` : `components/sections/${folder}/${prefix}${pascal(s.name)}.tsx`;
-    const naming = s.generic ? ' (the layer name is generic: choose a meaningful <Name>)' : '';
-    lines.push(step(i + 2, s.name, `build \`${component}\` from \`${base}/outline.md#${sectionStem(s).slice(0, 2)}\` and \`${base}/sections/${sectionStem(s)}-*.png\`${naming}.`));
+    const name = s.generic ? `${prefix}<Name>` : `${prefix}${pascal(s.name)}`;
+    lines.push(sectionStep(i + 2, s, `${base}/sections/${sectionDirName(s)}`, `src/components/sections/${folder}/${name}.tsx`, content, page.route));
   });
   let n = page.sections.length + 2;
-  lines.push(step(n++, 'Animations', `everything \`${base}/motion.md\` lists for this page, using the frames in \`${base}/frames/\`.`));
-  lines.push(step(n++, 'Page', `\`app${page.route === '/' ? '' : page.route}/page.tsx\` renders the sections in order with metadata.`));
+  lines.push(step(n++, 'Animations', `the \`## Animations\` part of every section ref.md (Framer's exact settings) and \`${base}/motion.md\`, checked against the frames in \`${base}/frames/\`.`));
+  lines.push(step(n++, 'Interactive states', 'every state in the `## Interactive` part of the section ref.md files (hover, open/closed), matching its before/after screenshots.'));
+  lines.push(step(n++, 'Page', `\`${appFile}\` renders the sections in order with metadata.`));
   lines.push(verifyStep(n++, [page.route]));
   lines.push(commitStep(n, `feat: ${pageName(page.route).toLowerCase()} page`));
   return lines;
@@ -123,14 +144,14 @@ function collectionTask(c: GuideCollection, site: GuideSite): string[] {
   const dir = c.indexRoute.replace(/^\//, '');
   const first = c.items[0]?.route ?? c.indexRoute;
   return [
-    `**Files:** \`content/${c.name}/*.mdx\`, \`lib/${c.name}.ts\`, \`app/${dir}/page.tsx\`, \`app/${dir}/[slug]/page.tsx\`, \`components/sections/${dir}/*\`.`,
-    `**Read first:** \`ai-guide/content.md\` (collection "${c.name}")${list ? `, \`ai-guide/pages/${list.slug}/\`` : ''}${item ? `, \`ai-guide/pages/${item.slug}/\` (one detail page)` : ''}.`,
+    `**Files:** \`src/content/${c.name}/*.mdx\`, \`src/lib/${c.name}.ts\`, \`src/app/${dir}/page.tsx\`, \`src/app/${dir}/[slug]/page.tsx\`, \`src/components/sections/${dir}/*\`.`,
+    `**Read first:** \`ai-guide/content.md\` (collection "${c.name}")${list ? `, \`ai-guide/pages/${list.slug}/sections/\`` : ''}${item ? `, \`ai-guide/pages/${item.slug}/sections/\` (one detail page)` : ''}.`,
     '',
-    step(1, 'MDX items', `one \`content/${c.name}/<slug>.mdx\` per item listed in \`ai-guide/content.md\` (${c.items.length} items), front matter as described there, body = the article text from the item's export file.`),
-    step(2, 'Loader', `\`lib/${c.name}.ts\`: typed list of items sorted as on the list page, and lookup by slug.`),
-    step(3, 'List page', `\`app/${dir}/page.tsx\` and its sections, built like a page task from the list page outline.`),
-    step(4, 'Detail template', `\`app/${dir}/[slug]/page.tsx\` with \`generateStaticParams\`, built from the detail page outline; renders any item.`),
-    step(5, 'Animations', 'from the list and detail pages\' `motion.md`.'),
+    step(1, 'MDX items', `one \`src/content/${c.name}/<slug>.mdx\` per item listed in \`ai-guide/content.md\` (${c.items.length} items), front matter as described there, body = the article text from the item's export file.`),
+    step(2, 'Loader', `\`src/lib/${c.name}.ts\`: typed list of items sorted as on the list page, and lookup by slug.`),
+    step(3, 'List page', `\`src/app/${dir}/page.tsx\` and its sections, each built like a page section: ref.md + markup + styles.css → ${compareCmd(c.indexRoute, '<id>')} until ${GATE}.`),
+    step(4, 'Detail template', `\`src/app/${dir}/[slug]/page.tsx\` with \`generateStaticParams\`, built from the detail page's section folders the same way (${compareCmd(first, '<id>')}); renders any item.`),
+    step(5, 'Animations', 'from the `## Animations` parts of the list and detail sections and their `motion.md`.'),
     verifyStep(6, [c.indexRoute, first]),
     commitStep(7, `feat: ${c.name} collection`),
   ];
@@ -142,9 +163,9 @@ function reviewTask(site: GuideSite): string[] {
     '**Files:** anything in `nextjs-app/` that the checks below find.',
     '**Read first:** `AGENTS.md`, `ai-guide/checklist.md`.',
     '',
-    step(1, 'Duplicates', 'markup repeated in two or more components moves into `components/ui`.'),
+    step(1, 'Duplicates', 'markup repeated in two or more components moves into `src/components/ui`.'),
     step(2, 'Names and size', 'meaningful component and prop names; no file over about 200 lines.'),
-    step(3, 'No leftovers', 'no raw hex colours, no pixel positions copied from screenshots, no framer-* class names or Framer scripts, no placeholder text, no TODOs.'),
+    step(3, 'No leftovers', 'no raw hex colours, no framer-* class names or Framer scripts, no placeholder text, no TODOs.'),
     step(4, 'Accessibility basics', 'alt text, one h1 per page, buttons vs links, focus styles, `prefers-reduced-motion`.'),
     verifyStep(5, routes),
     commitStep(6, 'refactor: review and cleanup'),
@@ -157,11 +178,11 @@ export function renderPlan(site: GuideSite): string {
     '',
     '> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.',
     '',
-    `**Goal:** Build a clean, editable Next.js version of ${site.name} (${site.sourceUrl}) in \`nextjs-app/\`.`,
+    `**Goal:** Build a clean, editable Next.js version of ${site.name} (${site.sourceUrl}) in \`nextjs-app/\` that matches the original.`,
     '',
-    '**Architecture:** One task per page. Each page is built from its outline, screenshots and motion notes in `ai-guide/pages/<page>/`; content lives in `content/` and MDX; shared parts live in `components/layout` and `components/ui`.',
+    "**Architecture:** One task per page, one step per section. Each section is built from the export's own markup and CSS (`ai-guide/pages/<page>/sections/<id>-<name>/`), then compared with the original until it matches; content lives in `src/content/` and MDX; shared parts live in `src/components/layout` and `src/components/ui`.",
     '',
-    '**Tech Stack:** Next.js 16 (App Router), React 19, TypeScript, Tailwind 4, motion, GSAP ScrollTrigger, Lenis, MDX.',
+    '**Tech Stack:** Next.js (App Router, `src/` folder, from `create-next-app@latest`), React, TypeScript, Tailwind CSS, motion, GSAP ScrollTrigger, Lenis, MDX.',
     '',
     '**Spec:** `ai-guide/site.md` and `AGENTS.md`.',
     '',
@@ -169,7 +190,8 @@ export function renderPlan(site: GuideSite): string {
     '',
     '- Follow every rule in `AGENTS.md`.',
     '- Reference widths 1440, 1024, 390; `tablet` = max 1199px, `mobile` = max 809px; fluid in between.',
-    '- Content only from `content/` and MDX; colours only from tokens; no Framer runtime, classes or generated CSS.',
+    `- Every section: built from its \`markup*.html\` + \`styles.css\` with exact values, then ${GATE} in \`npm run compare\`, at most 3 fix rounds.`,
+    '- Content only from `src/content/` and MDX; colours and fonts only from tokens; no Framer runtime, framer-* classes or inline style blobs.',
     '',
     '---',
     '',

@@ -216,7 +216,8 @@ function readableValue(property: string, value: string): string {
   return describeTransform(parseTransform(value)).join(', ') || 'none';
 }
 
-function line(e: MotionEntry): string {
+/** One `motion.md` line for a recorded entry. */
+export function motionLine(e: MotionEntry): string {
   const parts = [`trigger: ${e.trigger}`];
   if (e.from || e.to) parts.push(`${e.from || '?'} → ${e.to || '?'}`);
   if (e.startMs !== undefined) parts.push(`starts ${e.startMs} ms`);
@@ -245,12 +246,12 @@ export function renderMotionMd(page: GuidePage, entries: MotionEntry[]): string 
   const order = [...page.sections.map((s) => s.name), 'Page-wide'];
   for (const name of order) {
     const list = groups.get(name);
-    if (list) out.push(`## ${name}`, '', ...list.map(line), '');
+    if (list) out.push(`## ${name}`, '', ...list.map(motionLine), '');
   }
   const custom = entries.filter((e) => e.trigger === 'custom');
   if (custom.length) {
     out.push('## Custom behaviour', '', 'Not a plain style animation: write a small component for each (e.g. TypingText, LiveClock, Loader).', '');
-    out.push(...custom.map((e) => `${line(e)} · section: ${sectionOf(e)}`), '');
+    out.push(...custom.map((e) => `${motionLine(e)} · section: ${sectionOf(e)}`), '');
   }
   return out.join('\n');
 }

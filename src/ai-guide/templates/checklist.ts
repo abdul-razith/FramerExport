@@ -7,6 +7,7 @@ Run \`npm run dev\` in \`nextjs-app/\` and open the task's page next to the orig
 - [ ] At 1440 wide the page looks like \`ai-guide/pages/<page>/desktop.png\`.
 - [ ] At 1024 (tablet) and 390 (mobile) it looks like \`tablet.png\` and \`mobile.png\`.
 - [ ] Resize slowly between those widths: nothing overlaps, nothing is cut off, no sideways scroll.
+- [ ] \`npm run compare -- <route>\` shows 90% or more for every section at 1440, 1024 and 390, or the agent listed why not.
 - [ ] The side-by-side images in \`ai-guide/compare/\` show no big differences.
 
 ## Works

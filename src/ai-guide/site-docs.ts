@@ -31,6 +31,8 @@ export function renderSiteMd(site: GuideSite): string {
   out.push(...(cms.length ? cms.map(([r, c]) => row([r, c])) : ['None.']), '');
   out.push('## Navigation', ...(site.nav.length ? site.nav.map((l) => `- ${l.text} → ${l.href}`) : ['None found.']), '');
   out.push('## Footer links', ...(site.footer.length ? site.footer.map((l) => `- ${l.text} → ${l.href}`) : ['None found.']), '');
+  const home = site.pages.find((p) => p.route === '/') ?? site.pages[0];
+  out.push('## Shell parts (ai-guide/shell/)', ...(home?.shell?.length ? home.shell.map((s) => `- ${s.id} ${s.name}`) : ['None found.']), '');
   out.push(
     '## Sections shared between pages',
     ...(site.sharedSections.length ? site.sharedSections.map((s) => `- ${s.name}: ${s.routes.join(', ')}`) : ['None.']),
@@ -100,7 +102,7 @@ const FIELD_TYPE: Record<string, string> = { text: 'string', date: 'string', ima
 export function renderContentMd(site: GuideSite): string {
   const out = ['# CMS content', ''];
   if (!site.collections.length) {
-    out.push('No CMS collections were detected. All content is on the pages (see each outline.md).', '');
+    out.push('No CMS collections were detected. All content is on the pages (see the Content part of each section ref.md).', '');
     return out.join('\n');
   }
   for (const c of site.collections) {
