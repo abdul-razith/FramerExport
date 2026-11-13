@@ -25,3 +25,13 @@ test('sections.json lists shell and page sections per width, with live boxes', (
   assert.deepEqual(json['/'].sections[1].live['1440'], [{ x: 10, y: 60, w: 80, h: 20 }]);
   assert.deepEqual(json['/'].sections[2].live, {});
 });
+
+test('sections.json says how many animations each section is expected to have', () => {
+  const page: GuidePage = {
+    route: '/', slug: 'index', title: 'Home', exportFile: 'index.html',
+    sections: [{ ...section('01', 'Hero', 56), motion: ['Name enter', 'Badge loop'] }, section('02', 'Works', 900)],
+  };
+  const json = sectionsJson([page], () => ({}));
+  assert.equal(json['/'].sections[0].motion, 2);
+  assert.equal(json['/'].sections[1].motion, 0);
+});

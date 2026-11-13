@@ -40,6 +40,22 @@ export function markupFileNames(copies: MarkupCopy[]): string[] {
 
 const size = (b?: { w: number; h: number }) => (b ? `${Math.round(b.w)}×${Math.round(b.h)}` : '—');
 
+/** What visibly moves on its own (not hover, not custom behaviour such as cursors and clocks), once each. */
+const MOVES = new Set<MotionEntry['trigger']>(['load', 'in-view', 'scroll', 'loop']);
+
+/** Short list of what animates in a section: Framer's settings, then what the recording saw. */
+export function sectionMotion(animations: ExportAnimation[] | Error, recorded: MotionEntry[]): string[] {
+  const list = [
+    ...(animations instanceof Error
+      ? []
+      : animations
+          .filter((a) => a.kind !== 'override' || a.override?.animates)
+          .map((a) => `${a.layer || a.className} (${a.kind === 'override' ? `override ${a.override!.name}` : a.kind})`)),
+    ...recorded.filter((e) => MOVES.has(e.trigger)).map((e) => `${e.label} (${e.trigger})`),
+  ];
+  return [...new Set(list)];
+}
+
 /** The section's `ref.md`: the AI's entry point for building it from the export's own code. */
 export function renderSectionRef(input: SectionRefInput): string {
   const { page, section: s, exportFile } = input;
@@ -93,7 +109,11 @@ export function renderSectionRef(input: SectionRefInput): string {
   else if (!input.animations.length) out.push('No Framer animation settings for this section.');
   else {
     out.push("Framer's own settings, read from the export's JS (exact values):");
-    out.push(...input.animations.map((a) => `- ${a.layer ? `**${a.layer}** (\`${a.className}\`)` : `\`${a.className}\``} — ${describeAnimation(a)}`));
+    for (const a of input.animations) {
+      out.push(`- ${a.layer ? `**${a.layer}** (\`${a.className}\`)` : `\`${a.className}\``} — ${describeAnimation(a)}`);
+      // Custom code has no settings to list: its source is the spec (minified, as exported).
+      if (a.kind === 'override' && a.override) out.push('', '```js', a.override.code, '```', '');
+    }
   }
   if (input.recorded.length) out.push('', 'Recorded on the live site (frames in the page folder):', ...input.recorded.map(motionLine));
   out.push('');

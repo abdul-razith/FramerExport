@@ -38,9 +38,9 @@ import {
 import { classesIn, presetClassesIn, sectionMarkup, type MarkupCopy } from './export-markup.js';
 import { findAnimations, loadVendorModules, type ExportAnimation } from './export-motion.js';
 import { recordInteractions, type InteractionState } from './interactions.js';
-import { motionFromNodes, renderMotionMd, summarizeLoad } from './motion.js';
+import { motionFromNodes, moversToEntries, renderMotionMd, summarizeLoad } from './motion.js';
 import { buildGuidePage } from './outline.js';
-import { markupFileNames, renderSectionRef, sectionDirName } from './section-ref.js';
+import { markupFileNames, renderSectionRef, sectionDirName, sectionMotion } from './section-ref.js';
 import { sectionsJson, WIDTH_KEY, type WidthKey } from './sections-json.js';
 import { splitPage } from './split.js';
 import { assignShellIds, shellKey } from './shell-ids.js';
@@ -412,6 +412,9 @@ async function build(
                 (e) => e.trigger === 'loop'
               )
             );
+            // The net: anything else seen moving during the visit (scroll-triggered text effects,
+            // code components, CSS…), unless the readings above already describe it.
+            entries.push(...moversToEntries(rec.movers, entries));
           } catch (e) {
             // One slow or broken page must not cost the whole guide.
             log(`AI guide: recording ${page.route} failed (${(e as Error).message})`);
@@ -495,6 +498,7 @@ async function build(
             if (failHook(`section:${page.route}`) && i === targets.length - 1)
               throw new Error('Simulated section failure (FRAMER_AIGUIDE_TEST_FAIL)');
             const r = refs[i];
+            t.section.motion = sectionMotion(r.animations, r.recorded);
             for (const p of r.presets) presets.add(p);
             await fs.mkdir(t.dir, { recursive: true });
             if (!(r.markup instanceof Error)) {
@@ -567,6 +571,9 @@ Use the export file \`${page.exportFile}\` and the live site for this page.
   } finally {
     await browser.close().catch(() => undefined);
   }
+  // Pages that show a shell part they do not own still expect it to move.
+  for (const p of guidePages)
+    for (const s of p.shell ?? []) s.motion ??= siteShell.find((x) => x.id === s.id)?.motion;
   await fs.writeFile(
     path.join(guideDir, 'text-styles.css'),
     textStyles(allRules, [...presets], tokens) ||

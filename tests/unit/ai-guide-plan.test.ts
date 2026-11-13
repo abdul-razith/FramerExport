@@ -147,3 +147,38 @@ test('the shell task covers shell parts of every page, compared on the page that
   assert.match(md, /- \[ \] \*\*Step \d+: S2 About Menu\*\* — read `ai-guide\/shell\/S2-about-menu\/`/);
   assert.ok(md.includes('`npm run compare -- /about --section S2`'));
 });
+
+const animatedSite = () => {
+  const site = fixtureSite();
+  site.pages[0].sections[0] = { ...site.pages[0].sections[0], motion: ['Name (enter)', 'letters "Hi" (load)'] };
+  return site;
+};
+
+test('a section with animations builds them in its own step and needs compare to see motion', () => {
+  const md = renderPlan(animatedSite());
+  const hero = md.split('\n').find((l) => l.includes('**Step 2: 01 Hero Section**'))!;
+  assert.ok(hero.includes('Name (enter)'), hero);
+  assert.ok(hero.includes('letters "Hi" (load)'), hero);
+  assert.ok(hero.includes('`## Animations`'), hero);
+  assert.ok(hero.includes('`motion ✓`'), hero);
+  const projects = md.split('\n').find((l) => l.includes('**Step 3: 02 Projects**'))!;
+  assert.doesNotMatch(projects, /motion ✓/);
+});
+
+test('the page animation step is checked by compare, not ticked on trust', () => {
+  const md = renderPlan(animatedSite());
+  const home = md.slice(md.indexOf('### Task 2:'), md.indexOf('### Task 3:'));
+  const step = home.split('\n').find((l) => /\*\*Step \d+: Animations\*\*/.test(l))!;
+  assert.ok(step.includes('`npm run compare -- /`'), step);
+  assert.ok(step.includes('`motion ✗`'), step);
+  assert.ok(step.includes('motion.md'), step);
+  const blog = md.slice(md.indexOf('Blog collection'));
+  const cstep = blog.split('\n').find((l) => /\*\*Step \d+: Animations\*\*/.test(l))!;
+  assert.ok(cstep.includes('`npm run compare -- /blog`') && cstep.includes('`npm run compare -- /blog/post-a`'), cstep);
+  assert.ok(cstep.includes('`motion ✗`'), cstep);
+});
+
+test('AGENTS.md and the checklist say an animated section is not done without motion ✓', () => {
+  assert.ok(AGENTS_MD.includes('motion ✓'));
+  assert.ok(CHECKLIST_MD.includes('motion ✗'));
+});

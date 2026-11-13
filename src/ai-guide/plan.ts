@@ -59,13 +59,31 @@ function verifyStep(n: number, routes: string[]): string {
 
 const commitStep = (n: number, message: string) => step(n, 'Commit', `\`git add -A && git commit -m "${message}"\``);
 
+const SHOWN = 6;
+/** For a section that animates: build its animations in the same step, from ref.md's exact settings. */
+function motionPart(s: GuideSection): string {
+  const m = s.motion ?? [];
+  if (!m.length) return '';
+  const list = m.slice(0, SHOWN).join(', ') + (m.length > SHOWN ? `, +${m.length - SHOWN} more` : '');
+  return ` → animate it with motion or GSAP using the exact settings in the \`## Animations\` part of ref.md (${list}); compare must print \`motion ✓\` for it, \`motion ✗\` means nothing moved`;
+}
+
+/** The page-level animation step: page-wide motion, then compare proves every animated section moves. */
+function animationsStep(n: number, motionMds: string[], routes: string[]): string {
+  return step(
+    n,
+    'Animations',
+    `what the section steps did not cover: the page-wide motion and custom behaviour in ${motionMds.map((m) => `\`${m}\``).join(' and ')} (loader, cursor, scroll effects), checked against its \`frames/\`. Then, with \`npm run dev\` running, ${routes.map((r) => compareCmd(r)).join(' and ')}: no section may show \`motion ✗\` (it has animations in its ref.md but nothing moved). Do not tick this step while one does.`
+  );
+}
+
 /** The per-section loop: read the export references, build, compare, fix (at most 3 rounds). */
 function sectionStep(n: number, s: GuideSection, dir: string, component: string, content: string, route: string): string {
   const naming = s.generic ? ' (the layer name is generic: choose a meaningful component name)' : '';
   return step(
     n,
     `${s.id} ${s.name}`,
-    `read \`${dir}/\` (ref.md, markup, styles.css, shot slices) → build \`${component}\`${naming} with its content from \`${content}\` and \`data-section="${s.id}"\` on its root → ${compareCmd(route, s.id)} → fix and compare again, at most 3 fix rounds, until ${GATE} → tick this step and write the three scores after it.`
+    `read \`${dir}/\` (ref.md, markup, styles.css, shot slices) → build \`${component}\`${naming} with its content from \`${content}\` and \`data-section="${s.id}"\` on its root${motionPart(s)} → ${compareCmd(route, s.id)} → fix and compare again, at most 3 fix rounds, until ${GATE}${s.motion?.length ? ' and `motion ✓`' : ''} → tick this step and write the three scores after it.`
   );
 }
 
@@ -130,7 +148,7 @@ function pageTask(page: GuidePage): string[] {
     lines.push(sectionStep(i + 2, s, `${base}/sections/${sectionDirName(s)}`, `src/components/sections/${folder}/${name}.tsx`, content, page.route));
   });
   let n = page.sections.length + 2;
-  lines.push(step(n++, 'Animations', `the \`## Animations\` part of every section ref.md (Framer's exact settings) and \`${base}/motion.md\`, checked against the frames in \`${base}/frames/\`.`));
+  lines.push(animationsStep(n++, [`${base}/motion.md`], [page.route]));
   lines.push(step(n++, 'Interactive states', 'every state in the `## Interactive` part of the section ref.md files (hover, open/closed), matching its before/after screenshots.'));
   lines.push(step(n++, 'Page', `\`${appFile}\` renders the sections in order with metadata.`));
   lines.push(verifyStep(n++, [page.route]));
@@ -151,7 +169,7 @@ function collectionTask(c: GuideCollection, site: GuideSite): string[] {
     step(2, 'Loader', `\`src/lib/${c.name}.ts\`: typed list of items sorted as on the list page, and lookup by slug.`),
     step(3, 'List page', `\`src/app/${dir}/page.tsx\` and its sections, each built like a page section: ref.md + markup + styles.css → ${compareCmd(c.indexRoute, '<id>')} until ${GATE}.`),
     step(4, 'Detail template', `\`src/app/${dir}/[slug]/page.tsx\` with \`generateStaticParams\`, built from the detail page's section folders the same way (${compareCmd(first, '<id>')}); renders any item.`),
-    step(5, 'Animations', 'from the `## Animations` parts of the list and detail sections and their `motion.md`.'),
+    animationsStep(5, [list, item].filter((p): p is GuidePage => !!p).map((p) => `ai-guide/pages/${p.slug}/motion.md`), [c.indexRoute, first]),
     verifyStep(6, [c.indexRoute, first]),
     commitStep(7, `feat: ${c.name} collection`),
   ];

@@ -9,6 +9,9 @@ export const COMPARE_MJS = String.raw`// Usage (in nextjs-app/, with the site ru
 // section against the original: the element with data-section="<id>" against the box in
 // ai-guide/sections.json. Live parts (data-live, and the original's live boxes) are greyed out on
 // both sides. Writes ai-guide/compare/<page>-<id>-<width>.png (original | yours | differences).
+// It also watches what moves: a section whose ref.md lists animations ("motion" in sections.json)
+// gets "motion ✓" when something in it animated (CSS animation or transition, element.animate(),
+// or a script changing opacity/transform), else "motion ✗".
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -112,7 +115,31 @@ const score = (a, b) => {
 
 const outDir = path.join(guideDir, 'compare');
 fs.mkdirSync(outDir, { recursive: true });
-const results = new Map(sections.map((s) => [s.id, { name: s.name, scores: {} }]));
+const results = new Map(sections.map((s) => [s.id, { name: s.name, scores: {}, motion: s.motion || 0 }]));
+const moved = new Set();
+
+// Runs in the page before its own scripts: remembers every element that animates.
+function watchMotion() {
+  const seen = (window.__moved = []);
+  const add = (el) => el && el.nodeType === 1 && seen.push(el);
+  for (const type of ['animationstart', 'transitionrun']) document.addEventListener(type, (e) => add(e.target), true);
+  const animate = Element.prototype.animate;
+  Element.prototype.animate = function (...args) {
+    add(this);
+    return animate.apply(this, args);
+  };
+  const part = (style, prop) => {
+    const m = (style || '').match(new RegExp('(?:^|;)\\s*' + prop + '\\s*:([^;]*)'));
+    return m ? m[1].trim() : '';
+  };
+  new MutationObserver((list) => {
+    for (const m of list) {
+      const now = m.target.getAttribute('style');
+      if (['opacity', 'transform', 'translate', 'scale', 'rotate'].some((p) => part(m.oldValue, p) !== part(now, p))) add(m.target);
+    }
+  }).observe(document, { subtree: true, attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+  setInterval(() => document.getAnimations().forEach((a) => add(a.effect && a.effect.target)), 100);
+}
 const browser = await puppeteer.launch({ headless: true });
 try {
   for (const [name, width] of WIDTHS) {
@@ -123,6 +150,7 @@ try {
     }
     const page = await browser.newPage();
     await page.setViewport({ width, height: 900 });
+    await page.evaluateOnNewDocument(watchMotion);
     await page.goto(base + route, { waitUntil: 'networkidle2', timeout: 120000 });
     await page.evaluate(async () => {
       for (let y = 0; y < document.documentElement.scrollHeight; y += 400) {
@@ -140,8 +168,14 @@ try {
       };
       const sections = {};
       for (const el of document.querySelectorAll('[data-section]')) sections[el.getAttribute('data-section')] = box(el);
-      return { sections, live: Array.from(document.querySelectorAll('[data-live]')).map(box) };
+      const moved = new Set();
+      for (const el of window.__moved || []) {
+        const s = el.closest && el.closest('[data-section]');
+        if (s) moved.add(s.getAttribute('data-section'));
+      }
+      return { sections, live: Array.from(document.querySelectorAll('[data-live]')).map(box), moved: Array.from(moved) };
     });
+    for (const id of found.moved) moved.add(id);
     const shot = PNG.sync.read(await page.screenshot({ fullPage: true }));
     await page.close();
     const ref = PNG.sync.read(fs.readFileSync(refFile));
@@ -176,7 +210,10 @@ for (const [id, r] of results) {
     return w + ': ' + (typeof v === 'number' ? v.toFixed(1) + '%' : v ?? 'skipped');
   });
   const ok = WIDTHS.every(([, w]) => typeof r.scores[w] === 'number' && r.scores[w] >= PASS);
-  console.log(id + ' ' + (r.name || '') + '  ' + cells.join('  ') + (ok ? '' : ' ✗'));
+  const motion = r.motion ? '  motion ' + (moved.has(id) ? '✓' : '✗') : '';
+  console.log(id + ' ' + (r.name || '') + '  ' + cells.join('  ') + (ok ? '' : ' ✗') + motion);
 }
 if (results.size) console.log('✗ = below ' + PASS + '% at some width. Images: ai-guide/compare/' + slug + '-<id>-<width>.png (original | yours | differences)');
+if ([...results].some(([id, r]) => r.motion && !moved.has(id)))
+  console.log('motion ✗ = its ref.md lists animations (## Animations) but nothing in it moved: build them before ticking the step.');
 `;

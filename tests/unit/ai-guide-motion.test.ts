@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { motionFromNodes, needsMoreTime, renderMotionMd, summarizeLoad } from '../../src/ai-guide/motion.js';
+import { motionFromNodes, moversToEntries, needsMoreTime, renderMotionMd, summarizeLoad, type Mover } from '../../src/ai-guide/motion.js';
 import type { MotionEntry } from '../../src/ai-guide/types.js';
 import type { Node, Style } from '../../src/nextjs/model.js';
 import { guidePage } from './ai-guide-fixture.js';
@@ -134,4 +134,44 @@ test('the recorder keeps going while the page still moves, up to the limit', () 
 test('text that moves into child spans (Framer splitting it for an animation) is not custom behaviour', () => {
   const samples = [s(0, '1', 'none', 'I design outstanding'), s(200, '1', 'none', ''), s(400, '1', 'none', '')];
   assert.deepEqual(summarizeLoad(samples, 200), []);
+});
+
+const mover = (key: string, extra: Partial<Mover> = {}): Mover => ({ key, name: '', text: '', kinds: ['transform'], scrollY: 1800, ...extra });
+
+test('an element that moved while the page was scrolled to it is an in-view animation', () => {
+  const [e, ...rest] = moversToEntries([mover('body:0/div[Card]:3', { name: 'Card', text: 'Meridian', kinds: ['transform', 'opacity'] })], []);
+  assert.equal(rest.length, 0);
+  assert.equal(e.trigger, 'in-view');
+  assert.equal(e.key, 'body:0/div[Card]:3');
+  assert.equal(e.label, 'Card "Meridian"');
+  assert.match(e.note!, /moved while scrolling past it \(opacity, transform\)/);
+});
+
+test('letters of one text that moved become one entry for the text', () => {
+  const letters = ['F', 'E', 'A'].map((ch, i) => mover(`body:0/div[Heading]:2/h2:0/span:${i}`, { text: ch, parentText: 'FEATURED WORKS' }));
+  const entries = moversToEntries(letters, []);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].key, 'body:0/div[Heading]:2/h2:0');
+  assert.equal(entries[0].label, 'letters "FEATURED WORKS"');
+});
+
+test('what moved at the top before any scrolling is a load animation', () => {
+  const [e] = moversToEntries([mover('body:0/div:1', { scrollY: 0 })], []);
+  assert.equal(e.trigger, 'load');
+});
+
+test('movers already described by the recording are not listed twice', () => {
+  const known: MotionEntry[] = [{ key: 'body:0/div[Hero]:1', label: 'Hero', section: '', trigger: 'load' }];
+  assert.deepEqual(moversToEntries([mover('body:0/div[Hero]:1')], known), []);
+});
+
+test('an entry on a wrapper (smooth scroll, cursor) does not hide what moves inside it', () => {
+  const known: MotionEntry[] = [{ key: 'body:0/div:1', label: 'Smooth Scroll', section: '', trigger: 'custom' }];
+  const [e] = moversToEntries([mover('body:0/div:1/div[Note]:4', { text: 'think first, draw later.' })], known);
+  assert.equal(e?.label, 'div "think first, draw later."');
+});
+
+test('letters already described as one text are not listed again', () => {
+  const known: MotionEntry[] = [{ key: 'body:0/h1:0', label: 'letters "About"', section: '', trigger: 'load' }];
+  assert.deepEqual(moversToEntries([mover('body:0/h1:0/span:0', { text: 'A', parentText: 'About', scrollY: 0 })], known), []);
 });

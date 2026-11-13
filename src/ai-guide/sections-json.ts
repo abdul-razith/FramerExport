@@ -8,7 +8,7 @@ export const WIDTH_KEY: Record<Breakpoint, WidthKey> = { base: '1440', tablet: '
 export interface SectionsJson {
   [route: string]: {
     slug: string;
-    sections: { id: string; name: string; boxes: Partial<Record<WidthKey, Box>>; live: Partial<Record<WidthKey, Box[]>> }[];
+    sections: { id: string; name: string; boxes: Partial<Record<WidthKey, Box>>; live: Partial<Record<WidthKey, Box[]>>; motion: number }[];
   };
 }
 
@@ -21,7 +21,7 @@ export function sectionsJson(pages: GuidePage[], liveBoxes: (route: string, sect
       sections: [...(page.shell ?? []), ...page.sections].map((s) => {
         const boxes: Partial<Record<WidthKey, Box>> = {};
         for (const [bp, key] of Object.entries(WIDTH_KEY) as [Breakpoint, WidthKey][]) if (s.boxes[bp]) boxes[key] = s.boxes[bp];
-        return { id: s.id, name: s.name, boxes, live: liveBoxes(page.route, s.id) };
+        return { id: s.id, name: s.name, boxes, live: liveBoxes(page.route, s.id), motion: s.motion?.length ?? 0 };
       }),
     };
   }

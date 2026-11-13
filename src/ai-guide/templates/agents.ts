@@ -50,7 +50,9 @@ clean, editable Next.js project that looks and moves like the original. You buil
 7. **Animation.** Use the Framer settings in each \`ref.md\` \`## Animations\` part (exact values and
    timing) and check them against the page's \`motion.md\` and frames. Animate only transform and
    opacity. Respect \`prefers-reduced-motion\` (no movement, content visible). Rebuild every state in
-   \`## Interactive\` (hover, open/closed) to match its screenshots.
+   \`## Interactive\` (hover, open/closed) to match its screenshots. Build a section's animations in
+   the same step as the section, not later: a section whose ref.md lists animations is only done
+   when \`npm run compare\` prints \`motion ✓\` for it (\`motion ✗\` = nothing in it moved).
 8. **Measure.** Put \`data-section="<id>"\` on each section's root element and \`data-live\` on
    generated elements, then run \`npm run compare -- <route> --section <id>\` (with \`npm run dev\`
    running). A section is done at **90% or more at 1440, 1024 and 390**. Fix and compare again, at

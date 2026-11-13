@@ -47,6 +47,8 @@ export interface GuideSection {
   images: GuideImage[];
   links: { text: string; href: string }[];
   motionKeys: string[];
+  /** What moves in this section (`Name (enter)`, `Text (scroll)`), from ref.md's `## Animations`: compare checks each such section moves. */
+  motion?: string[];
 }
 
 export interface GuidePage {
