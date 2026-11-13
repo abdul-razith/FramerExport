@@ -46,6 +46,7 @@ import { splitPage } from './split.js';
 import { assignShellIds, shellKey } from './shell-ids.js';
 import { swapIn } from './swap.js';
 import { renderPlan, writePlanFile } from './plan.js';
+import { parityEntry, type ParitySources } from './parity-sources.js';
 import { recordPage } from './record.js';
 import { renderContentMd, renderFilesMd, renderSiteMd, renderTokensMd } from './site-docs.js';
 import { AGENTS_MD } from './templates/agents.js';
@@ -381,6 +382,7 @@ async function build(
 
   // Screenshots, recordings, motion notes and the per-section references, page by page.
   const modules = loadVendorModules(exportDir);
+  const paritySources: ParitySources = {};
   const allRules: CssRule[] = [];
   const presets = new Set<string>();
   const browser = await puppeteer.launch({
@@ -534,6 +536,16 @@ async function build(
                 slices,
               })
             );
+            // Pointers into the export for the parity report; shell parts once, for every page.
+            const owner = t.section.shell ? '_shell' : page.route;
+            (paritySources[owner] ??= {})[t.section.id] = parityEntry({
+              folder: 'ai-guide/' + path.relative(guideDir, t.dir).split(path.sep).join('/'),
+              exportFile: page.exportFile,
+              markup: r.markup,
+              animations: r.animations,
+              states: states.filter((s) => s.section === t.section.id),
+              hoverClasses: r.hoverClasses,
+            });
           } catch (e) {
             // One section that cannot be written must not cost the page.
             log(
@@ -574,6 +586,8 @@ Use the export file \`${page.exportFile}\` and the live site for this page.
   // Pages that show a shell part they do not own still expect it to move.
   for (const p of guidePages)
     for (const s of p.shell ?? []) s.motion ??= siteShell.find((x) => x.id === s.id)?.motion;
+  await fs.mkdir(path.join(guideDir, 'parity'), { recursive: true });
+  await fs.writeFile(path.join(guideDir, 'parity', 'sources.json'), JSON.stringify(paritySources, null, 1));
   await fs.writeFile(
     path.join(guideDir, 'text-styles.css'),
     textStyles(allRules, [...presets], tokens) ||
