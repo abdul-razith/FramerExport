@@ -32,12 +32,15 @@ ${rebuild ? '' : `<script>new IntersectionObserver((es)=>es.forEach((e)=>e.isInt
 const doc = (body: string, head = '') => `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:sans-serif} section{height:700px}</style>${head}</head><body>${body}<div style="height:1200px"></div></body></html>`;
 const sec = (rebuild: boolean, id: string, cls: string, inner: string, style = '') => `<section ${rebuild ? `data-section="${id}"` : `class="${cls}"`} style="${style}">${inner}</section>`;
 const PAIRS: Record<string, (rebuild: boolean) => string> = {
-  // A badge without its own class (found by name and size) and a class shared by two elements
-  // (the right one has the captured size).
+  // A badge without a class or a layer name (found by its captured place and size) and a class
+  // shared by two elements (the right one has the captured size).
   cls: (rb) =>
     doc(
       sec(rb, '01', 'framer-c1', rb ? '' : '<div class="framer-sh" style="width:300px;height:300px;background:#eee"></div>') +
-        (rb ? '<div data-section="S5"' : '<div data-framer-name="Section"') +
+        // On the original the badge has no class and no layer name (a script adds it), and another
+        // badge sits on the same spot.
+        (rb ? '' : '<div style="position:absolute;right:16px;top:844px;width:150px;height:40px"><a href="#" data-framer-name="Light">Made with</a></div>') +
+        (rb ? '<div data-section="S5"' : '<div') +
         ' style="position:fixed;right:16px;bottom:16px;width:150px;height:40px"><span class="pulse">BUY</span></div>' +
         (rb ? '<div data-section="S6"' : '<div class="framer-sh" data-framer-name="Default"') +
         ' style="position:fixed;left:-8px;top:-8px;width:16px;height:16px;background:#000"></div>',
@@ -164,7 +167,7 @@ for (const [name, why] of [
   ['nav', 'hover probes the same targets on both sites, whatever their order'],
   ['ld', 'a loader that fades is not a difference, kept or removed'],
   ['words', 'letters animated per word match the whole heading animated'],
-  ['cls', 'a section without its own class, or with a shared one, is found by name and size'],
+  ['cls', 'a section without a class or name, or with a shared class, is found by its captured place and size'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
 ]) {
   test(why, { timeout: 300000 }, async () => {

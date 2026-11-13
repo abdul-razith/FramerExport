@@ -151,6 +151,8 @@ function sectionTools(sections, side) {
   };
   const best = (list, b) => list.slice().sort((x, y) => sizeGap(x, b) - sizeGap(y, b) || posGap(x, b) - posGap(y, b))[0];
   let cache = { at: -1, roots: new Map() };
+  // Roots found by place and size (no class, no name) are kept while they stay in the page.
+  const placed = new Map();
   window.__parityRootOf = (s) => {
     if (side === 'rebuild') {
       for (const el of document.querySelectorAll('[data-section="' + s.id + '"]')) if (shown(el)) return el;
@@ -168,6 +170,18 @@ function sectionTools(sections, side) {
     else if (b && s.name) {
       const named = Array.from(document.querySelectorAll('[data-framer-name]')).filter((el) => el.getAttribute('data-framer-name') === s.name && shown(el) && sizeGap(el, b) <= 8);
       root = named.length ? best(named, b) : null;
+    }
+    if (!root && b && !s.className) {
+      // No class and no name on the page (a part added by a script): its captured place and size.
+      const kept = placed.get(s.id);
+      if (kept && kept.isConnected && shown(kept)) root = kept;
+      else {
+        const here = Array.from(document.querySelectorAll('body *')).filter((el) => sizeGap(el, b) <= 4 && posGap(el, b) <= 8 && shown(el));
+        // The outermost of the elements stacked there, a fixed one first (overlays, badges).
+        const outer = here.filter((el) => !here.some((o) => o !== el && o.contains(el)));
+        root = outer.find((el) => getComputedStyle(el).position === 'fixed') || outer[0] || null;
+        if (root) placed.set(s.id, root);
+      }
     }
     cache.roots.set(s.id, root);
     return root;
