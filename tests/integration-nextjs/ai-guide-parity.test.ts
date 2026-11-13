@@ -32,6 +32,26 @@ ${rebuild ? '' : `<script>new IntersectionObserver((es)=>es.forEach((e)=>e.isInt
 const doc = (body: string, head = '') => `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:sans-serif} section{height:700px}</style>${head}</head><body>${body}<div style="height:1200px"></div></body></html>`;
 const sec = (rebuild: boolean, id: string, cls: string, inner: string, style = '') => `<section ${rebuild ? `data-section="${id}"` : `class="${cls}"`} style="${style}">${inner}</section>`;
 const PAIRS: Record<string, (rebuild: boolean) => string> = {
+  // A badge without its own class (found by name and size) and a class shared by two elements
+  // (the right one has the captured size).
+  cls: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-c1', rb ? '' : '<div class="framer-sh" style="width:300px;height:300px;background:#eee"></div>') +
+        (rb ? '<div data-section="S5"' : '<div data-framer-name="Section"') +
+        ' style="position:fixed;right:16px;bottom:16px;width:150px;height:40px"><span class="pulse">BUY</span></div>' +
+        (rb ? '<div data-section="S6"' : '<div class="framer-sh" data-framer-name="Default"') +
+        ' style="position:fixed;left:-8px;top:-8px;width:16px;height:16px;background:#000"></div>',
+      '<style>.pulse{display:inline-block;animation:p 1s infinite}@keyframes p{50%{opacity:.4}}</style>'
+    ),
+  // The original sets the start state soon after load and animates a second later; the rebuild
+  // starts in that state (server-rendered) and animates at the same moment.
+  setup: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-u1', '<div id="a"' + (rb ? ' style="transform: translateY(40px)"' : '') + '>Hi there</div>') +
+        "<script>const a=document.getElementById('a');document.addEventListener('DOMContentLoaded',()=>{" +
+        (rb ? '' : "setTimeout(()=>{a.style.transform='translateY(40px)'},50);") +
+        "setTimeout(()=>{const t0=performance.now();(function f(t){const p=Math.min(1,(t-t0)/300);a.style.transform='translateY('+(40-40*p)+'px)';if(p<1)requestAnimationFrame(f)})(t0)},1000)})</script>"
+    ),
   // The original's DOMContentLoaded comes 600ms later (a slow script); both animate 300ms after it.
   t: (rb) => doc(sec(rb, '01', 'framer-t1', '<div id="a">Hello</div>') + `<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('a').animate([{opacity:0},{opacity:1}],{duration:300}),300))</script>`, rb ? '' : '<script>const e=Date.now()+600;while(Date.now()<e){}</script>'),
   // Ten links, the rebuild in reverse order; "Two" has the same hover colour on both.
@@ -70,6 +90,16 @@ before(async () => {
       '/nav': { slug: 'nav', url: server.url + '/nav-orig', sections: [s('01', 'framer-n1')] },
       '/ld': { slug: 'ld', url: server.url + '/ld-orig', sections: [s('S1', 'framer-ld'), s('01', 'framer-l1')] },
       '/words': { slug: 'words', url: server.url + '/words-orig', sections: [s('01', 'framer-w1')] },
+      '/cls': {
+        slug: 'cls',
+        url: server.url + '/cls-orig',
+        sections: [
+          s('01', 'framer-c1'),
+          { id: 'S5', name: 'Section', boxes: { 1440: { x: 1274, y: 844, w: 150, h: 40 }, 1024: { x: 858, y: 844, w: 150, h: 40 }, 390: { x: 224, y: 844, w: 150, h: 40 } }, live: {}, motion: 1 },
+          { id: 'S6', name: 'Default', className: 'framer-sh', boxes: { 1440: { x: -8, y: -8, w: 16, h: 16 }, 1024: { x: -8, y: -8, w: 16, h: 16 }, 390: { x: -8, y: -8, w: 16, h: 16 } }, live: {}, motion: 0 },
+        ],
+      },
+      '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
     })
   );
   const src = (id: string, extra = {}) => ({ folder: `ai-guide/pages/index/sections/${id}-x`, markup: `index.html:${id}0`, styles: `ai-guide/pages/index/sections/${id}-x/styles.css`, animations: [], hovers: [], ...extra });
@@ -134,6 +164,8 @@ for (const [name, why] of [
   ['nav', 'hover probes the same targets on both sites, whatever their order'],
   ['ld', 'a loader that fades is not a difference, kept or removed'],
   ['words', 'letters animated per word match the whole heading animated'],
+  ['cls', 'a section without its own class, or with a shared one, is found by name and size'],
+  ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
 ]) {
   test(why, { timeout: 300000 }, async () => {
     const run = await parity('/' + name);

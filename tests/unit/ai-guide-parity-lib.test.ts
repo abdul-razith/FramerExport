@@ -167,3 +167,26 @@ test('a short label on its own is not folded into its parent text', () => {
   const g = call<{ text: string }[]>('groupLetters', [moved('04', '01', { parentText: '01' })]);
   assert.deepEqual(g.map((x) => x.text), ['01']);
 });
+
+// Noise fixes after the first real run.
+test('exact texts pair before a container that contains them', () => {
+  const card = 'Mar 19, 2026 Meridian Health When therapists spend less time';
+  const { diffs } = call<{ diffs: MotionDiff[] }>(
+    'motionDiffs',
+    [moved('04', 'Meridian Health'), moved('04', 'When therapists spend less time'), moved('04', card)],
+    [moved('04', card), moved('04', 'Meridian Health'), moved('04', 'When therapists spend less time')]
+  );
+  assert.deepEqual(diffs, []);
+});
+
+test('several movements of the same text are one item', () => {
+  const { diffs } = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('04', 'Meridian Health', { startMs: 1300 })], [moved('04', 'Meridian Health', { startMs: 1335 }), moved('04', 'Meridian Health', { startMs: 1380 })]);
+  assert.deepEqual(diffs, []);
+});
+
+test('an animation that plays on load on the rebuild but on scroll on the original is a trigger difference', () => {
+  const { diffs } = call<{ diffs: (MotionDiff & { scroll?: boolean })[] }>('motionDiffs', [moved('04', 'Meridian Health', { startMs: 12397, scroll: true })], [moved('04', 'Meridian Health', { startMs: 1335 })]);
+  assert.deepEqual(diffs.map((d) => [d.section, d.kind, d.label]), [['04', 'trigger', 'Meridian Health']]);
+  const md = call<string>('renderReport', 'p', { widths: { 1440: { layout: [], motion: diffs, interaction: [] } }, cannotMatch: [] }, {});
+  assert.ok(md.includes('plays on load on the rebuild, when scrolled to on the original'), md);
+});

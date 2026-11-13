@@ -4,7 +4,7 @@
  * script text is exactly what is below.
  */
 export const PARITY_MJS = String.raw`// Usage (in nextjs-app/, with the site running):
-//   npm run parity -- <route> [--base http://localhost:3000] [--original <url>] [--load-ms 6000]
+//   npm run parity -- <route> [--base http://localhost:3000] [--original <url>] [--load-ms 6000] [--dump]
 // Opens the original Framer page and the rebuild at 1440, 1024 and 390 with the same headless
 // browser and lists every difference in ai-guide/parity/<page>.md:
 //   layout       each section's top and height (the first section that moved is the cause)
@@ -25,11 +25,13 @@ const args = process.argv.slice(2);
 let base = 'http://localhost:3000';
 let original;
 let loadMs = 6000;
+let dump = false;
 let route;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--base') base = args[++i];
   else if (args[i] === '--original') original = args[++i];
   else if (args[i] === '--load-ms') loadMs = Number(args[++i]);
+  else if (args[i] === '--dump') dump = true;
   else if (args[i].startsWith('--')) {
     console.error('Unknown argument: ' + args[i] + '. ' + USAGE);
     process.exit(1);
@@ -56,7 +58,7 @@ const allSources = readJson('parity/sources.json');
 const sources = Object.assign({}, allSources._shell ? { _shell: allSources._shell } : {}, allSources[route] || {});
 original = original || pageInfo.url;
 const slug = pageInfo.slug;
-const sections = pageInfo.sections.map((s) => ({ id: s.id, className: s.className, live: s.live || {} }));
+const sections = pageInfo.sections.map((s) => ({ id: s.id, className: s.className, name: s.name, boxes: s.boxes || {}, live: s.live || {} }));
 const WIDTHS = [1440, 1024, 390];
 const HOVER_WIDTHS = [1440, 1024];
 const MAX_PROBES = 8;
@@ -69,12 +71,21 @@ function watch() {
   const seen = (window.__parityMoved = new Map());
   const add = (el, kind) => {
     if (!el || el.nodeType !== 1) return;
+    const now = Math.round(performance.now());
     let e = seen.get(el);
     if (!e) {
-      e = { kinds: new Set(), t: Math.round(performance.now()), scroll: !!window.__parityScrolling };
+      e = { kinds: new Set(), t: now, scroll: !!window.__parityScrolling };
       // Described now, while it is in the page: it may be removed before the end (an unmounted loader).
       if (window.__parityDescribe) e.first = window.__parityDescribe(el);
     }
+    // A style change followed within 100ms by another is motion; a lone change only sets a state.
+    // CSS and Web Animations start when their event fires.
+    if (e.start === undefined) {
+      if (kind !== 'opacity' && kind !== 'transform') e.start = now;
+      else if (e.prev !== undefined && now - e.prev <= 100) e.start = e.prev;
+      if (e.start !== undefined) e.scroll = !!window.__parityScrolling;
+    }
+    e.prev = now;
     e.kinds.add(kind);
     seen.set(el, e);
   };
@@ -115,19 +126,51 @@ function sectionTools(sections, side) {
   window.__paritySectionOf = (el) => {
     for (let e = el; e && e !== document.body; e = e.parentElement) {
       if (side === 'rebuild' && e.getAttribute && e.getAttribute('data-section')) return e.getAttribute('data-section');
-      if (side === 'original' && e.classList) for (const c of e.classList) if (byClass.has(c)) return byClass.get(c);
+      if (side === 'original') {
+        if (e.classList) for (const c of e.classList) if (byClass.has(c) && window.__parityRootOf(sections.find((s) => s.id === byClass.get(c))) === e) return byClass.get(c);
+        for (const s of sections) if (!s.className && window.__parityRootOf(s) === e) return s.id;
+      }
     }
     return '';
   };
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    // A faded or hidden part (a loader after it went) is not shown.
+    return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.01;
+  };
+  const boxOf = (s) => s.boxes && s.boxes[innerWidth >= 1200 ? '1440' : innerWidth >= 810 ? '1024' : '390'];
+  const sizeGap = (el, b) => {
+    const r = el.getBoundingClientRect();
+    return Math.abs(r.width - b.w) + Math.abs(r.height - b.h);
+  };
+  const posGap = (el, b) => {
+    const r = el.getBoundingClientRect();
+    const fixed = getComputedStyle(el).position === 'fixed';
+    return Math.abs(r.left - b.x) + Math.abs(r.top + (fixed ? 0 : scrollY) - b.y);
+  };
+  const best = (list, b) => list.slice().sort((x, y) => sizeGap(x, b) - sizeGap(y, b) || posGap(x, b) - posGap(y, b))[0];
+  let cache = { at: -1, roots: new Map() };
   window.__parityRootOf = (s) => {
-    const list = side === 'rebuild' ? document.querySelectorAll('[data-section="' + s.id + '"]') : s.className ? document.getElementsByClassName(s.className) : [];
-    for (const el of list) {
-      const r = el.getBoundingClientRect();
-      const cs = getComputedStyle(el);
-      // A faded or hidden part (a loader after it went) is not shown.
-      if (r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.01) return el;
+    if (side === 'rebuild') {
+      for (const el of document.querySelectorAll('[data-section="' + s.id + '"]')) if (shown(el)) return el;
+      return null;
     }
-    return null;
+    // Several lookups per moving element: keep the roots for a moment.
+    const now = performance.now();
+    if (now - cache.at > 300) cache = { at: now, roots: new Map() };
+    if (cache.roots.has(s.id)) return cache.roots.get(s.id);
+    const b = boxOf(s);
+    const byClass = s.className ? Array.from(document.getElementsByClassName(s.className)).filter(shown) : [];
+    let root = null;
+    if (byClass.length === 1 || (byClass.length && !b)) root = byClass[0];
+    else if (byClass.length) root = best(byClass, b);
+    else if (b && s.name) {
+      const named = Array.from(document.querySelectorAll('[data-framer-name]')).filter((el) => el.getAttribute('data-framer-name') === s.name && shown(el) && sizeGap(el, b) <= 8);
+      root = named.length ? best(named, b) : null;
+    }
+    cache.roots.set(s.id, root);
+    return root;
   };
   const clean = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const own = (el) => clean(Array.from(el.childNodes).filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''));
@@ -165,7 +208,10 @@ function readMoved(sections, width) {
   const ready = nav ? nav.domContentLoadedEventEnd : 0;
   const out = [];
   for (const [el, info] of window.__parityMoved) {
-    const d = el.isConnected ? window.__parityDescribe(el) : info.first;
+    // Described now when it is still shown in a section, else as it was when it first moved
+    // (removed since, or inside a part that has faded out, like a loader).
+    const now = el.isConnected ? window.__parityDescribe(el) : null;
+    const d = now && now.section ? now : info.first || now;
     if (!d || !d.section || d.w < 2 || d.h < 2 || d.h > innerHeight * 2) continue;
     const r = el.isConnected ? el.getBoundingClientRect() : null;
     out.push({
@@ -173,7 +219,7 @@ function readMoved(sections, width) {
       name: d.name,
       text: d.text,
       parentText: d.parentText,
-      startMs: Math.round(info.t - ready),
+      startMs: Math.round((info.start !== undefined ? info.start : info.t) - ready),
       scroll: info.scroll,
       kinds: Array.from(info.kinds),
       live: (r && (!!el.closest('[data-live]') || (live.get(d.section) || []).some((b) => inside(r, b)))) || false,
@@ -279,6 +325,7 @@ async function visit(browser, url, width, side, wanted) {
 
 const browser = await puppeteer.launch({ headless: true });
 const result = { widths: {}, cannotMatch: [] };
+const raw = {};
 try {
   for (const width of WIDTHS) {
     let theirs;
@@ -300,6 +347,7 @@ try {
       result.widths[width] = { layout: [], motion: [], interaction: [], error, rebuildOnly };
       continue;
     }
+    if (dump) raw[width] = { original: theirs, rebuild: mine };
     const motion = motionDiffs(theirs.moved, mine.moved);
     for (const m of motion.cannotMatch) if (!result.cannotMatch.some((x) => x.section === m.section && x.text === m.text)) result.cannotMatch.push(m);
     result.widths[width] = {
@@ -313,6 +361,8 @@ try {
 }
 
 const report = renderReport(route, result, sources);
+// --dump: what was measured on both sites, to see why an item is (or is not) reported.
+if (dump) fs.writeFileSync(path.join(outDir, slug + '.raw.json'), JSON.stringify(raw, null, 1));
 fs.writeFileSync(path.join(outDir, slug + '.md'), report);
 for (const w of WIDTHS) {
   const r = result.widths[w];

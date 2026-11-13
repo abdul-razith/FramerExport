@@ -79,7 +79,25 @@ export function groupLetters(raw) {
       out.push(item);
     }
   }
-  return out;
+  // Several movements of one text (its start state set, then animated; letters and their line) are
+  // one item: the earliest start, on load if any of them was.
+  const merged = [];
+  const byText = new Map();
+  for (const m of out) {
+    const key = m.section + '|' + normText(m.text);
+    const g = normText(m.text) ? byText.get(key) : undefined;
+    if (!g) {
+      const item = Object.assign({}, m, { kinds: m.kinds.slice() });
+      if (normText(m.text)) byText.set(key, item);
+      merged.push(item);
+      continue;
+    }
+    g.startMs = Math.min(g.startMs, m.startMs);
+    g.kinds = Array.from(new Set(g.kinds.concat(m.kinds)));
+    g.live = g.live || m.live;
+    g.scroll = !!(g.scroll && m.scroll);
+  }
+  return merged;
 }
 
 const label = (m) => m.text || m.name || 'element';
@@ -112,6 +130,10 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
       continue;
     }
     used.add(i);
+    if (!!a.scroll !== !!r[i].scroll) {
+      diffs.push({ section: a.section, kind: 'trigger', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs, scroll: !!a.scroll });
+      continue;
+    }
     // Scroll-triggered start times depend on page speed, not on the animation: only load ones are timed.
     if (!a.scroll && !r[i].scroll && Math.abs(r[i].startMs - a.startMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs });
   }
@@ -190,6 +212,8 @@ export function renderReport(page, result, sources) {
       const when = (ms) => (d.scroll ? 'when scrolled to' : 'at ' + ms + ' ms');
       if (d.kind === 'missing') out.push('- ' + d.section + ' · ' + d.label + ': missing on the rebuild (moves on the original ' + when(d.originalMs) + ')' + (p ? ' → ' + p : ''));
       else if (d.kind === 'extra') out.push('- ' + d.section + ' · ' + d.label + ': moves on the rebuild only (' + when(d.rebuildMs) + ')');
+      else if (d.kind === 'trigger')
+        out.push('- ' + d.section + ' · ' + d.label + ': ' + (d.scroll ? 'plays on load on the rebuild, when scrolled to on the original' : 'plays when scrolled to on the rebuild, on load on the original') + (p ? ' → ' + p : ''));
       else out.push('- ' + d.section + ' · ' + d.label + ': starts at ' + d.rebuildMs + ' ms, the original at ' + d.originalMs + ' ms' + (p ? ' → ' + p : ''));
     }
     out.push('', '### Interaction', '');
