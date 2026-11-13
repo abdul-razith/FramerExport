@@ -62,10 +62,10 @@ test('an animation only on the original is missing; on the rebuild only, extra',
   assert.deepEqual(diffs.map((d) => [d.section, d.kind]).sort(), [['02', 'extra'], ['02', 'missing']]);
 });
 
-test('a start more than 100ms apart is a timing difference', () => {
-  const late = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('01', 'Hi', { startMs: 1200 })], [moved('01', 'Hi', { startMs: 1350 })]);
+test('a start more than 300ms apart is a timing difference', () => {
+  const late = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('01', 'Hi', { startMs: 1200 })], [moved('01', 'Hi', { startMs: 1550 })]);
   assert.deepEqual(late.diffs.map((d) => d.kind), ['timing']);
-  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('01', 'Hi', { startMs: 1200 })], [moved('01', 'Hi', { startMs: 1290 })]).diffs, []);
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('01', 'Hi', { startMs: 1200 })], [moved('01', 'Hi', { startMs: 1450 })]).diffs, []);
 });
 
 test('generated text is never a difference', () => {

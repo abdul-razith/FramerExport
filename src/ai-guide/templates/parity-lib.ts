@@ -6,7 +6,8 @@
 export const PARITY_LIB_MJS = String.raw`// Diffs between the original site and the rebuild, and the report text. Used by parity.mjs.
 
 const LAYOUT_TOL = 4;
-const TIME_TOL = 100;
+// Load animations start on a rendered frame, which varies by up to ~200ms between runs.
+const TIME_TOL = 300;
 
 /** Text for matching: case, spacing, non-breaking spaces and invisible marks do not count. */
 export function normText(s) {

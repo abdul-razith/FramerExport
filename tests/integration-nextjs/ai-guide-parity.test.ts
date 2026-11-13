@@ -32,6 +32,15 @@ ${rebuild ? '' : `<script>new IntersectionObserver((es)=>es.forEach((e)=>e.isInt
 const doc = (body: string, head = '') => `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:sans-serif} section{height:700px}</style>${head}</head><body>${body}<div style="height:1200px"></div></body></html>`;
 const sec = (rebuild: boolean, id: string, cls: string, inner: string, style = '') => `<section ${rebuild ? `data-section="${id}"` : `class="${cls}"`} style="${style}">${inner}</section>`;
 const PAIRS: Record<string, (rebuild: boolean) => string> = {
+  // The rebuild runs its loop as a Web Animation built directly (new Animation(new KeyframeEffect())),
+  // as motion does, without element.animate().
+  kfx: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-k1', '<div id="b" style="width:80px;height:40px;background:#ecb22e">Badge</div>') +
+        "<script>const b=document.getElementById('b');const k=[{transform:'none'},{transform:'translateX(150px)'}];" +
+        (rb ? "new Animation(new KeyframeEffect(b,k,{duration:2500,iterations:Infinity,direction:'alternate'}),document.timeline).play()" : "b.animate(k,{duration:2500,iterations:Infinity,direction:'alternate'})") +
+        '</script>'
+    ),
   // A badge without a class or a layer name (found by its captured place and size) and a class
   // shared by two elements (the right one has the captured size).
   cls: (rb) =>
@@ -103,6 +112,7 @@ before(async () => {
         ],
       },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
+      '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
   );
   const src = (id: string, extra = {}) => ({ folder: `ai-guide/pages/index/sections/${id}-x`, markup: `index.html:${id}0`, styles: `ai-guide/pages/index/sections/${id}-x/styles.css`, animations: [], hovers: [], ...extra });
@@ -169,6 +179,7 @@ for (const [name, why] of [
   ['words', 'letters animated per word match the whole heading animated'],
   ['cls', 'a section without a class or name, or with a shared class, is found by its captured place and size'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
+  ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {
   test(why, { timeout: 300000 }, async () => {
     const run = await parity('/' + name);

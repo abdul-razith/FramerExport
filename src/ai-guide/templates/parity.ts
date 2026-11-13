@@ -69,9 +69,10 @@ fs.mkdirSync(shotDir, { recursive: true });
 // Runs in the page before its scripts: remembers every element that visibly moves and when.
 function watch() {
   const seen = (window.__parityMoved = new Map());
-  const add = (el, kind) => {
+  const add = (el, kind, at) => {
     if (!el || el.nodeType !== 1) return;
-    const now = Math.round(performance.now());
+    // A polled Web Animation knows when it started (same clock as performance.now()).
+    const now = Math.round(typeof at === 'number' ? at : performance.now());
     let e = seen.get(el);
     if (!e) {
       e = { kinds: new Set(), t: now, scroll: !!window.__parityScrolling };
@@ -80,9 +81,18 @@ function watch() {
     }
     // A style change followed within 100ms by another is motion; a lone change only sets a state.
     // CSS and Web Animations start when their event fires.
+    // An animation's own start time (CSS or Web Animation) replaces the moment an event or a call
+    // reported it: events arrive whenever the browser gets to them, which varies with load.
+    if (kind === 'waapi-start' && e.start !== undefined && e.startFrom === 'event') {
+      e.start = now;
+      e.startFrom = 'clock';
+    }
+    if (kind === 'waapi-start') kind = 'waapi';
     if (e.start === undefined) {
-      if (kind !== 'opacity' && kind !== 'transform') e.start = now;
-      else if (e.prev !== undefined && now - e.prev <= 100) e.start = e.prev;
+      if (kind !== 'opacity' && kind !== 'transform') {
+        e.start = now;
+        e.startFrom = typeof at === 'number' ? 'clock' : 'event';
+      } else if (e.prev !== undefined && now - e.prev <= 100) e.start = e.prev;
       if (e.start !== undefined) e.scroll = !!window.__parityScrolling;
     }
     e.prev = now;
@@ -96,8 +106,15 @@ function watch() {
   const animate = Element.prototype.animate;
   Element.prototype.animate = function (...a) {
     add(this, 'waapi');
-    return animate.apply(this, a);
+    const an = animate.apply(this, a);
+    an.ready.then(() => add(this, 'waapi-start', an.startTime)).catch(() => undefined);
+    return an;
   };
+  // Web Animations built without element.animate() (motion builds them directly) are found by asking
+  // the document for its running animations.
+  setInterval(() => {
+    for (const an of document.getAnimations()) if (an.effect && an.effect.target && an.startTime !== null) add(an.effect.target, 'waapi-start', an.startTime);
+  }, 100);
   const part = (s, p) => {
     const m = (s || '').match(new RegExp('(?:^|;)\\s*' + p + '\\s*:([^;]*)'));
     return m ? m[1].trim() : '';
