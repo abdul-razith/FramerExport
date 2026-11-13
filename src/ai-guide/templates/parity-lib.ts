@@ -64,8 +64,9 @@ export function groupLetters(raw) {
       g.startMs = Math.min(g.startMs, m.startMs);
       g.kinds = Array.from(new Set(g.kinds.concat(m.kinds)));
       g.live = g.live || m.live;
+      g.scroll = g.scroll && m.scroll;
     } else {
-      const item = { section: m.section, name: m.name, text: m.parentText, startMs: m.startMs, kinds: m.kinds.slice(), live: m.live };
+      const item = { section: m.section, name: m.name, text: m.parentText, startMs: m.startMs, kinds: m.kinds.slice(), live: m.live, scroll: m.scroll };
       groups.set(key, item);
       out.push(item);
     }
@@ -90,14 +91,15 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
     if (a.live) continue;
     const i = r.findIndex((b, k) => !used.has(k) && sameThing(a, b));
     if (i < 0) {
-      diffs.push({ section: a.section, kind: 'missing', label: label(a), originalMs: a.startMs });
+      diffs.push({ section: a.section, kind: 'missing', label: label(a), originalMs: a.startMs, scroll: !!a.scroll });
       continue;
     }
     used.add(i);
-    if (Math.abs(r[i].startMs - a.startMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs });
+    // Scroll-triggered start times depend on page speed, not on the animation: only load ones are timed.
+    if (!a.scroll && !r[i].scroll && Math.abs(r[i].startMs - a.startMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs });
   }
   r.forEach((b, k) => {
-    if (!used.has(k)) diffs.push({ section: b.section, kind: 'extra', label: label(b), rebuildMs: b.startMs });
+    if (!used.has(k)) diffs.push({ section: b.section, kind: 'extra', label: label(b), rebuildMs: b.startMs, scroll: !!b.scroll });
   });
   return { diffs, cannotMatch };
 }
@@ -125,7 +127,8 @@ function pointerFor(src, item) {
 /** The report: per width, per check, one line per difference with its pointer into the export. */
 export function renderReport(page, result, sources) {
   const src = (id) => sources[id] || (sources._shell && sources._shell[id]);
-  const widths = Object.keys(result.widths);
+  // Numeric keys come back in ascending order: list desktop first.
+  const widths = Object.keys(result.widths).sort((x, y) => Number(y) - Number(x));
   let layout = 0;
   let motion = 0;
   let interaction = 0;
@@ -160,8 +163,9 @@ export function renderReport(page, result, sources) {
     if (!r.motion.length) out.push('- none');
     for (const d of r.motion) {
       const p = pointerFor(src(d.section), d.label);
-      if (d.kind === 'missing') out.push('- ' + d.section + ' · ' + d.label + ': missing on the rebuild (moves on the original at ' + d.originalMs + ' ms)' + (p ? ' → ' + p : ''));
-      else if (d.kind === 'extra') out.push('- ' + d.section + ' · ' + d.label + ': moves on the rebuild only (at ' + d.rebuildMs + ' ms)');
+      const when = (ms) => (d.scroll ? 'when scrolled to' : 'at ' + ms + ' ms');
+      if (d.kind === 'missing') out.push('- ' + d.section + ' · ' + d.label + ': missing on the rebuild (moves on the original ' + when(d.originalMs) + ')' + (p ? ' → ' + p : ''));
+      else if (d.kind === 'extra') out.push('- ' + d.section + ' · ' + d.label + ': moves on the rebuild only (' + when(d.rebuildMs) + ')');
       else out.push('- ' + d.section + ' · ' + d.label + ': starts at ' + d.rebuildMs + ' ms, the original at ' + d.originalMs + ' ms' + (p ? ' → ' + p : ''));
     }
     out.push('', '### Interaction', '');

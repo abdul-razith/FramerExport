@@ -118,3 +118,16 @@ test('the lib is self-contained valid JavaScript', () => {
   assert.doesNotMatch(PARITY_LIB_MJS, /from ['"]\.\.?\//);
   execFileSync(process.execPath, ['--check', file]);
 });
+
+test('scroll-triggered animations are not timed, and say when they move', () => {
+  const { diffs } = call<{ diffs: (MotionDiff & { scroll?: boolean })[] }>('motionDiffs', [moved('03', 'Card', { startMs: 9000, scroll: true }), moved('04', 'Note', { startMs: 9500, scroll: true })], [moved('03', 'Card', { startMs: 4000, scroll: true })]);
+  assert.deepEqual(diffs.map((d) => [d.section, d.kind]), [['04', 'missing']]);
+  const md = call<string>('renderReport', 'p', { widths: { '1440': { layout: [], motion: diffs, interaction: [] } }, cannotMatch: [] }, {});
+  assert.ok(md.includes('when scrolled to'), md);
+});
+
+test('the report lists widths from desktop to mobile', () => {
+  const empty = { layout: [], motion: [], interaction: [] };
+  const md = call<string>('renderReport', 'p', { widths: { 390: empty, 1024: empty, 1440: empty }, cannotMatch: [] }, {});
+  assert.ok(md.indexOf('## 1440') < md.indexOf('## 1024') && md.indexOf('## 1024') < md.indexOf('## 390'), md);
+});

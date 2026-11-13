@@ -52,6 +52,8 @@ import { renderContentMd, renderFilesMd, renderSiteMd, renderTokensMd } from './
 import { AGENTS_MD } from './templates/agents.js';
 import { CHECKLIST_MD } from './templates/checklist.js';
 import { COMPARE_MJS } from './templates/compare.js';
+import { PARITY_MJS } from './templates/parity.js';
+import { PARITY_LIB_MJS } from './templates/parity-lib.js';
 import { renderReadme } from './templates/readme.js';
 import {
   pageSlug,
@@ -678,6 +680,8 @@ Use the export file \`${page.exportFile}\` and the live site for this page.
   await fs.writeFile(path.join(guideDir, 'checklist.md'), CHECKLIST_MD);
   await fs.mkdir(path.join(guideDir, 'scripts'), { recursive: true });
   await fs.writeFile(path.join(guideDir, 'scripts', 'compare.mjs'), COMPARE_MJS);
+  await fs.writeFile(path.join(guideDir, 'scripts', 'parity.mjs'), PARITY_MJS);
+  await fs.writeFile(path.join(guideDir, 'scripts', 'parity-lib.mjs'), PARITY_LIB_MJS);
   await fs.rm(path.join(guideDir, '.capture'), { recursive: true, force: true });
   return renderPlan(site);
 }
