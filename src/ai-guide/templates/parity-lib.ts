@@ -1,0 +1,182 @@
+/**
+ * Source of ai-guide/scripts/parity-lib.mjs: the pure part of the parity report (diffs and the
+ * report text), imported by parity.mjs. Written as a raw string without `${` or backticks, so the
+ * script text is exactly what is below.
+ */
+export const PARITY_LIB_MJS = String.raw`// Diffs between the original site and the rebuild, and the report text. Used by parity.mjs.
+
+const LAYOUT_TOL = 4;
+const TIME_TOL = 100;
+
+/** Text for matching: case, spacing, non-breaking spaces and invisible marks do not count. */
+export function normText(s) {
+  return String(s || '')
+    .replace(/[​-‏⁠﻿]/g, '')
+    .replace(/ /g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .slice(0, 60);
+}
+
+/**
+ * Section tops and heights compared. The first section whose top moved is the cause; sections below
+ * that moved by the same amount inherit it. A section on one site only is missing or extra.
+ */
+export function layoutDiffs(original, rebuild, tol = LAYOUT_TOL) {
+  const shown = (list) => list.filter((b) => b.height > 0);
+  const o = shown(original);
+  const r = shown(rebuild);
+  const mine = new Map(r.map((b) => [b.id, b]));
+  const theirs = new Set(o.map((b) => b.id));
+  const out = [];
+  let shift = 0;
+  for (const a of o) {
+    const b = mine.get(a.id);
+    if (!b) {
+      out.push({ id: a.id, kind: 'missing', original: a.top, inherited: false });
+      continue;
+    }
+    const dt = Math.round(b.top - a.top);
+    const dh = Math.round(b.height - a.height);
+    if (Math.abs(dt) > tol) out.push({ id: a.id, kind: 'top', original: Math.round(a.top), rebuild: Math.round(b.top), delta: dt, inherited: Math.abs(dt - shift) <= tol });
+    if (Math.abs(dh) > tol) out.push({ id: a.id, kind: 'height', original: Math.round(a.height), rebuild: Math.round(b.height), delta: dh, inherited: false });
+    // What the sections below should be shifted by when nothing else changes.
+    shift = dt + dh;
+  }
+  for (const b of r) if (!theirs.has(b.id)) out.push({ id: b.id, kind: 'extra', rebuild: b.top, inherited: false });
+  return out;
+}
+
+/** Split letters (one or two characters with a parent text) become one item for their text. */
+export function groupLetters(raw) {
+  const out = [];
+  const groups = new Map();
+  for (const m of raw) {
+    const piece = String(m.text || '').trim().length <= 2 && m.parentText;
+    if (!piece) {
+      out.push(m);
+      continue;
+    }
+    const key = m.section + '|' + m.parentText;
+    const g = groups.get(key);
+    if (g) {
+      g.startMs = Math.min(g.startMs, m.startMs);
+      g.kinds = Array.from(new Set(g.kinds.concat(m.kinds)));
+      g.live = g.live || m.live;
+    } else {
+      const item = { section: m.section, name: m.name, text: m.parentText, startMs: m.startMs, kinds: m.kinds.slice(), live: m.live };
+      groups.set(key, item);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+const label = (m) => m.text || m.name || 'element';
+const sameThing = (a, b) => a.section === b.section && normText(a.text) === normText(b.text) && (a.text || b.text || a.name === b.name);
+
+/**
+ * What moves on one site and not the other, by section, then text, then layer name. Generated
+ * (live) items never count: they go to cannotMatch.
+ */
+export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
+  const o = groupLetters(original);
+  const r = groupLetters(rebuild).filter((m) => !m.live);
+  const cannotMatch = o.filter((m) => m.live);
+  const used = new Set();
+  const diffs = [];
+  for (const a of o) {
+    if (a.live) continue;
+    const i = r.findIndex((b, k) => !used.has(k) && sameThing(a, b));
+    if (i < 0) {
+      diffs.push({ section: a.section, kind: 'missing', label: label(a), originalMs: a.startMs });
+      continue;
+    }
+    used.add(i);
+    if (Math.abs(r[i].startMs - a.startMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs });
+  }
+  r.forEach((b, k) => {
+    if (!used.has(k)) diffs.push({ section: b.section, kind: 'extra', label: label(b), rebuildMs: b.startMs });
+  });
+  return { diffs, cannotMatch };
+}
+
+/** Hover and press changes the original makes that the rebuild does not make (or makes differently). */
+export function interactionDiffs(original, rebuild) {
+  const set = (list) => Array.from(new Set(list)).sort().join(',');
+  const out = [];
+  for (const a of original) {
+    if (!a.changed.length) continue;
+    const b = rebuild.find((x) => x.section === a.section && x.action === a.action && normText(x.target) === normText(a.target));
+    if (b && set(b.changed) === set(a.changed)) continue;
+    out.push({ section: a.section, target: a.target, action: a.action, original: a.changed, rebuild: b ? b.changed : null, image: a.image });
+  }
+  return out;
+}
+
+function pointerFor(src, item) {
+  if (!src) return '';
+  const want = normText(item);
+  const a = src.animations.find((x) => normText(x.label) === want) || src.animations[0];
+  return a ? a.at + ' (' + a.kind + ')' : src.folder;
+}
+
+/** The report: per width, per check, one line per difference with its pointer into the export. */
+export function renderReport(page, result, sources) {
+  const src = (id) => sources[id] || (sources._shell && sources._shell[id]);
+  const widths = Object.keys(result.widths);
+  let layout = 0;
+  let motion = 0;
+  let interaction = 0;
+  for (const w of widths) {
+    layout += result.widths[w].layout.filter((d) => !d.inherited).length;
+    motion += result.widths[w].motion.length;
+    interaction += result.widths[w].interaction.length;
+  }
+  const out = [
+    '# Parity: ' + page,
+    '',
+    layout + motion + interaction === 0
+      ? 'No differences. This page matches the original.'
+      : layout + motion + interaction + ' differences (layout ' + layout + ', motion ' + motion + ', interaction ' + interaction + '). Fix each from its pointer, then run npm run parity again.',
+    '',
+  ];
+  for (const w of widths) {
+    const r = result.widths[w];
+    out.push('## ' + w, '');
+    if (r.error) out.push('- ' + r.error, '');
+    out.push('### Layout', '');
+    if (!r.layout.length) out.push('- none');
+    for (const d of r.layout) {
+      const s = src(d.id);
+      const where = s ? ' → ' + s.styles + (s.markup ? ' · markup ' + s.markup : '') : '';
+      if (d.kind === 'missing') out.push('- ' + d.id + ': missing on the rebuild (no data-section="' + d.id + '")' + where);
+      else if (d.kind === 'extra') out.push('- ' + d.id + ': only on the rebuild');
+      else if (d.inherited) out.push('- ' + d.id + ': ' + d.kind + ' ' + (d.delta > 0 ? '+' : '') + d.delta + 'px, follows the section above');
+      else out.push('- ' + d.id + ': ' + d.kind + ' ' + (d.delta > 0 ? '+' : '') + d.delta + 'px (original ' + d.original + ', rebuild ' + d.rebuild + ')' + where);
+    }
+    out.push('', '### Motion', '');
+    if (!r.motion.length) out.push('- none');
+    for (const d of r.motion) {
+      const p = pointerFor(src(d.section), d.label);
+      if (d.kind === 'missing') out.push('- ' + d.section + ' · ' + d.label + ': missing on the rebuild (moves on the original at ' + d.originalMs + ' ms)' + (p ? ' → ' + p : ''));
+      else if (d.kind === 'extra') out.push('- ' + d.section + ' · ' + d.label + ': moves on the rebuild only (at ' + d.rebuildMs + ' ms)');
+      else out.push('- ' + d.section + ' · ' + d.label + ': starts at ' + d.rebuildMs + ' ms, the original at ' + d.originalMs + ' ms' + (p ? ' → ' + p : ''));
+    }
+    out.push('', '### Interaction', '');
+    if (!r.interaction.length) out.push('- none');
+    for (const d of r.interaction) {
+      const s = src(d.section);
+      const h = s && (s.hovers.find((x) => normText(x.element) === normText(d.target)) || s.hovers[0]);
+      out.push('- ' + d.section + ' · ' + d.target + ' (' + d.action + '): the original changes ' + d.original.join(', ') + '; the rebuild ' + (d.rebuild && d.rebuild.length ? 'changes ' + d.rebuild.join(', ') : 'changes nothing') + (h ? ' → ' + h.at : s ? ' → ' + s.styles : '') + (d.image ? ' · ' + d.image : ''));
+    }
+    out.push('');
+  }
+  out.push('## Cannot match', '', 'Generated or random on the original (clocks, live values): not compared.', '');
+  if (!result.cannotMatch.length) out.push('- none');
+  for (const m of result.cannotMatch) out.push('- ' + m.section + ' · ' + label(m));
+  out.push('');
+  return out.join('\n');
+}
+`;

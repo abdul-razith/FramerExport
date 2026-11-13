@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict';
+import { before, test } from 'node:test';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { PARITY_LIB_MJS } from '../../src/ai-guide/templates/parity-lib.js';
+
+// The lib ships as plain JS in the guide; test exactly that file.
+type Lib = Record<string, (...args: never[]) => unknown>;
+let lib: Lib;
+let file: string;
+before(async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'parity-lib-'));
+  file = path.join(dir, 'parity-lib.mjs');
+  await fs.writeFile(file, PARITY_LIB_MJS);
+  lib = await import(pathToFileURL(file).href);
+});
+const call = <T>(name: string, ...args: unknown[]) => (lib[name] as (...a: unknown[]) => T)(...args);
+
+type LayoutDiff = { id: string; kind: string; delta?: number; inherited: boolean };
+type MotionDiff = { section: string; kind: string; label: string };
+const box = (id: string, top: number, height = 900) => ({ id, top, height });
+const moved = (section: string, text: string, extra: Record<string, unknown> = {}) => ({ section, name: '', text, startMs: 1200, kinds: ['transform'], ...extra });
+
+test('the first section whose top moved is the cause, the ones below inherit it', () => {
+  const d = call<LayoutDiff[]>('layoutDiffs', [box('01', 0), box('02', 900), box('03', 1800)], [box('01', 0), box('02', 942), box('03', 1842)]);
+  assert.equal(d.length, 2);
+  assert.deepEqual([d[0].id, d[0].kind, d[0].delta, d[0].inherited], ['02', 'top', 42, false]);
+  assert.deepEqual([d[1].id, d[1].delta, d[1].inherited], ['03', 42, true]);
+});
+
+test('differences within 4px are not reported', () => {
+  assert.deepEqual(call('layoutDiffs', [box('01', 0), box('02', 900)], [box('01', 3), box('02', 903, 897)]), []);
+});
+
+test('a section on one site only is missing or extra, not a cascade', () => {
+  const d = call<LayoutDiff[]>('layoutDiffs', [box('01', 0), box('02', 900), box('03', 1800)], [box('01', 0), box('03', 1800), box('99', 2700)]);
+  assert.deepEqual(d.map((x) => [x.id, x.kind]), [['02', 'missing'], ['99', 'extra']]);
+});
+
+test('zero-height sections are ignored', () => {
+  assert.deepEqual(call('layoutDiffs', [box('01', 0), box('S2', 0, 0)], [box('01', 0)]), []);
+});
+
+test('split letters become their text', () => {
+  const letters = ['F', 'E', 'A'].map((t) => moved('03', t, { parentText: 'FEATURED' }));
+  const g = call<{ text: string }[]>('groupLetters', letters);
+  assert.equal(g.length, 1);
+  assert.equal(g[0].text, 'FEATURED');
+});
+
+test('text that differs only in case and spacing matches', () => {
+  const { diffs } = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('03', 'FEATURED  WORKS')], [moved('03', 'Featured works')]);
+  assert.deepEqual(diffs, []);
+  assert.equal(call('normText', '‎‎I’m  Bejaman'), call('normText', 'i’m bejaman'));
+});
+
+test('an animation only on the original is missing; on the rebuild only, extra', () => {
+  const { diffs } = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('02', 'it’s me')], [moved('02', 'You')]);
+  assert.deepEqual(diffs.map((d) => [d.section, d.kind]).sort(), [['02', 'extra'], ['02', 'missing']]);
+});
+
+test('a start more than 100ms apart is a timing difference', () => {
+  const late = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('01', 'Hi', { startMs: 1200 })], [moved('01', 'Hi', { startMs: 1350 })]);
+  assert.deepEqual(late.diffs.map((d) => d.kind), ['timing']);
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('01', 'Hi', { startMs: 1200 })], [moved('01', 'Hi', { startMs: 1290 })]).diffs, []);
+});
+
+test('generated text is never a difference', () => {
+  const r = call<{ diffs: MotionDiff[]; cannotMatch: unknown[] }>('motionDiffs', [moved('01', '5:17:32 AM', { live: true })], []);
+  assert.deepEqual(r.diffs, []);
+  assert.equal(r.cannotMatch.length, 1);
+});
+
+test('a hover that changes something on the original but nothing on the rebuild is reported', () => {
+  const probe = (changed: string[]) => ({ section: '05', target: 'Contact me', action: 'hover', changed });
+  assert.equal(call<unknown[]>('interactionDiffs', [probe(['transform'])], [probe([])]).length, 1);
+  assert.deepEqual(call('interactionDiffs', [probe(['transform'])], [probe(['transform'])]), []);
+});
+
+test('the report points each item into the export', () => {
+  const sources = {
+    '02': {
+      folder: 'ai-guide/pages/index/sections/02-about',
+      markup: 'index.html:120',
+      styles: 'ai-guide/pages/index/sections/02-about/styles.css',
+      animations: [{ label: 'Text', kind: 'enter', at: 'scripts/vendor/p.mjs @ 977' }],
+      hovers: [],
+    },
+  };
+  const md = call<string>(
+    'renderReport',
+    'index',
+    {
+      widths: {
+        '1440': {
+          layout: [{ id: '02', kind: 'top', original: 900, rebuild: 942, delta: 42, inherited: false }],
+          motion: [{ section: '02', kind: 'missing', label: 'Text' }],
+          interaction: [],
+        },
+        '390': { layout: [], motion: [], interaction: [], error: 'original not reachable: timeout' },
+      },
+      cannotMatch: [],
+    },
+    sources
+  );
+  const motionLine = md.split('\n').find((l) => l.includes('Text') && l.includes('missing'))!;
+  assert.ok(motionLine.includes('scripts/vendor/p.mjs @ 977'), motionLine);
+  const layoutLine = md.split('\n').find((l) => l.includes('+42'))!;
+  assert.ok(layoutLine.includes('02-about/styles.css') && layoutLine.includes('index.html:120'), layoutLine);
+  assert.match(md, /original not reachable/);
+  assert.match(md.trimEnd(), /## Cannot match[\s\S]*$/);
+});
+
+test('the lib is self-contained valid JavaScript', () => {
+  assert.doesNotMatch(PARITY_LIB_MJS, /from ['"]\.\.?\//);
+  execFileSync(process.execPath, ['--check', file]);
+});
