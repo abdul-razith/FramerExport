@@ -69,7 +69,12 @@ function watch() {
   const seen = (window.__parityMoved = new Map());
   const add = (el, kind) => {
     if (!el || el.nodeType !== 1) return;
-    const e = seen.get(el) || { kinds: new Set(), t: Math.round(performance.now()), scroll: !!window.__parityScrolling };
+    let e = seen.get(el);
+    if (!e) {
+      e = { kinds: new Set(), t: Math.round(performance.now()), scroll: !!window.__parityScrolling };
+      // Described now, while it is in the page: it may be removed before the end (an unmounted loader).
+      if (window.__parityDescribe) e.first = window.__parityDescribe(el);
+    }
     e.kinds.add(kind);
     seen.set(el, e);
   };
@@ -118,9 +123,26 @@ function sectionTools(sections, side) {
     const list = side === 'rebuild' ? document.querySelectorAll('[data-section="' + s.id + '"]') : s.className ? document.getElementsByClassName(s.className) : [];
     for (const el of list) {
       const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return el;
+      const cs = getComputedStyle(el);
+      // A faded or hidden part (a loader after it went) is not shown.
+      if (r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.01) return el;
     }
     return null;
+  };
+  const clean = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const own = (el) => clean(Array.from(el.childNodes).filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''));
+  window.__parityDescribe = (el) => {
+    const r = el.getBoundingClientRect();
+    // Split letters sit in per-word spans: their text is the text block's (heading, paragraph).
+    const block = el.parentElement && (el.parentElement.closest('h1,h2,h3,h4,h5,h6,p,li,[data-framer-component-type="RichTextContainer"]') || el.parentElement);
+    return {
+      section: window.__paritySectionOf(el),
+      name: el.getAttribute('data-framer-name') || '',
+      text: own(el) || clean(el.textContent),
+      parentText: block ? clean(block.textContent) : undefined,
+      w: r.width,
+      h: r.height,
+    };
   };
 }
 
@@ -138,41 +160,45 @@ function readBoxes(sections) {
 function readMoved(sections, width) {
   const live = new Map(sections.map((s) => [s.id, s.live[String(width)] || []]));
   const inside = (r, b) => r.left + scrollX < b.x + b.w && r.right + scrollX > b.x && r.top + scrollY < b.y + b.h && r.bottom + scrollY > b.y;
-  const own = (el) => Array.from(el.childNodes).filter((c) => c.nodeType === 3).map((c) => c.textContent).join('').replace(/\s+/g, ' ').trim();
+  // Times from the page's own DOMContentLoaded, so the network and hydration speed do not count.
+  const nav = performance.getEntriesByType('navigation')[0];
+  const ready = nav ? nav.domContentLoadedEventEnd : 0;
   const out = [];
   for (const [el, info] of window.__parityMoved) {
-    if (!el.isConnected) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2 || r.height > innerHeight * 2) continue;
-    const section = window.__paritySectionOf(el);
-    if (!section) continue;
+    const d = el.isConnected ? window.__parityDescribe(el) : info.first;
+    if (!d || !d.section || d.w < 2 || d.h < 2 || d.h > innerHeight * 2) continue;
+    const r = el.isConnected ? el.getBoundingClientRect() : null;
     out.push({
-      section,
-      name: el.getAttribute('data-framer-name') || '',
-      text: (own(el) || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60),
-      parentText: el.parentElement ? (el.parentElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) : undefined,
-      startMs: info.t,
+      section: d.section,
+      name: d.name,
+      text: d.text,
+      parentText: d.parentText,
+      startMs: Math.round(info.t - ready),
       scroll: info.scroll,
       kinds: Array.from(info.kinds),
-      live: !!el.closest('[data-live]') || (live.get(section) || []).some((b) => inside(r, b)),
+      live: (r && (!!el.closest('[data-live]') || (live.get(d.section) || []).some((b) => inside(r, b)))) || false,
     });
   }
   return out;
 }
 
-// Runs in the page: marks up to MAX_PROBES hover targets per section; returns their labels.
-function markProbes(sections, max) {
+// Runs in the page: marks the hover targets of each section and returns their labels. The original
+// gets up to MAX_PROBES per section; the rebuild gets exactly the targets the original probed.
+function markProbes(sections, max, wanted) {
+  const norm = (t) => (t || '').replace(/[​-‏⁠﻿]/g, '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 60);
   const out = [];
   let n = 0;
   for (const s of sections) {
     const root = window.__parityRootOf(s);
     if (!root) continue;
+    const want = wanted ? wanted.filter((w) => w.section === s.id).map((w) => norm(w.target)) : null;
     let k = 0;
     for (const el of root.querySelectorAll('a, button, [role="button"]')) {
       const r = el.getBoundingClientRect();
-      if (k >= max || r.width < 2 || r.height < 2) continue;
-      el.setAttribute('data-parity-probe', String(n));
+      if (r.width < 2 || r.height < 2) continue;
       const target = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('data-framer-name') || el.tagName).replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (want ? !want.includes(norm(target)) : k >= max) continue;
+      el.setAttribute('data-parity-probe', String(n));
       out.push({ n: n++, section: s.id, target });
       k++;
     }
@@ -196,13 +222,13 @@ function snapshot(n) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function visit(browser, url, width, side) {
+async function visit(browser, url, width, side, wanted) {
   const page = await browser.newPage();
   try {
     await page.setViewport({ width, height: 900 });
+    await page.evaluateOnNewDocument(sectionTools, sections, side);
     await page.evaluateOnNewDocument(watch);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 90000 });
-    await page.evaluate(sectionTools, sections, side);
     await wait(loadMs);
     const boxes = await page.evaluate(readBoxes, sections);
     await page.evaluate(() => (window.__parityScrolling = true));
@@ -216,7 +242,7 @@ async function visit(browser, url, width, side) {
     const probes = [];
     if (HOVER_WIDTHS.includes(width)) {
       await page.evaluate(() => window.scrollTo(0, 0));
-      for (const p of await page.evaluate(markProbes, sections, MAX_PROBES)) {
+      for (const p of await page.evaluate(markProbes, sections, MAX_PROBES, wanted || null)) {
         const handle = await page.$('[data-parity-probe="' + p.n + '"]');
         if (!handle) continue;
         await page.evaluate((n) => {
@@ -235,8 +261,10 @@ async function visit(browser, url, width, side) {
         const changed = Array.from(new Set(Object.keys(after).filter((k) => after[k] !== before[k]).map((k) => k.split('|')[1])));
         let image;
         if (changed.length) {
-          image = 'ai-guide/parity/' + slug + '/' + p.section + '-' + p.n + '-' + side + '.png';
-          await handle.screenshot({ path: path.join(shotDir, p.section + '-' + p.n + '-' + side + '.png') }).catch(() => (image = undefined));
+          // Named after the target, so the original's and the rebuild's images pair up.
+          const name = p.section + '-' + p.target.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) + '-' + side + '.png';
+          image = 'ai-guide/parity/' + slug + '/' + name;
+          await handle.screenshot({ path: path.join(shotDir, name) }).catch(() => (image = undefined));
         }
         probes.push({ section: p.section, target: p.target, action: 'hover', changed, image });
         await page.mouse.move(0, 0);
@@ -262,12 +290,14 @@ try {
       error = 'original not reachable: ' + (e && e.message ? e.message.split('\n')[0] : e);
     }
     try {
-      mine = await visit(browser, base + route, width, 'rebuild');
+      mine = await visit(browser, base + route, width, 'rebuild', theirs ? theirs.probes.map((p) => ({ section: p.section, target: p.target })) : null);
     } catch (e) {
       error = (error ? error + '; ' : '') + 'rebuild not reachable at ' + base + route + ' (start the site with npm run dev): ' + (e && e.message ? e.message.split('\n')[0] : e);
     }
     if (!theirs || !mine) {
-      result.widths[width] = { layout: [], motion: [], interaction: [], error };
+      // Nothing to compare, but what was measured on the rebuild is still shown.
+      const rebuildOnly = mine ? { sections: mine.boxes.length, moving: mine.moved.length, probes: mine.probes.length } : undefined;
+      result.widths[width] = { layout: [], motion: [], interaction: [], error, rebuildOnly };
       continue;
     }
     const motion = motionDiffs(theirs.moved, mine.moved);

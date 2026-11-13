@@ -27,6 +27,21 @@ ${rebuild ? '' : `<script>new IntersectionObserver((es)=>es.forEach((e)=>e.isInt
 </body></html>`;
 };
 
+
+// Review fixes: one page pair per case, each expected to produce no difference at all.
+const doc = (body: string, head = '') => `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:sans-serif} section{height:700px}</style>${head}</head><body>${body}<div style="height:1200px"></div></body></html>`;
+const sec = (rebuild: boolean, id: string, cls: string, inner: string, style = '') => `<section ${rebuild ? `data-section="${id}"` : `class="${cls}"`} style="${style}">${inner}</section>`;
+const PAIRS: Record<string, (rebuild: boolean) => string> = {
+  // The original's DOMContentLoaded comes 600ms later (a slow script); both animate 300ms after it.
+  t: (rb) => doc(sec(rb, '01', 'framer-t1', '<div id="a">Hello</div>') + `<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('a').animate([{opacity:0},{opacity:1}],{duration:300}),300))</script>`, rb ? '' : '<script>const e=Date.now()+600;while(Date.now()<e){}</script>'),
+  // Ten links, the rebuild in reverse order; "Two" has the same hover colour on both.
+  nav: (rb) => doc(sec(rb, '01', 'framer-n1', (rb ? ['Ten','Nine','Eight','Seven','Six','Five','Four','Three','Two','One'] : ['One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten']).map((t) => `<a href="#" class="${t === 'Two' ? 'h' : ''}" style="display:inline-block;padding:6px">${t}</a>`).join(' ')), '<style>a.h:hover{background:#36c5f0}</style>'),
+  // A loader that fades: the original keeps it (opacity 0), the rebuild removes it.
+  ld: (rb) => doc(sec(rb, 'S1', 'framer-ld', 'Hey there', 'position:fixed;inset:0;height:100vh;background:#fff;z-index:9') + sec(rb, '01', 'framer-l1', 'Body') + `<script>setTimeout(()=>{const l=document.querySelector('${rb ? '[data-section="S1"]' : '.framer-ld'}');l.animate([{opacity:1},{opacity:0}],{duration:200,fill:'forwards'}).finished.then(()=>{${rb ? 'l.remove()' : "l.style.opacity='0'"}})},200)</script>`),
+  // The original animates letters wrapped per word; the rebuild animates the whole heading.
+  words: (rb) => doc(sec(rb, '01', 'framer-w1', rb ? '<h2 id="h">FEATURED WORKS</h2>' : '<h2 id="h">' + ['FEATURED', 'WORKS'].map((w) => '<span style="display:inline-block">' + [...w].map((c) => `<span style="display:inline-block">${c}</span>`).join('') + '</span>').join(' ') + '</h2>') + `<script>setTimeout(()=>{${rb ? "document.getElementById('h').animate([{opacity:0},{opacity:1}],{duration:300})" : "document.querySelectorAll('#h span span').forEach((s,i)=>s.animate([{opacity:0,transform:'translateY(20px)'},{opacity:1,transform:'none'}],{duration:300,delay:i*20}))"}},200)</script>`),
+};
+
 let server: { url: string; close(): Promise<void> };
 let root: string;
 
@@ -36,6 +51,10 @@ before(async () => {
   await fs.mkdir(site, { recursive: true });
   await fs.writeFile(path.join(site, 'index.html'), page(true));
   await fs.writeFile(path.join(site, 'orig.html'), page(false));
+  for (const [name, make] of Object.entries(PAIRS)) {
+    await fs.writeFile(path.join(site, name + '.html'), make(true));
+    await fs.writeFile(path.join(site, name + '-orig.html'), make(false));
+  }
   server = await serveFixture(site);
   const guide = path.join(root, 'ai-guide');
   await fs.mkdir(path.join(guide, 'scripts'), { recursive: true });
@@ -45,7 +64,13 @@ before(async () => {
   const s = (id: string, cls: string) => ({ id, name: id, className: cls, boxes: {}, live: {}, motion: 0 });
   await fs.writeFile(
     path.join(guide, 'sections.json'),
-    JSON.stringify({ '/': { slug: 'index', url: server.url + '/orig', sections: [s('01', 'framer-s1'), s('02', 'framer-s2'), s('03', 'framer-s3')] } })
+    JSON.stringify({
+      '/': { slug: 'index', url: server.url + '/orig', sections: [s('01', 'framer-s1'), s('02', 'framer-s2'), s('03', 'framer-s3')] },
+      '/t': { slug: 't', url: server.url + '/t-orig', sections: [s('01', 'framer-t1')] },
+      '/nav': { slug: 'nav', url: server.url + '/nav-orig', sections: [s('01', 'framer-n1')] },
+      '/ld': { slug: 'ld', url: server.url + '/ld-orig', sections: [s('S1', 'framer-ld'), s('01', 'framer-l1')] },
+      '/words': { slug: 'words', url: server.url + '/words-orig', sections: [s('01', 'framer-w1')] },
+    })
   );
   const src = (id: string, extra = {}) => ({ folder: `ai-guide/pages/index/sections/${id}-x`, markup: `index.html:${id}0`, styles: `ai-guide/pages/index/sections/${id}-x/styles.css`, animations: [], hovers: [], ...extra });
   await fs.writeFile(
@@ -99,4 +124,22 @@ test('an unreachable original is reported, not a crash', { timeout: 300000 }, as
   assert.equal(run.status, 0, run.stderr);
   const md = await fs.readFile(path.join(root, 'ai-guide', 'parity', 'index.md'), 'utf8');
   assert.match(md, /original not reachable/);
+  assert.doesNotMatch(md, /matches the original/);
+  assert.match(md, /Not compared at 1440/);
+  assert.match(md, /rebuild measured: 3 sections/);
 });
+
+for (const [name, why] of [
+  ['t', 'load timing is measured from each page’s own DOMContentLoaded'],
+  ['nav', 'hover probes the same targets on both sites, whatever their order'],
+  ['ld', 'a loader that fades is not a difference, kept or removed'],
+  ['words', 'letters animated per word match the whole heading animated'],
+]) {
+  test(why, { timeout: 300000 }, async () => {
+    const run = await parity('/' + name);
+    assert.equal(run.status, 0, run.stderr);
+    const md = await fs.readFile(path.join(root, 'ai-guide', 'parity', name + '.md'), 'utf8');
+    const items = md.split('\n').filter((l) => l.startsWith('- ') && l !== '- none' && !l.startsWith('- Generated'));
+    assert.deepEqual(items, [], md);
+  });
+}

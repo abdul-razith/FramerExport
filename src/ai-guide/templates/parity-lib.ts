@@ -21,25 +21,33 @@ export function normText(s) {
 
 /**
  * Section tops and heights compared. The first section whose top moved is the cause; sections below
- * that moved by the same amount inherit it. A section on one site only is missing or extra.
+ * that moved by the same amount inherit it. A section on one site only is missing or extra, and is
+ * then the cause of what moved below it.
  */
 export function layoutDiffs(original, rebuild, tol = LAYOUT_TOL) {
   const shown = (list) => list.filter((b) => b.height > 0);
   const o = shown(original);
   const r = shown(rebuild);
-  const mine = new Map(r.map((b) => [b.id, b]));
+  const mine = new Map(r.map((b, i) => [b.id, Object.assign({ index: i }, b)]));
   const theirs = new Set(o.map((b) => b.id));
   const out = [];
   let shift = 0;
+  // A section missing or extra above the next common section explains its shift.
+  let structural = false;
+  let lastIndex = -1;
   for (const a of o) {
     const b = mine.get(a.id);
     if (!b) {
       out.push({ id: a.id, kind: 'missing', original: a.top, inherited: false });
+      structural = true;
       continue;
     }
+    if (r.slice(lastIndex + 1, b.index).some((x) => !theirs.has(x.id))) structural = true;
+    lastIndex = b.index;
     const dt = Math.round(b.top - a.top);
     const dh = Math.round(b.height - a.height);
-    if (Math.abs(dt) > tol) out.push({ id: a.id, kind: 'top', original: Math.round(a.top), rebuild: Math.round(b.top), delta: dt, inherited: Math.abs(dt - shift) <= tol });
+    if (Math.abs(dt) > tol) out.push({ id: a.id, kind: 'top', original: Math.round(a.top), rebuild: Math.round(b.top), delta: dt, inherited: structural || Math.abs(dt - shift) <= tol });
+    structural = false;
     if (Math.abs(dh) > tol) out.push({ id: a.id, kind: 'height', original: Math.round(a.height), rebuild: Math.round(b.height), delta: dh, inherited: false });
     // What the sections below should be shifted by when nothing else changes.
     shift = dt + dh;
@@ -53,7 +61,7 @@ export function groupLetters(raw) {
   const out = [];
   const groups = new Map();
   for (const m of raw) {
-    const piece = String(m.text || '').trim().length <= 2 && m.parentText;
+    const piece = String(m.text || '').trim().length <= 2 && m.parentText && normText(m.parentText) !== normText(m.text);
     if (!piece) {
       out.push(m);
       continue;
@@ -75,7 +83,13 @@ export function groupLetters(raw) {
 }
 
 const label = (m) => m.text || m.name || 'element';
-const sameThing = (a, b) => a.section === b.section && normText(a.text) === normText(b.text) && (a.text || b.text || a.name === b.name);
+/** Same text, or one text inside the other (a heading animated whole vs. one of its words or lines). */
+function sameText(a, b) {
+  const x = normText(a.text);
+  const y = normText(b.text);
+  if (!x || !y) return !x && !y;
+  return x === y || (Math.min(x.length, y.length) >= 3 && (x.includes(y) || y.includes(x)));
+}
 
 /**
  * What moves on one site and not the other, by section, then text, then layer name. Generated
@@ -89,7 +103,10 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
   const diffs = [];
   for (const a of o) {
     if (a.live) continue;
-    const i = r.findIndex((b, k) => !used.has(k) && sameThing(a, b));
+    // Elements without text (images, shapes) match in order; the layer name only breaks ties.
+    const free = (b, k) => !used.has(k) && b.section === a.section && sameText(a, b);
+    let i = r.findIndex((b, k) => free(b, k) && (a.text || b.name === a.name));
+    if (i < 0) i = r.findIndex(free);
     if (i < 0) {
       diffs.push({ section: a.section, kind: 'missing', label: label(a), originalMs: a.startMs, scroll: !!a.scroll });
       continue;
@@ -137,18 +154,25 @@ export function renderReport(page, result, sources) {
     motion += result.widths[w].motion.length;
     interaction += result.widths[w].interaction.length;
   }
+  const failed = widths.filter((w) => result.widths[w].error);
+  const total = layout + motion + interaction;
   const out = [
     '# Parity: ' + page,
     '',
-    layout + motion + interaction === 0
-      ? 'No differences. This page matches the original.'
-      : layout + motion + interaction + ' differences (layout ' + layout + ', motion ' + motion + ', interaction ' + interaction + '). Fix each from its pointer, then run npm run parity again.',
+    (failed.length ? 'Not compared at ' + failed.join(', ') + ' (see below): fix that and run npm run parity again. ' : '') +
+      (total === 0
+        ? failed.length
+          ? 'No differences at the widths that were compared.'
+          : 'No differences. This page matches the original.'
+        : total + ' differences (layout ' + layout + ', motion ' + motion + ', interaction ' + interaction + '). Fix each from its pointer, then run npm run parity again.'),
     '',
   ];
   for (const w of widths) {
     const r = result.widths[w];
     out.push('## ' + w, '');
-    if (r.error) out.push('- ' + r.error, '');
+    if (r.error) out.push('- ' + r.error);
+    if (r.rebuildOnly) out.push('- rebuild measured: ' + r.rebuildOnly.sections + ' sections, ' + r.rebuildOnly.moving + ' moving elements, ' + r.rebuildOnly.probes + ' hover targets');
+    if (r.error || r.rebuildOnly) out.push('');
     out.push('### Layout', '');
     if (!r.layout.length) out.push('- none');
     for (const d of r.layout) {

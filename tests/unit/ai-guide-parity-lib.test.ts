@@ -131,3 +131,39 @@ test('the report lists widths from desktop to mobile', () => {
   const md = call<string>('renderReport', 'p', { widths: { 390: empty, 1024: empty, 1440: empty }, cannotMatch: [] }, {});
   assert.ok(md.indexOf('## 1440') < md.indexOf('## 1024') && md.indexOf('## 1024') < md.indexOf('## 390'), md);
 });
+
+// Final review fixes.
+test('a width that could not be compared is never reported as matching', () => {
+  const md = call<string>('renderReport', 'p', { widths: { 1440: { layout: [], motion: [], interaction: [], error: 'original not reachable: timeout', rebuildOnly: { sections: 3, moving: 5, probes: 2 } } }, cannotMatch: [] }, {});
+  assert.doesNotMatch(md, /matches the original/);
+  assert.match(md, /Not compared at 1440/);
+  assert.match(md, /rebuild measured: 3 sections, 5 moving elements, 2 hover targets/);
+});
+
+test('a missing section is the only cause listed, the sections below follow it', () => {
+  const d = call<LayoutDiff[]>('layoutDiffs', [box('01', 0, 500), box('02', 500, 500), box('03', 1000, 500), box('04', 1500, 500)], [box('01', 0, 500), box('03', 500, 500), box('04', 1000, 500)]);
+  assert.deepEqual(d.filter((x) => !x.inherited).map((x) => [x.id, x.kind]), [['02', 'missing']]);
+});
+
+test('an extra section on the rebuild is the only cause listed', () => {
+  const d = call<LayoutDiff[]>('layoutDiffs', [box('01', 0, 500), box('03', 500, 500)], [box('01', 0, 500), box('99', 500, 300), box('03', 800, 500)]);
+  assert.deepEqual(d.filter((x) => !x.inherited).map((x) => [x.id, x.kind]), [['99', 'extra']]);
+});
+
+test('moving elements without text match in order within their section', () => {
+  const { diffs } = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('02', '', { name: 'Hero Image' }), moved('02', '', { name: 'Star' })], [moved('02', ''), moved('02', '')]);
+  assert.deepEqual(diffs, []);
+});
+
+test('a whole heading matches the same heading split by word', () => {
+  const words = [...'FEATURED'].map((t) => moved('03', t, { parentText: 'FEATURED WORKS' })).concat([...'WORKS'].map((t) => moved('03', t, { parentText: 'FEATURED WORKS' })));
+  const { diffs } = call<{ diffs: MotionDiff[] }>('motionDiffs', words, [moved('03', 'Featured works')]);
+  assert.deepEqual(diffs, []);
+  const part = call<{ diffs: MotionDiff[] }>('motionDiffs', [moved('03', 'FEATURED WORKS')], [moved('03', 'Featured')]);
+  assert.deepEqual(part.diffs, []);
+});
+
+test('a short label on its own is not folded into its parent text', () => {
+  const g = call<{ text: string }[]>('groupLetters', [moved('04', '01', { parentText: '01' })]);
+  assert.deepEqual(g.map((x) => x.text), ['01']);
+});
