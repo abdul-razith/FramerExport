@@ -14,7 +14,15 @@ body{margin:0;font-family:sans-serif} section{height:700px;display:flex;align-it
 </style></head><body>
 <section id="a"${build ? ' data-section="01"' : ''}>First <span id="clock"${build ? ' data-live' : ''}>${build ? '11:11:11' : '9:00:00'}</span></section>
 <section id="b"${build ? ' data-section="02"' : ''}><div class="fade">Second</div></section>
-${build ? `<script>new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('in'))).observe(document.querySelector('.fade'))</script>` : ''}
+<section id="c"${build ? ' data-section="03"' : ''}><div id="js" style="opacity:1">Third</div></section>
+<section id="d"${build ? ' data-section="04"' : ''}><div id="waapi">Fourth</div></section>
+${build ? `<script>
+new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('in'))).observe(document.querySelector('.fade'));
+// A JS tween writing inline styles each frame (GSAP, motion's JS path): "opacity: 1; transform: …".
+const js=document.getElementById('js');let t0=performance.now();(function f(t){const p=Math.min(1,(t-t0)/400);js.style.transform='translateY('+(20-20*p)+'px)';if(p<1)requestAnimationFrame(f)})(t0);
+// Web Animations API, no fill: gone from getAnimations() once finished (motion's default path).
+setTimeout(()=>document.getElementById('waapi').animate([{opacity:0},{opacity:1}],{duration:150}),50);
+</script>` : ''}
 </body></html>`;
 
 let server: { url: string; close(): Promise<void> };
@@ -34,16 +42,19 @@ before(async () => {
   await fs.mkdir(path.join(guide, 'scripts'), { recursive: true });
   await fs.writeFile(path.join(guide, 'scripts', 'compare.mjs'), COMPARE_MJS);
   const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-  const sections: { id: string; name: string; boxes: Record<string, unknown>; live: Record<string, unknown> }[] = [
-    { id: '01', name: 'First', boxes: {}, live: {} },
-    { id: '02', name: 'Second', boxes: {}, live: {} },
+  const sections: { id: string; name: string; boxes: Record<string, unknown>; live: Record<string, unknown>; motion: number }[] = [
+    { id: '01', name: 'First', boxes: {}, live: {}, motion: 1 },
+    { id: '02', name: 'Second', boxes: {}, live: {}, motion: 1 },
+    { id: '03', name: 'Third', boxes: {}, live: {}, motion: 1 },
+    { id: '04', name: 'Fourth', boxes: {}, live: {}, motion: 1 },
+    { id: '05', name: 'Missing', boxes: {}, live: {}, motion: 0 },
   ];
   for (const [name, width] of [['desktop', 1440], ['tablet', 1024], ['mobile', 390]] as const) {
     const p = await browser.newPage();
     await p.setViewport({ width, height: 900 });
     await p.goto(server.url + '/ref', { waitUntil: 'networkidle2' });
     const boxes = await p.evaluate(() =>
-      ['#a', '#b', '#clock'].map((s) => {
+      ['#a', '#b', '#clock', '#c', '#d'].map((s) => {
         const r = document.querySelector(s)!.getBoundingClientRect();
         return { x: r.x, y: r.y + scrollY, w: r.width, h: r.height };
       })
@@ -51,6 +62,8 @@ before(async () => {
     sections[0].boxes[width] = boxes[0];
     sections[1].boxes[width] = boxes[1];
     sections[0].live[width] = [boxes[2]];
+    sections[2].boxes[width] = boxes[3];
+    sections[3].boxes[width] = boxes[4];
     await p.screenshot({ path: path.join(guide, 'pages', 'index', `${name}.png`) as `${string}.png`, fullPage: true });
     await p.close();
   }
@@ -93,4 +106,14 @@ test('a missing section is reported as not found and the run still succeeds', { 
   const run = await compare('/', '--section', '99');
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /99 .*not found/);
+});
+
+test('compare flags a section that should animate but never moves', { timeout: 300000 }, async () => {
+  const run = await compare('/');
+  assert.equal(run.status, 0, run.stderr);
+  const line = (id: string) => run.stdout.split('\n').find((l) => l.startsWith(id + ' '))!;
+  assert.match(line('01'), /motion ✗/, run.stdout);
+  for (const id of ['02', '03', '04']) assert.match(line(id), /motion ✓/, line(id));
+  assert.doesNotMatch(line('05'), /motion/, 'no animations expected: no motion column');
+  assert.match(run.stdout, /motion ✗ = /);
 });

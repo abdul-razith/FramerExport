@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { markupFileNames, renderSectionRef, sectionDirName, type SectionRefInput } from '../../src/ai-guide/section-ref.js';
+import { markupFileNames, renderSectionRef, sectionDirName, sectionMotion, type SectionRefInput } from '../../src/ai-guide/section-ref.js';
 import { guidePage } from './ai-guide-fixture.js';
 
 function input(extra: Partial<SectionRefInput> = {}): SectionRefInput {
@@ -92,4 +92,46 @@ test('section folder names', () => {
   const page = guidePage();
   assert.equal(sectionDirName(page.sections[0]), '01-hero-section');
   assert.equal(sectionDirName(page.shell![0]), 'S1-header');
+});
+
+test('sectionMotion lists what moves: Framer settings and recorded load, in-view, scroll and loop motion', () => {
+  const anim = (layer: string | undefined, className: string, kind: 'enter' | 'loop' | 'scroll') =>
+    ({ file: 'scripts/vendor/a.mjs', offset: 1, className, layer, kind, values: {} });
+  const list = sectionMotion(
+    [anim('Name', 'framer-a', 'enter'), anim(undefined, 'framer-b-container', 'loop')],
+    [
+      { key: 'k', label: 'letters "Hi"', section: '', trigger: 'load' },
+      { key: 'k', label: 'Text', section: '', trigger: 'scroll' },
+      { key: 'k', label: 'Text', section: '', trigger: 'scroll' },
+      { key: 'k', label: 'div "5:17 AM"', section: '', trigger: 'custom' },
+      { key: 'k', label: 'Card', section: '', trigger: 'hover' },
+    ]
+  );
+  assert.deepEqual(list, ['Name (enter)', 'framer-b-container (loop)', 'letters "Hi" (load)', 'Text (scroll)']);
+});
+
+test('sectionMotion ignores an extractor error', () => {
+  assert.deepEqual(sectionMotion(new Error('x'), []), []);
+});
+
+const spin = {
+  file: 'scripts/vendor/Loop.Ab12.mjs',
+  offset: 99,
+  className: 'framer-14tvjdo',
+  layer: 'Interactive',
+  kind: 'override' as const,
+  values: {},
+  override: { name: 'RotateLoop', code: 'function D() { x.to(e.current, { rotation: 360, duration: 3, repeat: -1 }); }', animates: true },
+};
+const link = { ...spin, className: 'framer-link', layer: 'Link', override: { name: 'withLink', code: 'function T(e) { return (t) => l(e, { ...t, href: `/x` }); }', animates: false } };
+
+test('ref.md prints a code override with its source, to rebuild it from', () => {
+  const md = renderSectionRef(input({ animations: [spin] }));
+  const part = md.slice(md.indexOf('## Animations'), md.indexOf('## Interactive'));
+  assert.ok(part.includes('**Interactive** (`framer-14tvjdo`) — code override RotateLoop'), part);
+  assert.ok(part.includes('```js\nfunction D() { x.to(e.current, { rotation: 360, duration: 3, repeat: -1 }); }\n```'), part);
+});
+
+test('sectionMotion counts a code override only when it animates', () => {
+  assert.deepEqual(sectionMotion([spin, link], []), ['Interactive (override RotateLoop)']);
 });

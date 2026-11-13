@@ -216,6 +216,59 @@ function readableValue(property: string, value: string): string {
   return describeTransform(parseTransform(value)).join(', ') || 'none';
 }
 
+/** An element the recorder saw move at some point of its visit (load, slow scroll to the bottom, rest). */
+export interface Mover {
+  /** Node key (same scheme as the capture's RawNode.key). */
+  key: string;
+  name: string;
+  /** Its own text, trimmed. */
+  text: string;
+  /** Text of its parent, for split letters and words. */
+  parentText?: string;
+  /** What changed: `transform`, `opacity`, `css-animation`, `waapi`… */
+  kinds: string[];
+  /** Page scroll position when it first moved. */
+  scrollY: number;
+}
+
+const parentKey = (key: string) => key.slice(0, key.lastIndexOf('/'));
+const related = (a: string, b: string) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+
+/**
+ * Entries for everything that moved and is not described yet — the net under the other readers
+ * (whatever the mechanism: text effects, code components, CSS, scripts). Split letters or words of
+ * one text become a single entry for the text.
+ */
+export function moversToEntries(movers: Mover[], known: MotionEntry[]): MotionEntry[] {
+  // Already described: the same element, or a letter of a text described as letters. An entry on
+  // a wrapper (smooth scroll, cursor, a section) says nothing about what moves inside it.
+  const fresh = movers.filter((m) => !known.some((k) => k.key === m.key || (k.label.startsWith('letters') && m.key.startsWith(k.key + '/'))));
+  const pieces = new Map<string, Mover[]>();
+  for (const m of fresh) {
+    if (m.text.length <= 2 && m.parentText) pieces.set(parentKey(m.key), [...(pieces.get(parentKey(m.key)) ?? []), m]);
+  }
+  const out: MotionEntry[] = [];
+  const done = new Set<string>();
+  for (const m of fresh) {
+    const group = m.text.length <= 2 && m.parentText ? pieces.get(parentKey(m.key))! : undefined;
+    const key = group && group.length > 1 ? parentKey(m.key) : m.key;
+    if (done.has(key) || out.some((e) => related(e.key, key))) continue;
+    done.add(key);
+    const members = group && group.length > 1 ? group : [m];
+    const kinds = [...new Set(members.flatMap((x) => x.kinds))].sort();
+    const atTop = members.every((x) => x.scrollY === 0);
+    const label = group && group.length > 1 ? `letters "${m.parentText!.slice(0, 40)}"` : [m.name || 'div', m.text ? `"${m.text.slice(0, 30)}"` : ''].filter(Boolean).join(' ');
+    out.push({
+      key,
+      label,
+      section: '',
+      trigger: atTop ? 'load' : 'in-view',
+      note: `${atTop ? 'moved on load' : 'moved while scrolling past it'} (${kinds.join(', ')}); not in the Framer settings, so check the live site for how`,
+    });
+  }
+  return out;
+}
+
 /** One `motion.md` line for a recorded entry. */
 export function motionLine(e: MotionEntry): string {
   const parts = [`trigger: ${e.trigger}`];
