@@ -593,7 +593,7 @@ Use the export file \`${page.exportFile}\` and the live site for this page.
             if (b[bp] && b[bp]!.w > 0) (out[WIDTH_KEY[bp]] ??= []).push(b[bp]!);
         }
         return out;
-      }),
+      }, (route) => capturedBy.get(route)!.url),
       null,
       1
     )

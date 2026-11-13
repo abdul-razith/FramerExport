@@ -17,7 +17,7 @@ test('sections.json lists shell and page sections per width, with live boxes', (
     sections: [section('01', 'Hero', 56), section('02', 'Works', 900)],
     shell: [{ ...section('S1', 'Header', 0), shell: true }],
   };
-  const json = sectionsJson([page], (route, id) => (id === '01' ? { '1440': [{ x: 10, y: 60, w: 80, h: 20 }] } : {}));
+  const json = sectionsJson([page], (route, id) => (id === '01' ? { '1440': [{ x: 10, y: 60, w: 80, h: 20 }] } : {}), (r) => r);
   assert.deepEqual(json['/'].sections.map((s) => s.id), ['S1', '01', '02']);
   assert.equal(json['/'].slug, 'index');
   assert.deepEqual(Object.keys(json['/'].sections[1].boxes).sort(), ['1024', '1440', '390']);
@@ -31,7 +31,18 @@ test('sections.json says how many animations each section is expected to have', 
     route: '/', slug: 'index', title: 'Home', exportFile: 'index.html',
     sections: [{ ...section('01', 'Hero', 56), motion: ['Name enter', 'Badge loop'] }, section('02', 'Works', 900)],
   };
-  const json = sectionsJson([page], () => ({}));
+  const json = sectionsJson([page], () => ({}), (r) => r);
   assert.equal(json['/'].sections[0].motion, 2);
   assert.equal(json['/'].sections[1].motion, 0);
+});
+
+test("sections.json gives the original page URL and each section's export class", () => {
+  const page: GuidePage = {
+    route: '/about', slug: 'about', title: 'About', exportFile: 'subpages/about.html',
+    sections: [{ ...section('01', 'Hero', 56), className: 'framer-abc' }, section('02', 'Works', 900)],
+  };
+  const json = sectionsJson([page], () => ({}), (r) => 'https://site.framer.website' + r);
+  assert.equal(json['/about'].url, 'https://site.framer.website/about');
+  assert.equal(json['/about'].sections[0].className, 'framer-abc');
+  assert.ok(!('className' in json['/about'].sections[1]));
 });
