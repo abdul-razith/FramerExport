@@ -103,17 +103,19 @@ function watch() {
   document.addEventListener('transitionrun', (e) => {
     if (/^(opacity|transform|translate|scale|rotate)$/.test(e.propertyName)) add(e.target, 'css-transition');
   }, true);
+  // An animation begins to move when its delay ends.
+  const begins = (an) => an.startTime + ((an.effect && an.effect.getTiming().delay) || 0) / (an.playbackRate || 1);
   const animate = Element.prototype.animate;
   Element.prototype.animate = function (...a) {
     add(this, 'waapi');
     const an = animate.apply(this, a);
-    an.ready.then(() => add(this, 'waapi-start', an.startTime)).catch(() => undefined);
+    an.ready.then(() => add(this, 'waapi-start', begins(an))).catch(() => undefined);
     return an;
   };
   // Web Animations built without element.animate() (motion builds them directly) are found by asking
   // the document for its running animations.
   setInterval(() => {
-    for (const an of document.getAnimations()) if (an.effect && an.effect.target && an.startTime !== null) add(an.effect.target, 'waapi-start', an.startTime);
+    for (const an of document.getAnimations()) if (an.effect && an.effect.target && an.startTime !== null) add(an.effect.target, 'waapi-start', begins(an));
   }, 100);
   const part = (s, p) => {
     const m = (s || '').match(new RegExp('(?:^|;)\\s*' + p + '\\s*:([^;]*)'));

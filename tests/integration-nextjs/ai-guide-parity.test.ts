@@ -72,6 +72,13 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
         (rb ? '' : '</div>'),
       '<style>a.h:hover{background:#000}</style>'
     ),
+  // Both start moving 800ms after load: the original from a timer, the rebuild by a CSS delay.
+  delay: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-d1', '<div id="a" class="' + (rb ? 'late' : '') + '">Hello</div>') +
+        (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('a').animate([{opacity:1},{opacity:.2},{opacity:1}],{duration:1000,iterations:Infinity}),800))</script>"),
+      rb ? '<style>.late{animation:f 1s linear .8s infinite}@keyframes f{50%{opacity:.2}}</style>' : ''
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -134,6 +141,7 @@ before(async () => {
         sections: [s('01', 'framer-e1'), { id: 'S5', name: 'Section', boxes: { 1440: { x: 1274, y: 844, w: 150, h: 40 }, 1024: { x: 858, y: 844, w: 150, h: 40 }, 390: { x: 224, y: 844, w: 150, h: 40 } }, live: {}, motion: 1 }],
       },
       '/self': { slug: 'self', url: server.url + '/self-orig', sections: [s('01', 'framer-f1')] },
+      '/delay': { slug: 'delay', url: server.url + '/delay-orig', sections: [s('01', 'framer-d1')] },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -203,6 +211,7 @@ for (const [name, why] of [
   ['cls', 'a section without a class or name, or with a shared class, is found by its captured place and size'],
   ['late', 'a fixed badge that appears late is found even when another element sits on its spot first'],
   ['self', 'a section whose root is the link itself is hovered too'],
+  ['delay', 'an animation with a delay starts when the delay ends'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {
