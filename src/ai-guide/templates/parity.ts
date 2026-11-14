@@ -130,9 +130,29 @@ function watch() {
     const v = part(s, p);
     return still.test(v) ? 'none' : v.replace(/\s+/g, ' ');
   };
+  const sig = (s) => opacity(s) + '|' + ['transform', 'translate', 'scale', 'rotate'].map((p) => shape(s, p)).join('|');
+  // The last style change of each element: a change put back within 100ms (hydration rewriting a
+  // style) is no motion, so it is undone.
+  const lastChange = new WeakMap();
   new MutationObserver((list) => {
     for (const m of list) {
       const now = m.target.getAttribute('style');
+      const before = sig(m.oldValue);
+      const after = sig(now);
+      if (before === after) continue;
+      const t = performance.now();
+      const rec = lastChange.get(m.target);
+      if (rec && t - rec.t <= 100 && after === rec.before) {
+        lastChange.delete(m.target);
+        const e = seen.get(m.target);
+        if (e && e.start === undefined) {
+          if (rec.fresh) seen.delete(m.target);
+          else e.prev = rec.prevBefore;
+        }
+        continue;
+      }
+      const old = seen.get(m.target);
+      lastChange.set(m.target, { before, t, fresh: !old, prevBefore: old ? old.prev : undefined });
       if (opacity(m.oldValue) !== opacity(now)) add(m.target, 'opacity');
       if (['transform', 'translate', 'scale', 'rotate'].some((p) => shape(m.oldValue, p) !== shape(now, p))) add(m.target, 'transform');
     }

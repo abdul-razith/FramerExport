@@ -93,6 +93,12 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
       sec(rb, '01', 'framer-p1', '<a href="#" class="h" style="display:inline-block;padding:6px">Shop' + (rb ? '<i class="bl"></i>' : '') + '</a>' + (rb ? '' : '<i class="bl"></i>')),
       '<style>a.h:hover{background:#000}.bl{display:inline-block;width:6px;height:6px;background:#c00;animation:b 1s linear infinite}@keyframes b{50%{opacity:.2}}</style>'
     ),
+  // Hydration on the original drops a transform and puts it back 5ms later: nothing visibly moves.
+  flicker: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-q1', '<div id="a" style="width:80px;height:80px;background:#36c;transform:rotate(-10deg)"></div>') +
+        (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{const a=document.getElementById('a');a.style.transform='';setTimeout(()=>{a.style.transform='rotate(-10deg)'},5)},300))</script>")
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -158,6 +164,7 @@ before(async () => {
       '/delay': { slug: 'delay', url: server.url + '/delay-orig', sections: [s('01', 'framer-d1')] },
       '/zero': { slug: 'zero', url: server.url + '/zero-orig', sections: [s('01', 'framer-z1')] },
       '/blink': { slug: 'blink', url: server.url + '/blink-orig', sections: [s('01', 'framer-p1')] },
+      '/flicker': { slug: 'flicker', url: server.url + '/flicker-orig', sections: [s('01', 'framer-q1')] },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -230,6 +237,7 @@ for (const [name, why] of [
   ['delay', 'an animation with a delay starts when the delay ends'],
   ['zero', 'an element scaled to nothing when the report reads it is still listed'],
   ['blink', 'a loop inside a link is not a hover change'],
+  ['flicker', 'a style removed and put back at once is not motion'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {
