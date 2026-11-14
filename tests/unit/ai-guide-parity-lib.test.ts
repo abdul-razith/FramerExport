@@ -80,6 +80,12 @@ test('a hover that changes something on the original but nothing on the rebuild 
   assert.deepEqual(call('interactionDiffs', [probe(['transform'])], [probe(['transform'])]), []);
 });
 
+test('of several rebuild targets with the same label, the one that matches the hover is compared', () => {
+  const probe = (target: string, changed: string[]) => ({ section: 'S3', target, action: 'hover', changed });
+  // The logo link reads "Home" too and changes nothing; the nav link HOME changes its background.
+  assert.deepEqual(call('interactionDiffs', [probe('HOME', ['background-color'])], [probe('Home', []), probe('HOME', ['background-color'])]), []);
+});
+
 test('the report points each item into the export', () => {
   const sources = {
     '02': {

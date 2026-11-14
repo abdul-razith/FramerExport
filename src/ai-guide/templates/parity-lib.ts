@@ -150,8 +150,11 @@ export function interactionDiffs(original, rebuild) {
   const out = [];
   for (const a of original) {
     if (!a.changed.length) continue;
-    const b = rebuild.find((x) => x.section === a.section && x.action === a.action && normText(x.target) === normText(a.target));
-    if (b && set(b.changed) === set(a.changed)) continue;
+    // Several rebuild targets can share a label (a logo link and a nav link both "Home"): the one
+    // that changes the same things counts, else the first.
+    const same = rebuild.filter((x) => x.section === a.section && x.action === a.action && normText(x.target) === normText(a.target));
+    if (same.some((x) => set(x.changed) === set(a.changed))) continue;
+    const b = same.find((x) => x.changed.length) || same[0];
     out.push({ section: a.section, target: a.target, action: a.action, original: a.changed, rebuild: b ? b.changed : null, image: a.image });
   }
   return out;
