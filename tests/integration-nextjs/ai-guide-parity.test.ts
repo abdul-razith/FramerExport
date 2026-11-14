@@ -79,6 +79,20 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
         (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('a').animate([{opacity:1},{opacity:.2},{opacity:1}],{duration:1000,iterations:Infinity}),800))</script>"),
       rb ? '<style>.late{animation:f 1s linear .8s infinite}@keyframes f{50%{opacity:.2}}</style>' : ''
     ),
+  // The same ring grows on both; the rebuild's has shrunk back to nothing when the report reads it.
+  zero: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-z1', '<div id="a" style="width:80px;height:80px;border-radius:50%;background:#36c">&nbsp;</div>') +
+        "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('a').animate([{transform:'scale(0)'},{transform:'scale(1)'}" +
+        (rb ? ",{transform:'scale(0)'}" : '') +
+        "],{duration:600,fill:'forwards'}),300))</script>"
+    ),
+  // A dot blinks on both; on the rebuild it sits inside the link, so it changes during the hover too.
+  blink: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-p1', '<a href="#" class="h" style="display:inline-block;padding:6px">Shop' + (rb ? '<i class="bl"></i>' : '') + '</a>' + (rb ? '' : '<i class="bl"></i>')),
+      '<style>a.h:hover{background:#000}.bl{display:inline-block;width:6px;height:6px;background:#c00;animation:b 1s linear infinite}@keyframes b{50%{opacity:.2}}</style>'
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -142,6 +156,8 @@ before(async () => {
       },
       '/self': { slug: 'self', url: server.url + '/self-orig', sections: [s('01', 'framer-f1')] },
       '/delay': { slug: 'delay', url: server.url + '/delay-orig', sections: [s('01', 'framer-d1')] },
+      '/zero': { slug: 'zero', url: server.url + '/zero-orig', sections: [s('01', 'framer-z1')] },
+      '/blink': { slug: 'blink', url: server.url + '/blink-orig', sections: [s('01', 'framer-p1')] },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -212,6 +228,8 @@ for (const [name, why] of [
   ['late', 'a fixed badge that appears late is found even when another element sits on its spot first'],
   ['self', 'a section whose root is the link itself is hovered too'],
   ['delay', 'an animation with a delay starts when the delay ends'],
+  ['zero', 'an element scaled to nothing when the report reads it is still listed'],
+  ['blink', 'a loop inside a link is not a hover change'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {

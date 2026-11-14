@@ -217,8 +217,9 @@ function sectionTools(sections, side) {
       name: el.getAttribute('data-framer-name') || '',
       text: own(el) || clean(el.textContent),
       parentText: block ? clean(block.textContent) : undefined,
-      w: r.width,
-      h: r.height,
+      // The size before transforms: a ring scaled to nothing at this moment is still a ring.
+      w: Math.max(r.width, el.offsetWidth || 0),
+      h: Math.max(r.height, el.offsetHeight || 0),
     };
   };
 }
@@ -332,7 +333,11 @@ async function visit(browser, url, width, side, wanted) {
           window.scrollTo(0, Math.max(0, el.getBoundingClientRect().top + scrollY - 300));
         }, p.n);
         await wait(300);
+        // What changes on its own (a loop inside the link) over the same wait is not the hover.
+        const idle = await page.evaluate(snapshot, p.n);
+        await wait(400);
         const before = await page.evaluate(snapshot, p.n);
+        const restless = new Set(Object.keys(before).filter((k) => before[k] !== idle[k]));
         try {
           await handle.hover();
         } catch {
@@ -340,7 +345,7 @@ async function visit(browser, url, width, side, wanted) {
         }
         await wait(400);
         const after = await page.evaluate(snapshot, p.n);
-        const changed = Array.from(new Set(Object.keys(after).filter((k) => after[k] !== before[k]).map((k) => k.split('|')[1])));
+        const changed = Array.from(new Set(Object.keys(after).filter((k) => after[k] !== before[k] && !restless.has(k)).map((k) => k.split('|')[1])));
         let image;
         if (changed.length) {
           // Named after the target, so the original's and the rebuild's images pair up.
