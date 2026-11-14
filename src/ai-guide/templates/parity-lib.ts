@@ -120,6 +120,7 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
   const cannotMatch = o.filter((m) => m.live);
   const used = new Set();
   const diffs = [];
+  const timed = [];
   for (const a of o) {
     if (a.live) continue;
     // Elements without text (images, shapes) match in order; the layer name only breaks ties.
@@ -139,12 +140,20 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
       continue;
     }
     // Scroll-triggered start times depend on page speed, not on the animation: only load ones are timed.
-    if (!a.scroll && !r[i].scroll && Math.abs(r[i].startMs - a.startMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs });
+    if (!a.scroll && !r[i].scroll) timed.push([a, r[i]]);
+  }
+  // The original starts its effects when its scripts are ready, which varies by hundreds of ms
+  // from run to run. With enough load items, the median gap is that lag: an item is late or early
+  // when it is out of step with the rest of the page.
+  const gaps = timed.map(([a, b]) => b.startMs - a.startMs).sort((x, y) => x - y);
+  const offsetMs = gaps.length >= 3 ? Math.round(gaps[Math.floor((gaps.length - 1) / 2)]) : 0;
+  for (const [a, b] of timed) {
+    if (Math.abs(b.startMs - a.startMs - offsetMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: b.startMs });
   }
   r.forEach((b, k) => {
     if (!used.has(k)) diffs.push({ section: b.section, kind: 'extra', label: label(b), rebuildMs: b.startMs, scroll: !!b.scroll });
   });
-  return { diffs, cannotMatch };
+  return { diffs, cannotMatch, offsetMs };
 }
 
 /** Hover and press changes the original makes that the rebuild does not make (or makes differently). */
@@ -214,6 +223,8 @@ export function renderReport(page, result, sources) {
       else out.push('- ' + d.id + ': ' + d.kind + ' ' + (d.delta > 0 ? '+' : '') + d.delta + 'px (original ' + d.original + ', rebuild ' + d.rebuild + ')' + where);
     }
     out.push('', '### Motion', '');
+    // The original's load speed varies by run: a page-wide lag is said once, not per item.
+    if (Math.abs(r.offsetMs || 0) > TIME_TOL) out.push('On-load animations start ' + Math.abs(r.offsetMs) + ' ms ' + (r.offsetMs < 0 ? 'earlier' : 'later') + ' overall than on the original (its own load speed varies by run); the items below are out of step with that.', '');
     if (!r.motion.length) out.push('- none');
     for (const d of r.motion) {
       const p = pointerFor(src(d.section), d.label);

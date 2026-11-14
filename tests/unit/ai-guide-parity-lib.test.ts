@@ -97,6 +97,32 @@ test('an item matches the same text before a text that only contains it', () => 
   assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs, []);
 });
 
+test('load timing is compared after taking out the overall lag of the page', () => {
+  const o = ['A', 'B', 'C', 'D'].map((t, k) => moved('01', t, { startMs: 1000 + k * 100 }));
+  // The whole rebuild page starts 500ms sooner (the original's own load speed): not a difference.
+  const r = ['A', 'B', 'C', 'D'].map((t, k) => moved('01', t, { startMs: 500 + k * 100 }));
+  const same = call<{ diffs: MotionDiff[]; offsetMs: number }>('motionDiffs', o, r);
+  assert.deepEqual(same.diffs, []);
+  assert.equal(same.offsetMs, -500);
+  // One item out of step with the rest still is.
+  r[3] = moved('01', 'D', { startMs: 1600 });
+  const late = call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs;
+  assert.deepEqual(late.map((d) => [d.kind, d.label]), [['timing', 'D']]);
+});
+
+test('with fewer than three timed items, load timing is absolute', () => {
+  const r = call<{ diffs: MotionDiff[]; offsetMs: number }>('motionDiffs', [moved('01', 'A', { startMs: 1000 })], [moved('01', 'A', { startMs: 300 })]);
+  assert.equal(r.diffs.length, 1);
+  assert.equal(r.offsetMs, 0);
+});
+
+test('the report states the overall lag of the page when it is beyond the tolerance', () => {
+  const md = call<string>('renderReport', 'p', { widths: { '1440': { layout: [], motion: [], interaction: [], offsetMs: -480 } }, cannotMatch: [] }, {});
+  assert.match(md, /On-load animations start 480 ms earlier overall than on the original/);
+  const near = call<string>('renderReport', 'p', { widths: { '1440': { layout: [], motion: [], interaction: [], offsetMs: 120 } }, cannotMatch: [] }, {});
+  assert.doesNotMatch(near, /overall than on the original/);
+});
+
 test('the report points each item into the export', () => {
   const sources = {
     '02': {

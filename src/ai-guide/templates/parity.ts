@@ -414,6 +414,7 @@ try {
     result.widths[width] = {
       layout: layoutDiffs(theirs.boxes, mine.boxes),
       motion: motion.diffs,
+      offsetMs: motion.offsetMs,
       interaction: interactionDiffs(theirs.probes, mine.probes),
     };
   }
