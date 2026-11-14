@@ -105,6 +105,18 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
       sec(rb, '01', 'framer-z2', '<div id="a" style="width:100%;transform:translateZ(0)">Some text</div>') +
         (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{document.getElementById('a').setAttribute('style','width: 100%; transform: translateZ(0px); visibility: visible;')},300))</script>")
     ),
+  // On the original a page wrapper has the same place and size as the unnamed section 01 and also
+  // holds the header: section 01 is the inner one, so the header link stays in the header.
+  wrap: (rb) =>
+    doc(
+      (rb ? '' : '<div style="position:relative;width:100%;height:900px">') +
+        (rb ? '<header data-section="S3"' : '<header class="framer-h3"') +
+        ' style="position:absolute;top:0;left:0;z-index:2"><a href="#" class="h" style="display:inline-block;padding:6px">Go</a></header>' +
+        (rb ? '<div data-section="01"' : '<div') +
+        ' style="' + (rb ? 'position:relative;' : 'position:absolute;top:0;left:0;') + 'width:100%;height:900px;background:#eee"></div>' +
+        (rb ? '' : '</div>'),
+      '<style>section{height:auto}a.h:hover{background:#000}</style>'
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -172,6 +184,11 @@ before(async () => {
       '/blink': { slug: 'blink', url: server.url + '/blink-orig', sections: [s('01', 'framer-p1')] },
       '/flicker': { slug: 'flicker', url: server.url + '/flicker-orig', sections: [s('01', 'framer-q1')] },
       '/tz': { slug: 'tz', url: server.url + '/tz-orig', sections: [s('01', 'framer-z2')] },
+      '/wrap': {
+        slug: 'wrap',
+        url: server.url + '/wrap-orig',
+        sections: [s('S3', 'framer-h3'), { id: '01', name: 'Section', boxes: { 1440: { x: 0, y: 0, w: 1440, h: 900 }, 1024: { x: 0, y: 0, w: 1024, h: 900 }, 390: { x: 0, y: 0, w: 390, h: 900 } }, live: {}, motion: 0 }],
+      },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -246,6 +263,7 @@ for (const [name, why] of [
   ['blink', 'a loop inside a link is not a hover change'],
   ['flicker', 'a style removed and put back at once is not motion'],
   ['tz', 'the same transform written another way is not motion'],
+  ['wrap', 'a section found by place and size is not a wrapper around another section'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {
