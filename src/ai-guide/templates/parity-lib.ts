@@ -146,7 +146,8 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
 
 /** Hover and press changes the original makes that the rebuild does not make (or makes differently). */
 export function interactionDiffs(original, rebuild) {
-  const set = (list) => Array.from(new Set(list)).sort().join(',');
+  // rotate, scale and translate are transforms written another way.
+  const set = (list) => Array.from(new Set(list.map((p) => (/^(rotate|scale|translate)$/.test(p) ? 'transform' : p)))).sort().join(',');
   const out = [];
   for (const a of original) {
     if (!a.changed.length) continue;

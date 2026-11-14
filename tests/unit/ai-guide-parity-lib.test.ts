@@ -86,6 +86,11 @@ test('of several rebuild targets with the same label, the one that matches the h
   assert.deepEqual(call('interactionDiffs', [probe('HOME', ['background-color'])], [probe('Home', []), probe('HOME', ['background-color'])]), []);
 });
 
+test('rotate, scale and translate count as transform in a hover', () => {
+  const probe = (changed: string[]) => ({ section: '02', target: 'CONTACT', action: 'hover', changed });
+  assert.deepEqual(call('interactionDiffs', [probe(['transform', 'color'])], [probe(['rotate', 'color'])]), []);
+});
+
 test('the report points each item into the export', () => {
   const sources = {
     '02': {
