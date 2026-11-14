@@ -55,6 +55,15 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
         ' style="position:fixed;left:-8px;top:-8px;width:16px;height:16px;background:#000"></div>',
       '<style>.pulse{display:inline-block;animation:p 1s infinite}@keyframes p{50%{opacity:.4}}</style>'
     ),
+  // Like cls, but the fixed badge fades in late: the other badge on its spot is there first.
+  late: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-e1', '') +
+        (rb ? '' : '<div style="position:absolute;right:16px;top:844px;width:150px;height:40px"><a href="#" data-framer-name="Light">Made with</a></div>') +
+        (rb ? '<div data-section="S5"' : '<div') +
+        ' id="b" style="position:fixed;right:16px;bottom:16px;width:150px;height:40px;opacity:0">BUY</div>' +
+        "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('b').animate([{opacity:0},{opacity:1}],{duration:300,fill:'forwards'}),600))</script>"
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -110,6 +119,11 @@ before(async () => {
           { id: 'S5', name: 'Section', boxes: { 1440: { x: 1274, y: 844, w: 150, h: 40 }, 1024: { x: 858, y: 844, w: 150, h: 40 }, 390: { x: 224, y: 844, w: 150, h: 40 } }, live: {}, motion: 1 },
           { id: 'S6', name: 'Default', className: 'framer-sh', boxes: { 1440: { x: -8, y: -8, w: 16, h: 16 }, 1024: { x: -8, y: -8, w: 16, h: 16 }, 390: { x: -8, y: -8, w: 16, h: 16 } }, live: {}, motion: 0 },
         ],
+      },
+      '/late': {
+        slug: 'late',
+        url: server.url + '/late-orig',
+        sections: [s('01', 'framer-e1'), { id: 'S5', name: 'Section', boxes: { 1440: { x: 1274, y: 844, w: 150, h: 40 }, 1024: { x: 858, y: 844, w: 150, h: 40 }, 390: { x: 224, y: 844, w: 150, h: 40 } }, live: {}, motion: 1 }],
       },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
@@ -178,6 +192,7 @@ for (const [name, why] of [
   ['ld', 'a loader that fades is not a difference, kept or removed'],
   ['words', 'letters animated per word match the whole heading animated'],
   ['cls', 'a section without a class or name, or with a shared class, is found by its captured place and size'],
+  ['late', 'a fixed badge that appears late is found even when another element sits on its spot first'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {

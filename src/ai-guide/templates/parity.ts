@@ -191,14 +191,15 @@ function sectionTools(sections, side) {
     if (!root && b && !s.className) {
       // No class and no name on the page (a part added by a script): its captured place and size.
       const kept = placed.get(s.id);
-      if (kept && kept.isConnected && shown(kept)) root = kept;
-      else {
-        const here = Array.from(document.querySelectorAll('body *')).filter((el) => sizeGap(el, b) <= 4 && posGap(el, b) <= 8 && shown(el));
-        // The outermost of the elements stacked there, a fixed one first (overlays, badges).
-        const outer = here.filter((el) => !here.some((o) => o !== el && o.contains(el)));
-        root = outer.find((el) => getComputedStyle(el).position === 'fixed') || outer[0] || null;
-        if (root) placed.set(s.id, root);
-      }
+      const keptOk = kept && kept.isConnected && shown(kept);
+      const here = Array.from(document.querySelectorAll('body *')).filter((el) => sizeGap(el, b) <= 4 && posGap(el, b) <= 8 && shown(el));
+      // The outermost of the elements stacked there, a fixed one first (overlays, badges). A fixed
+      // one that appears later (a badge fading in) replaces another element found there first.
+      const outer = here.filter((el) => !here.some((o) => o !== el && o.contains(el)));
+      const fixed = outer.find((el) => getComputedStyle(el).position === 'fixed');
+      const keptFixed = keptOk && getComputedStyle(kept).position === 'fixed';
+      root = (keptFixed ? kept : fixed) || (keptOk ? kept : outer[0]) || null;
+      if (root) placed.set(s.id, root);
     }
     cache.roots.set(s.id, root);
     return root;
