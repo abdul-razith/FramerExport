@@ -77,6 +77,17 @@ function animationsStep(n: number, motionMds: string[], routes: string[]): strin
   );
 }
 
+/** The page's last check: the original and the rebuild compared for spacing, motion and hover. */
+function parityStep(n: number, pages: { route: string; slug: string }[]): string {
+  return step(
+    n,
+    'Parity',
+    `with \`npm run dev\` running, ${pages.map((p) => `\`npm run parity -- ${p.route}\``).join(' and ')}: fix every item in ${pages
+      .map((p) => `\`ai-guide/parity/${p.slug}.md\``)
+      .join(' and ')} from its pointer into the export (spacing, motion, hover), then run it again. Done when the report is empty (items under "Cannot match" stay).`
+  );
+}
+
 /** The per-section loop: read the export references, build, compare, fix (at most 3 rounds). */
 function sectionStep(n: number, s: GuideSection, dir: string, component: string, content: string, route: string): string {
   const naming = s.generic ? ' (the layer name is generic: choose a meaningful component name)' : '';
@@ -96,7 +107,7 @@ function setupTask(site: GuideSite): string[] {
     '',
     step(1, 'Create the project', `in the export folder run \`${CREATE_APP}\`. It creates \`nextjs-app/\` with TypeScript, Tailwind, ESLint, the App Router, a \`src/\` folder, the \`@/*\` alias and a \`.gitignore\`.`),
     step(2, 'Install', `in \`nextjs-app/\`: \`${INSTALL}\` and \`${INSTALL_DEV}\` (latest versions; the last three are for \`npm run compare\`).`),
-    step(3, 'Configure', 'MDX in `next.config.ts` with `@next/mdx` (`pageExtensions` includes `md` and `mdx`) and `src/mdx-components.tsx`; add the script `"compare": "node ../ai-guide/scripts/compare.mjs"` to `package.json`.'),
+    step(3, 'Configure', 'MDX in `next.config.ts` with `@next/mdx` (`pageExtensions` includes `md` and `mdx`) and `src/mdx-components.tsx`; add the scripts `"compare": "node ../ai-guide/scripts/compare.mjs"` and `"parity": "node ../ai-guide/scripts/parity.mjs"` to `package.json`.'),
     step(4, 'Tokens', 'every colour, font, radius and shadow from `ai-guide/tokens.md` into `@theme` in `src/app/globals.css`; custom variants `tablet` = `@media (min-width: 810px) and (max-width: 1199px)` and `mobile` = `@media (max-width: 809px)` (the same ranges as Framer, so a tablet class never leaks into mobile).'),
     step(5, 'Text styles', 'turn each Framer text preset in `ai-guide/text-styles.css` into one Tailwind `@utility` in `src/app/globals.css`, named after its role (`text-heading-1`, `text-body`…), keeping its exact values per width; note in a comment which preset class each one replaces.'),
     step(6, 'Fonts', 'copy the font files listed in `ai-guide/files.md` to `public/fonts/` and declare them with `@font-face` in `src/app/fonts.css`, imported by `src/app/layout.tsx`.'),
@@ -151,6 +162,7 @@ function pageTask(page: GuidePage): string[] {
   lines.push(animationsStep(n++, [`${base}/motion.md`], [page.route]));
   lines.push(step(n++, 'Interactive states', 'every state in the `## Interactive` part of the section ref.md files (hover, open/closed), matching its before/after screenshots.'));
   lines.push(step(n++, 'Page', `\`${appFile}\` renders the sections in order with metadata.`));
+  lines.push(parityStep(n++, [page]));
   lines.push(verifyStep(n++, [page.route]));
   lines.push(commitStep(n, `feat: ${pageName(page.route).toLowerCase()} page`));
   return lines;
@@ -170,8 +182,9 @@ function collectionTask(c: GuideCollection, site: GuideSite): string[] {
     step(3, 'List page', `\`src/app/${dir}/page.tsx\` and its sections, each built like a page section: ref.md + markup + styles.css → ${compareCmd(c.indexRoute, '<id>')} until ${GATE}.`),
     step(4, 'Detail template', `\`src/app/${dir}/[slug]/page.tsx\` with \`generateStaticParams\`, built from the detail page's section folders the same way (${compareCmd(first, '<id>')}); renders any item.`),
     animationsStep(5, [list, item].filter((p): p is GuidePage => !!p).map((p) => `ai-guide/pages/${p.slug}/motion.md`), [c.indexRoute, first]),
-    verifyStep(6, [c.indexRoute, first]),
-    commitStep(7, `feat: ${c.name} collection`),
+    parityStep(6, [list, site.pages.find((p) => p.route === first)].filter((p): p is GuidePage => !!p)),
+    verifyStep(7, [c.indexRoute, first]),
+    commitStep(8, `feat: ${c.name} collection`),
   ];
 }
 

@@ -57,6 +57,9 @@ clean, editable Next.js project that looks and moves like the original. You buil
    generated elements, then run \`npm run compare -- <route> --section <id>\` (with \`npm run dev\`
    running). A section is done at **90% or more at 1440, 1024 and 390**. Fix and compare again, at
    most 3 fix rounds; if it is still below, write down its scores and the reason and move on.
+   Then \`npm run parity -- <route>\` compares the whole page with the original site (section
+   spacing, everything that moves, hover changes) and writes \`ai-guide/parity/<page>.md\`, each item
+   pointing into the export; a page is done when that report is empty.
 9. **Done means.** In \`nextjs-app/\`: \`npm run build\` and \`npm run lint\` pass; every section of the
    task reached the 90% gate or is listed with its scores and reason; only the files the task names
    were changed.

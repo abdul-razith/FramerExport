@@ -6,6 +6,7 @@ import test from 'node:test';
 import { PNG } from 'pngjs';
 import { cropPng, sliceSection } from '../../src/ai-guide/crops.js';
 import { COMPARE_MJS } from '../../src/ai-guide/templates/compare.js';
+import { PARITY_MJS } from '../../src/ai-guide/templates/parity.js';
 
 const tmpDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'ai-guide-crops-'));
 
@@ -75,4 +76,13 @@ test('sliceSection cuts a tall box into 900px slices', async () => {
   assert.deepEqual(files.map((f) => path.basename(f)), ['shot-1440-1.png', 'shot-1440-2.png', 'shot-1440-3.png']);
   assert.equal(PNG.sync.read(await fs.readFile(files[2])).height, 200);
   assert.equal(PNG.sync.read(await fs.readFile(files[0])).height, 900);
+});
+
+test('the parity script imports only its lib and is valid JavaScript', async () => {
+  const imports = [...PARITY_MJS.matchAll(/from ['"](\.\.?\/[^'"]+)['"]/g)].map((m) => m[1]);
+  assert.deepEqual(imports, ['./parity-lib.mjs']);
+  const { execFileSync } = await import('node:child_process');
+  const file = path.join(await tmpDir(), 'parity.mjs');
+  await fs.writeFile(file, PARITY_MJS);
+  execFileSync(process.execPath, ['--check', file]);
 });

@@ -30,6 +30,7 @@ one page per task. You run each task and check it.
 | \`ai-guide/plan.md\` | The tasks, as a superpowers plan with checkboxes. |
 | \`ai-guide/checklist.md\` | What to check after each task. |
 | \`ai-guide/scripts/compare.mjs\` | Scores each section of your page against the original (90% gate) and saves side-by-side images. |
+| \`ai-guide/scripts/parity.mjs\`, \`ai-guide/parity/\` | Compares the whole page with the original site (section spacing, everything that moves, hover changes) and writes \`parity/<page>.md\`, each item pointing into the export. |
 | \`nextjs-app/\` | The Next.js project — created by the agent in task 0. |
 
 ## The tasks

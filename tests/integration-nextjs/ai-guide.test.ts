@@ -91,6 +91,7 @@ test('ai-guide v2 writes section references next to an unchanged export', { time
   assert.ok(plan.includes('npm run compare -- / --section 01'));
   assert.ok(existsSync(path.join(dir, 'ai-guide/text-styles.css')));
   assert.ok(existsSync(path.join(dir, 'ai-guide/scripts/compare.mjs')));
+  for (const f of ['ai-guide/scripts/parity.mjs', 'ai-guide/scripts/parity-lib.mjs', 'ai-guide/parity/sources.json']) assert.ok(existsSync(path.join(dir, f)), f);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'ai-guide/README.md', 'ai-guide/site.md', 'ai-guide/tokens.md', 'ai-guide/pages/index/motion.md', 'ai-guide/pages/index/desktop.png']) {
     assert.ok(existsSync(path.join(dir, f)), f);
   }

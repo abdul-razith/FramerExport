@@ -15,6 +15,7 @@ Run \`npm run dev\` in \`nextjs-app/\` and open the task's page next to the orig
 - [ ] The mobile menu opens and closes.
 - [ ] The animation matches the original: loader, elements appearing, scroll effects, hover.
 - [ ] \`npm run compare -- <route>\` shows no \`motion ✗\` (a section with animations in its ref.md where nothing moved).
+- [ ] \`npm run parity -- <route>\` leaves \`ai-guide/parity/<page>.md\` empty (no spacing, motion or hover difference with the original).
 - [ ] With "reduce motion" switched on in your OS, the page is still readable and nothing moves.
 
 ## Code

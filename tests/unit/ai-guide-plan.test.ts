@@ -182,3 +182,26 @@ test('AGENTS.md and the checklist say an animated section is not done without mo
   assert.ok(AGENTS_MD.includes('motion ✓'));
   assert.ok(CHECKLIST_MD.includes('motion ✗'));
 });
+
+test('setup adds the parity script', () => {
+  assert.ok(renderPlan(fixtureSite()).includes('"parity": "node ../ai-guide/scripts/parity.mjs"'));
+});
+
+test('each page task ends with a parity step before Verify', () => {
+  const md = renderPlan(fixtureSite());
+  const home = md.slice(md.indexOf('### Task 2:'), md.indexOf('### Task 3:'));
+  const steps = home.split('\n').filter((l) => /^- \[ \] \*\*Step \d+:/.test(l));
+  const num = (l: string) => Number(l.match(/Step (\d+):/)![1]);
+  const parity = steps.find((l) => l.includes('**Step') && l.includes(': Parity**'))!;
+  const verify = steps.find((l) => l.includes(': Verify**'))!;
+  assert.ok(parity.includes('`npm run parity -- /`') && parity.includes('ai-guide/parity/index.md') && parity.includes('empty'), parity);
+  assert.equal(num(parity), num(verify) - 1);
+  const blog = md.slice(md.indexOf('Blog collection'));
+  const cparity = blog.split('\n').find((l) => l.includes(': Parity**'))!;
+  assert.ok(cparity.includes('`npm run parity -- /blog`') && cparity.includes('`npm run parity -- /blog/post-a`'), cparity);
+});
+
+test('AGENTS.md and the checklist require an empty parity report', () => {
+  assert.ok(AGENTS_MD.includes('npm run parity'));
+  assert.ok(CHECKLIST_MD.includes('npm run parity'));
+});
