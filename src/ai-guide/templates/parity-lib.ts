@@ -124,7 +124,10 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
     if (a.live) continue;
     // Elements without text (images, shapes) match in order; the layer name only breaks ties.
     const free = (b, k) => !used.has(k) && b.section === a.section && sameText(a, b);
-    let i = r.findIndex((b, k) => free(b, k) && (a.text || b.name === a.name));
+    // The same text first, then a text that only contains it (a heading word inside a line).
+    const exact = (b, k) => free(b, k) && normText(a.text) === normText(b.text);
+    let i = a.text ? r.findIndex(exact) : -1;
+    if (i < 0) i = r.findIndex((b, k) => free(b, k) && (a.text || b.name === a.name));
     if (i < 0) i = r.findIndex(free);
     if (i < 0) {
       diffs.push({ section: a.section, kind: 'missing', label: label(a), originalMs: a.startMs, scroll: !!a.scroll });

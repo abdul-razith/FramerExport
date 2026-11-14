@@ -91,6 +91,12 @@ test('rotate, scale and translate count as transform in a hover', () => {
   assert.deepEqual(call('interactionDiffs', [probe(['transform', 'color'])], [probe(['rotate', 'color'])]), []);
 });
 
+test('an item matches the same text before a text that only contains it', () => {
+  const o = [moved('01', 'About', { startMs: 100 }), moved('01', 'Chicago who gets excited about', { startMs: 1000 })];
+  const r = [moved('01', 'Chicago who gets excited about', { startMs: 1000 }), moved('01', 'About', { startMs: 100 })];
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs, []);
+});
+
 test('the report points each item into the export', () => {
   const sources = {
     '02': {
