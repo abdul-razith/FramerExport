@@ -14,8 +14,8 @@ export function normText(s) {
   return String(s || '')
     .replace(/[​-‏⁠﻿]/g, '')
     .replace(/ /g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+    // Whitespace depends on where elements start and end (a card's name and text joined or not).
+    .replace(/\s+/g, '')
     .toLowerCase()
     .slice(0, 60);
 }

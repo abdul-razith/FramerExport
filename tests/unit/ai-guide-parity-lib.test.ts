@@ -131,6 +131,12 @@ test('all same-text pairs are made before any text is matched by containment', (
   assert.deepEqual(d.map((x) => [x.kind, x.label]), [['missing', 'I am Bejaman a designer in Chicago']]);
 });
 
+test('texts that differ only in whitespace are the same text', () => {
+  const o = [moved('11', 'Question UserWhat does the process look like?', { scroll: true })];
+  const r = [moved('11', 'QuestionUserWhat does the process look like?', { scroll: true })];
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs, []);
+});
+
 test('the report points each item into the export', () => {
   const sources = {
     '02': {
