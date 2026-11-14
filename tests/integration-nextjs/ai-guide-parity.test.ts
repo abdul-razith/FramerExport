@@ -99,6 +99,12 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
       sec(rb, '01', 'framer-q1', '<div id="a" style="width:80px;height:80px;background:#36c;transform:rotate(-10deg)"></div>') +
         (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{const a=document.getElementById('a');a.style.transform='';setTimeout(()=>{a.style.transform='rotate(-10deg)'},5)},300))</script>")
     ),
+  // The original rewrites translateZ(0) as translateZ(0px): the same transform, no motion.
+  tz: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-z2', '<div id="a" style="width:100%;transform:translateZ(0)">Some text</div>') +
+        (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{document.getElementById('a').setAttribute('style','width: 100%; transform: translateZ(0px); visibility: visible;')},300))</script>")
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -165,6 +171,7 @@ before(async () => {
       '/zero': { slug: 'zero', url: server.url + '/zero-orig', sections: [s('01', 'framer-z1')] },
       '/blink': { slug: 'blink', url: server.url + '/blink-orig', sections: [s('01', 'framer-p1')] },
       '/flicker': { slug: 'flicker', url: server.url + '/flicker-orig', sections: [s('01', 'framer-q1')] },
+      '/tz': { slug: 'tz', url: server.url + '/tz-orig', sections: [s('01', 'framer-z2')] },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -238,6 +245,7 @@ for (const [name, why] of [
   ['zero', 'an element scaled to nothing when the report reads it is still listed'],
   ['blink', 'a loop inside a link is not a hover change'],
   ['flicker', 'a style removed and put back at once is not motion'],
+  ['tz', 'the same transform written another way is not motion'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {

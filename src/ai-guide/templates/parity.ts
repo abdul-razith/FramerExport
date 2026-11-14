@@ -127,8 +127,9 @@ function watch() {
   };
   const still = /^(none|translate(3d)?\(0(px)?(, ?0(px)?)*\)|matrix\(1, 0, 0, 1, 0, 0\)|translateX\(0(px)?\) translateY\(0(px)?\)|scale\(1\)|rotate\(0deg\))?$/;
   const shape = (s, p) => {
-    const v = part(s, p);
-    return still.test(v) ? 'none' : v.replace(/\s+/g, ' ');
+    // 0 and 0px are the same; translateZ(0) only makes a layer, it does not move anything.
+    const v = part(s, p).replace(/(^|[^\d.])0px/g, '$10').replace(/translateZ\(0\)/g, '').replace(/\s+/g, ' ').trim();
+    return still.test(v) ? 'none' : v;
   };
   const sig = (s) => opacity(s) + '|' + ['transform', 'translate', 'scale', 'rotate'].map((p) => shape(s, p)).join('|');
   // The last style change of each element: a change put back within 100ms (hydration rewriting a
