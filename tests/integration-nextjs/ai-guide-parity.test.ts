@@ -117,6 +117,15 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
         (rb ? '' : '</div>'),
       '<style>section{height:auto}a.h:hover{background:#000}</style>'
     ),
+  // The original writes its start state in two quick steps at 300ms and animates at 1000ms; the
+  // rebuild starts in that state and animates at 1000ms.
+  twostep: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-w2', '<div id="a"' + (rb ? ' style="opacity:0.001;transform:translateY(40px)"' : '') + '>Hi there</div>') +
+        "<script>const a=document.getElementById('a');document.addEventListener('DOMContentLoaded',()=>{" +
+        (rb ? '' : "setTimeout(()=>{a.style.opacity='0.001';setTimeout(()=>{a.style.transform='translateY(40px)'},30)},300);") +
+        "setTimeout(()=>{const t0=performance.now();(function f(t){const p=Math.min(1,(t-t0)/400);a.style.opacity=String(0.001+p*0.999);a.style.transform='translateY('+(40-40*p)+'px)';if(p<1)requestAnimationFrame(f)})(t0)},1000)})</script>"
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -189,6 +198,7 @@ before(async () => {
         url: server.url + '/wrap-orig',
         sections: [s('S3', 'framer-h3'), { id: '01', name: 'Section', boxes: { 1440: { x: 0, y: 0, w: 1440, h: 900 }, 1024: { x: 0, y: 0, w: 1024, h: 900 }, 390: { x: 0, y: 0, w: 390, h: 900 } }, live: {}, motion: 0 }],
       },
+      '/twostep': { slug: 'twostep', url: server.url + '/twostep-orig', sections: [s('01', 'framer-w2')] },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -264,6 +274,7 @@ for (const [name, why] of [
   ['flicker', 'a style removed and put back at once is not motion'],
   ['tz', 'the same transform written another way is not motion'],
   ['wrap', 'a section found by place and size is not a wrapper around another section'],
+  ['twostep', 'a start state written in two quick steps is not the start of the motion'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {

@@ -79,7 +79,7 @@ function watch() {
       // Described now, while it is in the page: it may be removed before the end (an unmounted loader).
       if (window.__parityDescribe) e.first = window.__parityDescribe(el);
     }
-    // A style change followed within 100ms by another is motion; a lone change only sets a state.
+    // Style changes start motion only when they come frame after frame (see below); a lone change or two only set a state.
     // CSS and Web Animations start when their event fires.
     // An animation's own start time (CSS or Web Animation) replaces the moment an event or a call
     // reported it: events arrive whenever the browser gets to them, which varies with load.
@@ -92,7 +92,16 @@ function watch() {
       if (kind !== 'opacity' && kind !== 'transform') {
         e.start = now;
         e.startFrom = typeof at === 'number' ? 'clock' : 'event';
-      } else if (e.prev !== undefined && now - e.prev <= 100) e.start = e.prev;
+      } else {
+        // Motion changes the style frame after frame: three changes in a row, each within 100ms of
+        // the last. One or two quick writes only set a start state.
+        if (e.prev !== undefined && now - e.prev <= 100) e.run = (e.run || 1) + 1;
+        else {
+          e.run = 1;
+          e.runStart = now;
+        }
+        if (e.run >= 3) e.start = e.runStart;
+      }
       if (e.start !== undefined) e.scroll = !!window.__parityScrolling;
     }
     e.prev = now;
