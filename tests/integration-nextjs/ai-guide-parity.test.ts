@@ -113,8 +113,12 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
         (rb ? '<header data-section="S3"' : '<header class="framer-h3"') +
         ' style="position:absolute;top:0;left:0;z-index:2"><a href="#" class="h" style="display:inline-block;padding:6px">Go</a></header>' +
         (rb ? '<div data-section="01"' : '<div') +
-        ' style="' + (rb ? 'position:relative;' : 'position:absolute;top:0;left:0;') + 'width:100%;height:900px;background:#eee"></div>' +
-        (rb ? '' : '</div>'),
+        ' style="' + (rb ? 'position:relative;' : 'position:absolute;top:0;left:0;') + 'width:100%;height:900px;background:#eee">' +
+        (rb ? '<div class="card" style="position:absolute;top:400px;left:100px;width:120px;height:80px;background:#36c">Card</div>' : '') +
+        '</div>' +
+        // On the original the moving card sits in the wrapper, beside the inner box.
+        (rb ? '' : '<div class="card" style="position:absolute;top:400px;left:100px;width:120px;height:80px;background:#36c">Card</div></div>') +
+        "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.querySelector('.card').animate([{opacity:0},{opacity:1}],{duration:400}),300))</script>",
       '<style>section{height:auto}a.h:hover{background:#000}</style>'
     ),
   // The original writes its start state in two quick steps at 300ms and animates at 1000ms; the
@@ -283,7 +287,7 @@ for (const [name, why] of [
   ['blink', 'a loop inside a link is not a hover change'],
   ['flicker', 'a style removed and put back at once is not motion'],
   ['tz', 'the same transform written another way is not motion'],
-  ['wrap', 'a section found by place and size is not a wrapper around another section'],
+  ['wrap', 'a section found by place and size may wrap another section: its links stay in that section, its motion counts'],
   ['twostep', 'a start state written in two quick steps is not the start of the motion'],
   ['onetick', 'style writes in one tick count as one change'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],

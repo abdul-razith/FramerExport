@@ -227,9 +227,7 @@ function sectionTools(sections, side) {
       // No class and no name on the page (a part added by a script): its captured place and size.
       const kept = placed.get(s.id);
       const keptOk = kept && kept.isConnected && shown(kept);
-      // Never a wrapper around another section's root (a page wrapper with the same place and size).
-      const others = sections.filter((o) => o.id !== s.id && o.className).flatMap((o) => Array.from(document.getElementsByClassName(o.className)));
-      const here = Array.from(document.querySelectorAll('body *')).filter((el) => sizeGap(el, b) <= 4 && posGap(el, b) <= 8 && shown(el) && !others.some((o) => o !== el && el.contains(o)));
+      const here = Array.from(document.querySelectorAll('body *')).filter((el) => sizeGap(el, b) <= 4 && posGap(el, b) <= 8 && shown(el));
       // The outermost of the elements stacked there, a fixed one first (overlays, badges). A fixed
       // one that appears later (a badge fading in) replaces another element found there first.
       const outer = here.filter((el) => !here.some((o) => o !== el && o.contains(el)));
@@ -316,6 +314,8 @@ function markProbes(sections, max, wanted) {
       if (r.width < 2 || r.height < 2) continue;
       const target = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('data-framer-name') || el.tagName).replace(/\s+/g, ' ').trim().slice(0, 40);
       if (want ? !want.includes(norm(target)) : k >= max) continue;
+      // A link inside another section nested in this one (a header in a page section) is that section's.
+      if (window.__paritySectionOf(el) !== s.id) continue;
       el.setAttribute('data-parity-probe', String(n));
       out.push({ n: n++, section: s.id, target });
       k++;
