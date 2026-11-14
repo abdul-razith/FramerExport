@@ -64,6 +64,14 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
         ' id="b" style="position:fixed;right:16px;bottom:16px;width:150px;height:40px;opacity:0">BUY</div>' +
         "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('b').animate([{opacity:0},{opacity:1}],{duration:300,fill:'forwards'}),600))</script>"
     ),
+  // The rebuild puts data-section on the link itself; the original wraps the link in a div.
+  self: (rb) =>
+    doc(
+      (rb ? '<a href="#" data-section="01" class="h"' : '<div class="framer-f1"><a href="#" class="h"') +
+        ' style="display:inline-block;padding:6px">Buy now</a>' +
+        (rb ? '' : '</div>'),
+      '<style>a.h:hover{background:#000}</style>'
+    ),
   // The original sets the start state soon after load and animates a second later; the rebuild
   // starts in that state (server-rendered) and animates at the same moment.
   setup: (rb) =>
@@ -125,6 +133,7 @@ before(async () => {
         url: server.url + '/late-orig',
         sections: [s('01', 'framer-e1'), { id: 'S5', name: 'Section', boxes: { 1440: { x: 1274, y: 844, w: 150, h: 40 }, 1024: { x: 858, y: 844, w: 150, h: 40 }, 390: { x: 224, y: 844, w: 150, h: 40 } }, live: {}, motion: 1 }],
       },
+      '/self': { slug: 'self', url: server.url + '/self-orig', sections: [s('01', 'framer-f1')] },
       '/setup': { slug: 'setup', url: server.url + '/setup-orig', sections: [s('01', 'framer-u1')] },
       '/kfx': { slug: 'kfx', url: server.url + '/kfx-orig', sections: [s('01', 'framer-k1')] },
     })
@@ -193,6 +202,7 @@ for (const [name, why] of [
   ['words', 'letters animated per word match the whole heading animated'],
   ['cls', 'a section without a class or name, or with a shared class, is found by its captured place and size'],
   ['late', 'a fixed badge that appears late is found even when another element sits on its spot first'],
+  ['self', 'a section whose root is the link itself is hovered too'],
   ['setup', 'an animation is timed from when it moves, not from when its start state was set'],
   ['kfx', 'a Web Animation built without element.animate() still counts as motion'],
 ]) {

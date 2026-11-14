@@ -271,7 +271,9 @@ function markProbes(sections, max, wanted) {
     if (!root) continue;
     const want = wanted ? wanted.filter((w) => w.section === s.id).map((w) => norm(w.target)) : null;
     let k = 0;
-    for (const el of root.querySelectorAll('a, button, [role="button"]')) {
+    // The root itself can be the link (a badge whose section marker is on the <a>).
+    const links = [root, ...root.querySelectorAll('a, button, [role="button"]')].filter((el) => el.matches('a, button, [role="button"]'));
+    for (const el of links) {
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) continue;
       const target = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('data-framer-name') || el.tagName).replace(/\s+/g, ' ').trim().slice(0, 40);
