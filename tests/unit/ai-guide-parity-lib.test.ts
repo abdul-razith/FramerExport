@@ -123,6 +123,14 @@ test('the report states the overall lag of the page when it is beyond the tolera
   assert.doesNotMatch(near, /overall than on the original/);
 });
 
+test('all same-text pairs are made before any text is matched by containment', () => {
+  // The original also moves the whole paragraph; it must not take the line or the tag that have their own pair.
+  const o = [moved('01', 'I am Bejaman a designer in Chicago', { startMs: 800 }), moved('01', 'I am Bejaman a designer in', { startMs: 800 }), moved('01', 'Bejaman', { startMs: 850 })];
+  const r = [moved('01', 'I am Bejaman a designer in', { startMs: 800 }), moved('01', 'Bejaman', { startMs: 850 })];
+  const d = call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs;
+  assert.deepEqual(d.map((x) => [x.kind, x.label]), [['missing', 'I am Bejaman a designer in Chicago']]);
+});
+
 test('the report points each item into the export', () => {
   const sources = {
     '02': {
