@@ -95,7 +95,10 @@ function watch() {
       } else {
         // Motion changes the style frame after frame: three changes in a row, each within 100ms of
         // the last. One or two quick writes only set a start state.
-        if (e.prev !== undefined && now - e.prev <= 100) e.run = (e.run || 1) + 1;
+        // Writes in the same tick (a library setting several properties) are one change.
+        if (e.prev !== undefined && now - e.prev < 4) {
+          // same change
+        } else if (e.prev !== undefined && now - e.prev <= 100) e.run = (e.run || 1) + 1;
         else {
           e.run = 1;
           e.runStart = now;
