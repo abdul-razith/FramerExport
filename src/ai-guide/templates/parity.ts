@@ -69,6 +69,17 @@ fs.mkdirSync(shotDir, { recursive: true });
 // Runs in the page before its scripts: remembers every element that visibly moves and when.
 function watch() {
   const seen = (window.__parityMoved = new Map());
+  // Not seen: not displayed, or inside something hidden or fully transparent (its own opacity is
+  // what it animates, so it does not count).
+  const hidden = (el) => {
+    for (let a = el; a && a.nodeType === 1; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+      if (a !== el && parseFloat(cs.opacity) < 0.01) return true;
+    }
+    return false;
+  };
+  window.__parityHidden = hidden;
   const add = (el, kind, at) => {
     if (!el || el.nodeType !== 1) return;
     // A polled Web Animation knows when it started (same clock as performance.now()).
@@ -88,6 +99,9 @@ function watch() {
       e.startFrom = 'clock';
     }
     if (kind === 'waapi-start') kind = 'waapi';
+    // Separate changes (writes in one tick are one); a state set once or twice is not motion.
+    if (e.prev === undefined || now - e.prev >= 4) e.count = (e.count || 0) + 1;
+    if (kind === 'opacity' || kind === 'transform') e.lastStyle = now;
     if (e.start === undefined) {
       if (kind !== 'opacity' && kind !== 'transform') {
         e.start = now;
@@ -107,6 +121,8 @@ function watch() {
       }
       if (e.start !== undefined) e.scroll = !!window.__parityScrolling;
     }
+    // Whether it could be seen when it began to move (steps that never run frame by frame: by the third).
+    if (e.hiddenAtStart === undefined && (e.start !== undefined || e.count >= 3)) e.hiddenAtStart = hidden(el);
     e.prev = now;
     e.kinds.add(kind);
     seen.set(el, e);
@@ -127,7 +143,11 @@ function watch() {
   // Web Animations built without element.animate() (motion builds them directly) are found by asking
   // the document for its running animations.
   setInterval(() => {
-    for (const an of document.getAnimations()) if (an.effect && an.effect.target && an.startTime !== null) add(an.effect.target, 'waapi-start', begins(an));
+    for (const an of document.getAnimations()) {
+      if (!an.effect || !an.effect.target || an.startTime === null) continue;
+      add(an.effect.target, 'waapi-start', begins(an));
+      if (an.effect.getTiming().iterations === Infinity) seen.get(an.effect.target).loop = true;
+    }
   }, 100);
   const part = (s, p) => {
     const m = (s || '').match(new RegExp('(?:^|;)\\s*' + p + '\\s*:([^;]*)'));
@@ -239,7 +259,7 @@ function sectionTools(sections, side) {
     cache.roots.set(s.id, root);
     return root;
   };
-  const clean = (t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const clean = (t, n = 60) => (t || '').replace(/\s+/g, ' ').trim().slice(0, n);
   const own = (el) => clean(Array.from(el.childNodes).filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''));
   window.__parityDescribe = (el) => {
     const r = el.getBoundingClientRect();
@@ -250,6 +270,9 @@ function sectionTools(sections, side) {
       name: el.getAttribute('data-framer-name') || '',
       text: own(el) || clean(el.textContent),
       parentText: block ? clean(block.textContent) : undefined,
+      // Whole, to find a line inside a text animated as one on the other site.
+      full: clean(el.textContent, 300),
+      parentFull: block ? clean(block.textContent, 300) : undefined,
       // The size before transforms: a ring scaled to nothing at this moment is still a ring.
       w: Math.max(r.width, el.offsetWidth || 0),
       h: Math.max(r.height, el.offsetHeight || 0),
@@ -275,7 +298,14 @@ function readMoved(sections, width) {
   const nav = performance.getEntriesByType('navigation')[0];
   const ready = nav ? nav.domContentLoadedEventEnd : 0;
   const out = [];
+  const at = performance.now();
   for (const [el, info] of window.__parityMoved) {
+    // A start state set once or twice (and put in place again on a re-split) never moved.
+    if (info.start === undefined && (info.count || 0) < 3) continue;
+    // Moved only while it could not be seen (a caret blinking in a bubble already gone) and still unseen.
+    if (info.hiddenAtStart && (!el.isConnected || window.__parityHidden(el))) continue;
+    // Still changing at the end of the rest after the scroll: a loop (also kept for the hover probes).
+    if (info.lastStyle !== undefined && at - info.lastStyle < 800) info.loop = true;
     // Described now when it is still shown in a section, else as it was when it first moved
     // (removed since, or inside a part that has faded out, like a loader).
     const now = el.isConnected ? window.__parityDescribe(el) : null;
@@ -287,6 +317,9 @@ function readMoved(sections, width) {
       name: d.name,
       text: d.text,
       parentText: d.parentText,
+      full: d.full,
+      parentFull: d.parentFull,
+      loop: !!info.loop,
       startMs: Math.round((info.start !== undefined ? info.start : info.t) - ready),
       scroll: info.scroll,
       kinds: Array.from(info.kinds),
@@ -329,7 +362,9 @@ function snapshot(n) {
   if (!el) return {};
   const props = ['transform', 'translate', 'scale', 'rotate', 'background-color', 'color', 'box-shadow', 'opacity', 'border-color', 'text-decoration-line'];
   const out = {};
-  [el, ...Array.from(el.querySelectorAll('*')).slice(0, 30)].forEach((node, k) => {
+  [el, ...Array.from(el.querySelectorAll('*')).slice(0, 200)].forEach((node, k) => {
+    // A loop inside the link changes on its own, hovered or not.
+    if (node.hasAttribute('data-parity-restless')) return;
     const cs = getComputedStyle(node);
     for (const p of props) out[k + '|' + p] = cs.getPropertyValue(p);
     const r = node.getBoundingClientRect();
@@ -368,6 +403,14 @@ async function visit(browser, url, width, side, wanted) {
           window.scrollTo(0, Math.max(0, el.getBoundingClientRect().top + scrollY - 300));
         }, p.n);
         await wait(300);
+        await page.evaluate((n) => {
+          const el = document.querySelector('[data-parity-probe="' + n + '"]');
+          for (const node of [el, ...el.querySelectorAll('*')]) {
+            const e = window.__parityMoved.get(node);
+            const infinite = node.getAnimations().some((an) => an.effect && an.effect.getTiming().iterations === Infinity);
+            if ((e && e.loop) || infinite) node.setAttribute('data-parity-restless', '');
+          }
+        }, p.n);
         // What changes on its own (a loop inside the link) over the same wait is not the hover.
         const idle = await page.evaluate(snapshot, p.n);
         await wait(400);
