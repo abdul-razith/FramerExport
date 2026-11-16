@@ -105,7 +105,7 @@ test('load timing is compared after taking out the overall lag of the page', () 
   assert.deepEqual(same.diffs, []);
   assert.equal(same.offsetMs, -500);
   // One item out of step with the rest still is.
-  r[3] = moved('01', 'D', { startMs: 1600 });
+  r[3] = moved('01', 'D', { startMs: 1700 });
   const late = call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs;
   assert.deepEqual(late.map((d) => [d.kind, d.label]), [['timing', 'D']]);
 });
@@ -246,4 +246,33 @@ test('an animation that plays on load on the rebuild but on scroll on the origin
   assert.deepEqual(diffs.map((d) => [d.section, d.kind, d.label]), [['04', 'trigger', 'Meridian Health']]);
   const md = call<string>('renderReport', 'p', { widths: { 1440: { layout: [], motion: diffs, interaction: [] } }, cannotMatch: [] }, {});
   assert.ok(md.includes('plays on load on the rebuild, when scrolled to on the original'), md);
+});
+
+test('a loop is matched but not timed: its start is only a phase', () => {
+  const o = [moved('S5', 'BUY NUDGE', { startMs: 1650, loop: true })];
+  const r = [moved('S5', 'BUY NUDGE', { startMs: 500 })];
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs, []);
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', r, o).diffs, []);
+});
+
+test('starts within the tolerance of each other are not a timing difference, whatever the page lag', () => {
+  // The page runs 400ms early overall, so the overall lag alone would flag the title.
+  const o = [moved('01', 'Alpha', { startMs: 1500 }), moved('01', 'Beta', { startMs: 1600 }), moved('01', 'Gamma', { startMs: 1700 }), moved('02', 'A Greener Workspace', { startMs: 818 })];
+  const r = [moved('01', 'Alpha', { startMs: 1100 }), moved('01', 'Beta', { startMs: 1200 }), moved('01', 'Gamma', { startMs: 1300 }), moved('02', 'A Greener Workspace', { startMs: 821 })];
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs, []);
+});
+
+test('a line of a text animated whole on the other site is neither extra nor missing', () => {
+  // The original animates the paragraph's letters (one item for the whole text), the rebuild each line.
+  const para = 'When therapists spend less time clicking, they have more time for patients.';
+  const o = [moved('04', para, { scroll: true })];
+  const r = [moved('04', 'When therapists spend less time clicking, they have', { scroll: true }), moved('04', 'more time for patients.', { scroll: true })];
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs, []);
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', r, o).diffs, []);
+});
+
+test('a line inside a text that moves on another trigger is still reported', () => {
+  const o = [moved('04', 'When therapists spend less time clicking, they have more time for patients.', { scroll: true })];
+  const r = [moved('04', 'When therapists spend less time clicking, they have', { scroll: true }), moved('04', 'more time for patients.')];
+  assert.deepEqual(call<{ diffs: MotionDiff[] }>('motionDiffs', o, r).diffs.map((d) => [d.kind, d.label]), [['extra', 'more time for patients.']]);
 });

@@ -9,15 +9,19 @@ const LAYOUT_TOL = 4;
 // Load animations start on a rendered frame, which varies by up to ~200ms between runs.
 const TIME_TOL = 300;
 
-/** Text for matching: case, spacing, non-breaking spaces and invisible marks do not count. */
-export function normText(s) {
+/** Text for matching, whole: case, spacing, non-breaking spaces and invisible marks do not count. */
+function normFull(s) {
   return String(s || '')
     .replace(/[​-‏⁠﻿]/g, '')
     .replace(/ /g, ' ')
     // Whitespace depends on where elements start and end (a card's name and text joined or not).
     .replace(/\s+/g, '')
-    .toLowerCase()
-    .slice(0, 60);
+    .toLowerCase();
+}
+
+/** Text for matching, cut to its start (texts are recorded up to 60 characters). */
+export function normText(s) {
+  return normFull(s).slice(0, 60);
 }
 
 /**
@@ -74,8 +78,9 @@ export function groupLetters(raw) {
       g.kinds = Array.from(new Set(g.kinds.concat(m.kinds)));
       g.live = g.live || m.live;
       g.scroll = g.scroll && m.scroll;
+      g.loop = g.loop || m.loop;
     } else {
-      const item = { section: m.section, name: m.name, text: m.parentText, startMs: m.startMs, kinds: m.kinds.slice(), live: m.live, scroll: m.scroll };
+      const item = { section: m.section, name: m.name, text: String(m.parentText).slice(0, 60), full: m.parentFull || m.parentText, startMs: m.startMs, kinds: m.kinds.slice(), live: m.live, scroll: m.scroll, loop: m.loop };
       groups.set(key, item);
       out.push(item);
     }
@@ -97,6 +102,7 @@ export function groupLetters(raw) {
     g.kinds = Array.from(new Set(g.kinds.concat(m.kinds)));
     g.live = g.live || m.live;
     g.scroll = !!(g.scroll && m.scroll);
+    g.loop = g.loop || m.loop;
   }
   return merged;
 }
@@ -140,7 +146,7 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
     if (i < 0) i = r.findIndex((b, k) => free(b, k) && (a.text || b.name === a.name));
     if (i < 0) i = r.findIndex(free);
     if (i < 0) {
-      diffs.push({ section: a.section, kind: 'missing', label: label(a), originalMs: a.startMs, scroll: !!a.scroll });
+      diffs.push({ section: a.section, kind: 'missing', label: label(a), full: a.full, originalMs: a.startMs, scroll: !!a.scroll });
       continue;
     }
     used.add(i);
@@ -148,8 +154,9 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
       diffs.push({ section: a.section, kind: 'trigger', label: label(a), originalMs: a.startMs, rebuildMs: r[i].startMs, scroll: !!a.scroll });
       continue;
     }
-    // Scroll-triggered start times depend on page speed, not on the animation: only load ones are timed.
-    if (!a.scroll && !r[i].scroll) timed.push([a, r[i]]);
+    // Scroll-triggered start times depend on page speed, not on the animation: only load ones are
+    // timed. A loop's start is only its phase.
+    if (!a.scroll && !r[i].scroll && !a.loop && !r[i].loop) timed.push([a, r[i]]);
   }
   // The original starts its effects when its scripts are ready, which varies by hundreds of ms
   // from run to run. With enough load items, the median gap is that lag: an item is late or early
@@ -157,12 +164,21 @@ export function motionDiffs(original, rebuild, tolMs = TIME_TOL) {
   const gaps = timed.map(([a, b]) => b.startMs - a.startMs).sort((x, y) => x - y);
   const offsetMs = gaps.length >= 3 ? Math.round(gaps[Math.floor((gaps.length - 1) / 2)]) : 0;
   for (const [a, b] of timed) {
-    if (Math.abs(b.startMs - a.startMs - offsetMs) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: b.startMs });
+    // Starts that agree as measured are in step whatever the rest of the page does.
+    const gap = b.startMs - a.startMs;
+    if (Math.abs(gap - offsetMs) > tolMs && Math.abs(gap) > tolMs) diffs.push({ section: a.section, kind: 'timing', label: label(a), originalMs: a.startMs, rebuildMs: b.startMs });
   }
   r.forEach((b, k) => {
-    if (!used.has(k)) diffs.push({ section: b.section, kind: 'extra', label: label(b), rebuildMs: b.startMs, scroll: !!b.scroll });
+    if (!used.has(k)) diffs.push({ section: b.section, kind: 'extra', label: label(b), full: b.full, rebuildMs: b.startMs, scroll: !!b.scroll });
   });
-  return { diffs, cannotMatch, offsetMs };
+  // A text animated whole on one site (letters grouped into their paragraph) and line by line on the
+  // other: a line inside a text that moves the same way on the other site is that text moving.
+  const within = (d, list) => {
+    const line = normFull(d.full || d.label);
+    return line.length >= 3 && list.some((m) => m.section === d.section && !m.live && !!m.scroll === !!d.scroll && normFull(m.full || m.text).length > line.length && normFull(m.full || m.text).includes(line));
+  };
+  const kept = diffs.filter((d) => !((d.kind === 'extra' && within(d, o)) || (d.kind === 'missing' && within(d, r))));
+  return { diffs: kept, cannotMatch, offsetMs };
 }
 
 /** Hover and press changes the original makes that the rebuild does not make (or makes differently). */
