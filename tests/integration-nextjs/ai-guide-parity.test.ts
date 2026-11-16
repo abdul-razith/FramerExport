@@ -187,6 +187,30 @@ const PAIRS: Record<string, (rebuild: boolean) => string> = {
       ) + "<script>const bs=document.querySelectorAll('.go b');let k=0;setInterval(()=>{bs[k%10].style.opacity='1';k++;bs[k%10].style.opacity='0.3'},150)</script>",
       '<style>a.h:hover{background:#000}</style>'
     ),
+  // A loop written frame by frame (the original's from 400ms on, the rebuild's from the start) that
+  // has stopped when the report reads it, as one does when it pauses off screen.
+  ploop: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-pl', '<div id="a" style="width:60px;height:60px;background:#2fbc81">&nbsp;</div>') +
+        "<script>const a=document.getElementById('a');" +
+        "document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{const t0=performance.now();(function f(t){a.style.transform='rotate('+((t-t0)/10%360)+'deg)';if(t-t0<3200)requestAnimationFrame(f)})(t0)}," +
+        (rb ? '0' : '400') +
+        '))</script>'
+    ),
+  // The original fades out a transparent overlay that blocks clicks during its loader: nothing is seen.
+  blank: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-bk', 'Hello') +
+        (rb ? '' : '<div id="o" style="position:fixed;inset:0;background:transparent"></div>') +
+        (rb ? '' : "<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{const o=document.getElementById('o');o.parentElement.removeChild(o);document.querySelector('section').appendChild(o);const t0=performance.now();(function f(t){const p=Math.min(1,(t-t0)/300);o.style.opacity=String(1-p);if(p<1)requestAnimationFrame(f)})(t0)},500))</script>")
+    ),
+  // While it measures its layout, the original's script moves a heading away and back in the same
+  // tick, a few times during load (as a pinned section's refresh does): it never shows moved.
+  jump: (rb) =>
+    doc(
+      sec(rb, '01', 'framer-jp', '<h2 id="h">How I work</h2>') +
+        (rb ? '' : "<script>const h=document.getElementById('h');document.addEventListener('DOMContentLoaded',()=>[300,320,380,500].forEach((t)=>setTimeout(()=>{h.style.transform='translate(-1240px, 0px)';h.style.transform='translate(0px, 0px)'},t)))</script>")
+    ),
   // The original's DOMContentLoaded comes 600ms later (a slow script); both animate 300ms after it.
   t: (rb) => doc(sec(rb, '01', 'framer-t1', '<div id="a">Hello</div>') + `<script>document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>document.getElementById('a').animate([{opacity:0},{opacity:1}],{duration:300}),300))</script>`, rb ? '' : '<script>const e=Date.now()+600;while(Date.now()<e){}</script>'),
   // Ten links, the rebuild in reverse order; "Two" has the same hover colour on both.
@@ -259,6 +283,9 @@ before(async () => {
       '/hidden': { slug: 'hidden', url: server.url + '/hidden-orig', sections: [s('01', 'framer-x1')] },
       '/deep': { slug: 'deep', url: server.url + '/deep-orig', sections: [s('01', 'framer-dp')] },
       '/wave': { slug: 'wave', url: server.url + '/wave-orig', sections: [s('01', 'framer-wv')] },
+      '/ploop': { slug: 'ploop', url: server.url + '/ploop-orig', sections: [s('01', 'framer-pl')] },
+      '/blank': { slug: 'blank', url: server.url + '/blank-orig', sections: [s('01', 'framer-bk')] },
+      '/jump': { slug: 'jump', url: server.url + '/jump-orig', sections: [s('01', 'framer-jp')] },
     })
   );
   const src = (id: string, extra = {}) => ({ folder: `ai-guide/pages/index/sections/${id}-x`, markup: `index.html:${id}0`, styles: `ai-guide/pages/index/sections/${id}-x/styles.css`, animations: [], hovers: [], ...extra });
@@ -341,6 +368,9 @@ for (const [name, why] of [
   ['hidden', 'what moves only while hidden is not motion'],
   ['deep', 'a hover change deep inside the link is seen'],
   ['wave', 'a loop whose changes move from element to element is not a hover change'],
+  ['ploop', 'a loop that has stopped when the report reads it is still a loop'],
+  ['blank', 'an element that paints nothing is not motion'],
+  ['jump', 'a move made and undone in the same tick is not motion'],
 ]) {
   test(why, { timeout: 300000 }, async () => {
     const run = await parity('/' + name);

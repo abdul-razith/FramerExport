@@ -80,6 +80,21 @@ function watch() {
     return false;
   };
   window.__parityHidden = hidden;
+  // No text, no fill, no border, no shadow and no image inside: nothing to see.
+  window.__parityBlank = (el) => {
+    if ((el.textContent || '').trim()) return false;
+    for (const n of [el, ...Array.from(el.querySelectorAll('*')).slice(0, 80)]) {
+      if (/^(IMG|SVG|svg|CANVAS|VIDEO|PICTURE|IFRAME)$/.test(n.tagName)) return false;
+      const cs = getComputedStyle(n);
+      const seen = (c) => c && c !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(c);
+      if (seen(cs.backgroundColor) || cs.backgroundImage !== 'none' || cs.boxShadow !== 'none') return false;
+      if (parseFloat(cs.borderTopWidth) + parseFloat(cs.borderRightWidth) + parseFloat(cs.borderBottomWidth) + parseFloat(cs.borderLeftWidth) > 0 && seen(cs.borderTopColor)) return false;
+      if (parseFloat(cs.outlineWidth) > 0 && cs.outlineStyle !== 'none') return false;
+      const before = getComputedStyle(n, '::after');
+      if (before.content !== 'none' && (seen(before.backgroundColor) || parseFloat(before.borderTopWidth) > 0)) return false;
+    }
+    return true;
+  };
   const add = (el, kind, at) => {
     if (!el || el.nodeType !== 1) return;
     // A polled Web Animation knows when it started (same clock as performance.now()).
@@ -101,7 +116,16 @@ function watch() {
     if (kind === 'waapi-start') kind = 'waapi';
     // Separate changes (writes in one tick are one); a state set once or twice is not motion.
     if (e.prev === undefined || now - e.prev >= 4) e.count = (e.count || 0) + 1;
-    if (kind === 'opacity' || kind === 'transform') e.lastStyle = now;
+    if (kind === 'opacity' || kind === 'transform') {
+      // Bursts of changes (apart by more than 150ms): a loop keeps coming back, or never stops for
+      // seconds, even when it pauses off screen before the report reads it.
+      if (e.lastStyle === undefined || now - e.lastStyle > 150) {
+        e.bursts = (e.bursts || 0) + 1;
+        e.burstStart = now;
+      } else if (now - e.burstStart > 3000) e.loop = true;
+      if (e.bursts >= 5) e.loop = true;
+      e.lastStyle = now;
+    }
     if (e.start === undefined) {
       if (kind !== 'opacity' && kind !== 'transform') {
         e.start = now;
@@ -167,27 +191,38 @@ function watch() {
   // The last style change of each element: a change put back within 100ms (hydration rewriting a
   // style) is no motion, so it is undone.
   const lastChange = new WeakMap();
-  new MutationObserver((list) => {
-    for (const m of list) {
-      const now = m.target.getAttribute('style');
-      const before = sig(m.oldValue);
-      const after = sig(now);
-      if (before === after) continue;
-      const t = performance.now();
-      const rec = lastChange.get(m.target);
-      if (rec && t - rec.t <= 100 && after === rec.before) {
-        lastChange.delete(m.target);
-        const e = seen.get(m.target);
-        if (e && e.start === undefined) {
-          if (rec.fresh) seen.delete(m.target);
-          else e.prev = rec.prevBefore;
-        }
-        continue;
+  const change = (target, was, now) => {
+    const before = sig(was);
+    const after = sig(now);
+    if (before === after) return;
+    const t = performance.now();
+    const rec = lastChange.get(target);
+    if (rec && t - rec.t <= 100 && after === rec.before) {
+      lastChange.delete(target);
+      const e = seen.get(target);
+      if (e && e.start === undefined) {
+        if (rec.fresh) seen.delete(target);
+        else Object.assign(e, rec.state);
       }
-      const old = seen.get(m.target);
-      lastChange.set(m.target, { before, t, fresh: !old, prevBefore: old ? old.prev : undefined });
-      if (opacity(m.oldValue) !== opacity(now)) add(m.target, 'opacity');
-      if (['transform', 'translate', 'scale', 'rotate'].some((p) => shape(m.oldValue, p) !== shape(now, p))) add(m.target, 'transform');
+      return;
+    }
+    const old = seen.get(target);
+    const state = old ? { prev: old.prev, count: old.count, bursts: old.bursts, burstStart: old.burstStart, lastStyle: old.lastStyle, loop: old.loop } : undefined;
+    lastChange.set(target, { before, t, fresh: !old, state });
+    if (opacity(was) !== opacity(now)) add(target, 'opacity');
+    if (['transform', 'translate', 'scale', 'rotate'].some((p) => shape(was, p) !== shape(now, p))) add(target, 'transform');
+  };
+  new MutationObserver((list) => {
+    // Records come in batches: each one's new style is the next record's old style (the element's
+    // current style only for its last one), so a move made and undone in one tick shows as both.
+    const order = new Map();
+    for (const m of list) {
+      if (!order.has(m.target)) order.set(m.target, []);
+      order.get(m.target).push(m.oldValue);
+    }
+    for (const [target, olds] of order) {
+      const values = olds.concat([target.getAttribute('style')]);
+      for (let i = 0; i < olds.length; i++) change(target, values[i], values[i + 1]);
     }
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ['style'], attributeOldValue: true });
 }
@@ -302,6 +337,8 @@ function readMoved(sections, width) {
   for (const [el, info] of window.__parityMoved) {
     // A start state set once or twice (and put in place again on a re-split) never moved.
     if (info.start === undefined && (info.count || 0) < 3) continue;
+    // Paints nothing (a transparent overlay that blocks clicks): its motion cannot be seen.
+    if (el.isConnected && window.__parityBlank(el)) continue;
     // Moved only while it could not be seen (a caret blinking in a bubble already gone) and still unseen.
     if (info.hiddenAtStart && (!el.isConnected || window.__parityHidden(el))) continue;
     // Still changing at the end of the rest after the scroll: a loop (also kept for the hover probes).
