@@ -14,16 +14,28 @@ export interface MotionPreset {
   to: Record<string, number>;
   transition: Record<string, unknown>;
   repeatType?: string;
+  repeatDelay?: number;
+  /** in-view: play once (Framer's default) or every time it enters. */
+  once?: boolean;
+  /** in-view: the share of the element in view that starts it (Framer's threshold). */
+  amount?: number;
 }
 
 /** The value each transform/opacity property settles at. */
 const REST: Record<string, number> = { opacity: 1, x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotate: 0, rotateX: 0, rotateY: 0, skewX: 0, skewY: 0 };
 const TRIGGER: Partial<Record<ExportAnimation['kind'], MotionPreset['trigger']>> = { appear: 'load', enter: 'in-view', loop: 'loop' };
 
-/** The numeric transform/opacity values that differ from rest. */
-function moved(values: Record<string, unknown>): Record<string, number> {
+/**
+ * The numeric transform/opacity values that differ from rest, or undefined when any value cannot be
+ * carried by a preset (filter, colour, a `%` offset…): those animations stay with ref.md alone.
+ */
+function moved(values: Record<string, unknown>): Record<string, number> | undefined {
   const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(values)) if (k in REST && typeof v === 'number' && v !== REST[k]) out[k] = v;
+  for (const [k, v] of Object.entries(values)) {
+    if (k === 'transition') continue;
+    if (!(k in REST) || typeof v !== 'number') return undefined;
+    if (v !== REST[k]) out[k] = v;
+  }
   return out;
 }
 
@@ -38,9 +50,9 @@ export function buildMotionPresets(
   for (const { section, animations } of groups) {
     for (const a of animations) {
       const trigger = TRIGGER[a.kind];
-      if (!trigger || typeof a.values !== 'object' || !a.transition || typeof a.transition !== 'object') continue;
+      if (!trigger || typeof a.values !== 'object' || !a.transition || typeof a.transition !== 'object' || a.byBreakpoint) continue;
       const changed = moved(a.values);
-      if (!Object.keys(changed).length) continue;
+      if (!changed || !Object.keys(changed).length) continue;
       const name = a.layer ? slugify(a.layer) : a.className.replace(/^framer-/, '');
       let key = `${section}-${name}`;
       for (let n = 2; taken.has(key); n++) key = `${section}-${name}-${n}`;
@@ -48,7 +60,18 @@ export function buildMotionPresets(
       keyOf.set(a, key);
       // appear/enter start at their values and settle at rest; a loop runs from rest to its values.
       const [from, to] = trigger === 'loop' ? [rest(Object.keys(changed)), changed] : [changed, rest(Object.keys(changed))];
-      presets.push({ key, section, trigger, from, to, transition: a.transition, ...(a.repeatType ? { repeatType: a.repeatType } : {}) });
+      presets.push({
+        key,
+        section,
+        trigger,
+        from,
+        to,
+        transition: a.transition,
+        ...(a.repeatType ? { repeatType: a.repeatType } : {}),
+        ...(a.repeatDelay ? { repeatDelay: a.repeatDelay } : {}),
+        ...(trigger === 'in-view' ? { once: a.once !== false } : {}),
+        ...(trigger === 'in-view' && typeof a.threshold === 'number' ? { amount: a.threshold } : {}),
+      });
     }
   }
   return { presets, keyOf };
@@ -74,35 +97,41 @@ export function renderPresetsModule(presets: MotionPreset[]): string {
 export const APPEAR_TSX = `'use client';
 
 import type { ReactNode } from 'react';
-import { motion, useReducedMotion, type TargetAndTransition, type Transition } from 'motion/react';
+import { MotionConfig, motion, type TargetAndTransition, type Transition } from 'motion/react';
 import { presets, type PresetKey } from './presets';
 
-type AppearProps = { preset: PresetKey; className?: string; children?: ReactNode };
+type Tag = 'div' | 'section' | 'header' | 'footer' | 'article' | 'figure' | 'span' | 'p' | 'h1' | 'h2' | 'h3' | 'li' | 'ul' | 'a' | 'img';
+type AppearProps = { preset: PresetKey; as?: Tag; className?: string; children?: ReactNode } & Record<string, unknown>;
 type Preset = {
   trigger: string;
   from: TargetAndTransition;
   to: TargetAndTransition;
   transition: Transition;
   repeatType?: 'loop' | 'reverse' | 'mirror';
+  repeatDelay?: number;
+  once?: boolean;
+  amount?: number;
 };
 
-/** Plays a Framer animation from ai-guide's presets: on load, in view (once) or as a loop. */
-export function Appear({ preset, className, children }: AppearProps) {
-  const reduce = useReducedMotion();
+/**
+ * Plays a Framer animation from ai-guide's presets: on load, in view or as a loop. The same element
+ * renders on server and client; with reduced motion, MotionConfig drops movement and keeps fades.
+ */
+export function Appear({ preset, as = 'div', className, children, ...rest }: AppearProps) {
   const p = presets[preset] as unknown as Preset;
-  if (reduce) return <div className={className}>{children}</div>;
-  if (p.trigger === 'in-view') {
-    return (
-      <motion.div className={className} initial={p.from} whileInView={{ ...p.to, transition: p.transition }} viewport={{ once: true }}>
-        {children}
-      </motion.div>
-    );
-  }
-  const transition = p.trigger === 'loop' ? { ...p.transition, repeat: Infinity, repeatType: p.repeatType ?? 'loop' } : p.transition;
+  const M = (motion as unknown as Record<Tag, typeof motion.div>)[as];
+  const play =
+    p.trigger === 'in-view'
+      ? { whileInView: { ...p.to, transition: p.transition }, viewport: { once: p.once ?? true, amount: p.amount ?? 0 } }
+      : p.trigger === 'loop'
+        ? { animate: { ...p.to, transition: { ...p.transition, repeat: Infinity, repeatType: p.repeatType ?? 'loop', repeatDelay: p.repeatDelay ?? 0 } } }
+        : { animate: { ...p.to, transition: p.transition } };
   return (
-    <motion.div className={className} initial={p.from} animate={{ ...p.to, transition }}>
-      {children}
-    </motion.div>
+    <MotionConfig reducedMotion="user">
+      <M className={className} initial={p.from} {...play} {...rest}>
+        {children}
+      </M>
+    </MotionConfig>
   );
 }
 `;

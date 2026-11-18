@@ -83,11 +83,20 @@ export function parseAppearAnimations(html: string): Map<string, AppearAnimation
   return out;
 }
 
-/** Fills `transition` on each `appear` animation whose class is `framer-<id>` of a parsed entry. */
+const sameState = (a: AppearState, b: AppearState) =>
+  JSON.stringify([a.initial, a.animate, a.transition]) === JSON.stringify([b.initial, b.animate, b.transition]);
+
+/**
+ * Takes each `appear` animation whose class is `framer-<id>` from the page's appear JSON: its start
+ * values (`initial`), its exact `transition`, and its per-width states when those differ.
+ */
 export function mergeAppear(animations: ExportAnimation[], appear: Map<string, AppearAnimation>): ExportAnimation[] {
   return animations.map((a) => {
     if (a.kind !== 'appear') return a;
     const found = appear.get(a.className.replace(/^framer-/, ''));
-    return found ? { ...a, transition: found.transition } : a;
+    if (!found) return a;
+    const states = Object.values(found.byBreakpoint);
+    const differs = states.some((s) => !sameState(s, found));
+    return { ...a, values: found.initial, transition: found.transition, ...(differs ? { byBreakpoint: found.byBreakpoint } : {}) };
   });
 }

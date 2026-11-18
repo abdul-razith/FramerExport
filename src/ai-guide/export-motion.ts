@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import type { AppearState, Breakpoint as AppearBreakpoint } from './appear-transitions.js';
 
 /** One Framer animation setting found in the export's page JS for an element. */
 export interface ExportAnimation {
@@ -17,6 +18,10 @@ export interface ExportAnimation {
   transition?: Record<string, unknown> | string;
   repeatType?: string;
   repeatDelay?: number;
+  /** kind `enter`: the share of the element in view that starts it (`__framer__threshold`). */
+  threshold?: number;
+  /** kind `appear`: the per-width states, only when they differ from each other (from the page HTML). */
+  byBreakpoint?: Partial<Record<AppearBreakpoint, AppearState>>;
   /** kind `override`: a code override (the site's own code, not a Framer effect) wrapping the element. */
   override?: CodeOverride;
 }
@@ -376,7 +381,16 @@ export function findAnimations(modules: { file: string; text: string }[], classe
           const effect = textEffect(props.get('effect')!, text);
           if (effect) out.push({ ...base, kind: 'text', values: effect });
         }
-        if (props.has('__framer__enter')) out.push({ ...base, kind: 'enter', once, values: value(props.get('__framer__enter')!, text), transition: transitionOf('__framer__animate') });
+        const threshold = props.get('__framer__threshold') ? evaluateSafe(props.get('__framer__threshold')!, text) : undefined;
+        if (props.has('__framer__enter'))
+          out.push({
+            ...base,
+            kind: 'enter',
+            once,
+            ...(typeof threshold === 'number' ? { threshold } : {}),
+            values: value(props.get('__framer__enter')!, text),
+            transition: transitionOf('__framer__animate'),
+          });
         if (props.has('__framer__exit')) out.push({ ...base, kind: 'exit', values: value(props.get('__framer__exit')!, text), transition: transitionOf('__framer__animate') });
         if (props.has('__framer__loop'))
           out.push({
@@ -477,5 +491,16 @@ export function describeAnimation(a: ExportAnimation): string {
       if (a.kind === 'loop' || a.kind === 'exit' || a.kind === 'animate') change = change ? `to ${change}` : 'no change';
     }
   }
-  return [`${head}: ${change || 'no visible change'}`, describeTransition(a.transition), source].filter(Boolean).join(' · ');
+  // Framer can give each width its own appear: list them, the start values and timing differ.
+  const widths = a.byBreakpoint
+    ? (['desktop', 'laptop', 'tablet', 'mobile'] as const)
+        .filter((bp) => a.byBreakpoint![bp])
+        .map((bp) => {
+          const s = a.byBreakpoint![bp]!;
+          const from = Object.entries(s.initial).filter(([k, v]) => !(k in REST) || v !== REST[k]).map(([k, v]) => `${k} ${fmt(v)}`).join(', ');
+          return `${bp}: ${from || 'no visible change'} · ${describeTransition(s.transition)}`;
+        })
+    : [];
+  const perWidth = widths.length ? `per width (no preset, build each): ${widths.join('; ')}` : '';
+  return [`${head}: ${change || 'no visible change'}`, describeTransition(a.transition), perWidth, source].filter(Boolean).join(' · ');
 }

@@ -64,3 +64,22 @@ test('mergeAppear fills the transition of a matching appear animation only', () 
   assert.equal(merged[1].transition, undefined);
   assert.equal(merged[2].transition, undefined, 'only kind appear is filled');
 });
+
+test('mergeAppear takes the start values from the HTML initial state (review minor 3)', () => {
+  const a = mergeAppear(
+    [{ file: 'x.mjs', offset: 1, kind: 'appear', className: 'framer-a4be70', values: { scale: 1 } }],
+    parseAppearAnimations(html)
+  )[0];
+  assert.equal((a.values as Record<string, number>).scale, 1.06);
+});
+
+test('mergeAppear keeps per-width variants only when they differ (review item 5)', () => {
+  const same = mergeAppear([{ file: 'x.mjs', offset: 1, kind: 'appear', className: 'framer-a4be70', values: {} }], parseAppearAnimations(html))[0];
+  assert.equal(same.byBreakpoint, undefined, 'a4be70 variants are identical');
+  const state = (y: number, delay: number) => ({ initial: { opacity: 0, y }, animate: { opacity: 1, y: 0, transition: { duration: 1, delay } } });
+  const json = JSON.stringify({ abc: { default: state(54, 0), m1: state(20, 0.3) } });
+  const bps = JSON.stringify([{ hash: 'd1', mediaQuery: '(min-width: 1200px)' }, { hash: 'm1', mediaQuery: '(max-width: 809.98px)' }]);
+  const differ = mergeAppear([{ file: 'x.mjs', offset: 1, kind: 'appear', className: 'framer-abc', values: {} }], parseAppearAnimations(appear(json, bps)))[0];
+  assert.deepEqual(Object.keys(differ.byBreakpoint ?? {}).sort(), ['desktop', 'mobile']);
+  assert.equal(differ.byBreakpoint!.mobile!.initial.y, 20);
+});

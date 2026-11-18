@@ -93,7 +93,7 @@ test('the presets module is valid TypeScript that exports presets and PresetKey'
 
 test('the Appear component reads a preset and types no timing of its own', () => {
   assert.ok(APPEAR_TSX.includes("from './presets'"));
-  assert.ok(APPEAR_TSX.includes('useReducedMotion'));
+  assert.ok(APPEAR_TSX.includes('reducedMotion="user"'));
   assert.ok(!/duration:\s*\d/.test(APPEAR_TSX), 'no typed duration');
   // motion's `initial`/`animate` reject a plain `object`; the preset must be typed with motion's own types.
   assert.match(APPEAR_TSX, /from: TargetAndTransition/);
@@ -104,4 +104,43 @@ test('plan Task 0 copies the motion presets and AGENTS forbids typed timing', ()
   assert.ok(renderPlan(fixtureSite()).includes('`ai-guide/motion/`'));
   assert.ok(AGENTS_MD.includes('<Appear preset='));
   assert.ok(AGENTS_MD.includes('never type a duration'));
+});
+
+test('in-view presets carry once and the Framer threshold (review item 2)', () => {
+  const { presets } = buildMotionPresets([
+    { section: 's', animations: [{ ...base, kind: 'enter', className: 'framer-a', layer: 'A', once: false, threshold: 0.1, values: { opacity: 0 }, transition: { duration: 1 } }] },
+  ]);
+  assert.equal(presets[0].once, false);
+  assert.equal(presets[0].amount, 0.1);
+});
+
+test('loop presets carry repeatDelay (review item 3)', () => {
+  const { presets } = buildMotionPresets([
+    { section: 's', animations: [{ ...base, kind: 'loop', className: 'framer-a', layer: 'A', values: { rotate: 360 }, transition: { duration: 4 }, repeatDelay: 2 }] },
+  ]);
+  assert.equal(presets[0].repeatDelay, 2);
+});
+
+test('no preset when a value cannot be carried, or when widths differ (review items 4 and 5)', () => {
+  const t = { duration: 1 };
+  const { presets } = buildMotionPresets([
+    {
+      section: 's',
+      animations: [
+        { ...base, kind: 'enter', className: 'framer-a', layer: 'Blur', values: { opacity: 0, filter: 'blur(8px)' }, transition: t },
+        { ...base, kind: 'enter', className: 'framer-b', layer: 'Pct', values: { x: '-50%' }, transition: t },
+        { ...base, kind: 'appear', className: 'framer-c', layer: 'Widths', values: { opacity: 0 }, transition: t, byBreakpoint: { mobile: { initial: { opacity: 0, y: 20 }, animate: { opacity: 1 }, transition: t } } },
+      ],
+    },
+  ]);
+  assert.deepEqual(presets, []);
+});
+
+test('Appear keeps one element type for reduced motion and passes once, amount, repeatDelay and as (review item 1, minor 1)', () => {
+  assert.ok(!APPEAR_TSX.includes('useReducedMotion'), 'no element swap on reduced motion');
+  assert.match(APPEAR_TSX, /<MotionConfig reducedMotion="user">/);
+  assert.match(APPEAR_TSX, /once: p\.once/);
+  assert.match(APPEAR_TSX, /amount: p\.amount/);
+  assert.match(APPEAR_TSX, /repeatDelay: p\.repeatDelay/);
+  assert.match(APPEAR_TSX, /as\?: /);
 });

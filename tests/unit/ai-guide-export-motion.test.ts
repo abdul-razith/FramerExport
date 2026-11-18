@@ -171,3 +171,19 @@ test('a plain-object text effect split by line, in view', () => {
   const line = describeAnimation(a);
   for (const s of ['text effect, per line', 'y 40→0', 'in view', '0.01s between lines', 'after 3.5s']) assert.ok(line.includes(s), `${s} in ${line}`);
 });
+
+test('enter reads the Framer in-view threshold and once false', () => {
+  const text = 'const t1 = { duration: 0.6 };\nfunction C() { return p(J, { __framer__animate: { transition: t1 }, __framer__animateOnce: !1, __framer__enter: { opacity: 0, y: 40 }, __framer__threshold: 0.1, className: "framer-thr", "data-framer-name": "Card" }); }';
+  const [a] = findAnimations([{ file: 'scripts/vendor/t.mjs', text }], ['framer-thr']);
+  assert.equal(a.kind, 'enter');
+  assert.equal(a.once, false);
+  assert.equal(a.threshold, 0.1);
+});
+
+test('an appear that differs per width lists each width in its ref line (review item 5)', () => {
+  const line = describeAnimation({
+    file: 'scripts/vendor/t.mjs', offset: 1, kind: 'appear', className: 'framer-abc', values: { opacity: 0, y: 54 }, transition: { duration: 1 },
+    byBreakpoint: { mobile: { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.6, delay: 0.3 } } },
+  });
+  assert.match(line, /mobile: opacity 0, y 20 · tween 0\.6s, delay 0\.3s/);
+});
