@@ -37,6 +37,7 @@ import {
 } from './export-css.js';
 import { classesIn, presetClassesIn, sectionMarkup, type MarkupCopy } from './export-markup.js';
 import { findAnimations, loadVendorModules, type ExportAnimation } from './export-motion.js';
+import { mergeAppear, parseAppearAnimations } from './appear-transitions.js';
 import { recordInteractions, type InteractionState } from './interactions.js';
 import { motionFromNodes, moversToEntries, renderMotionMd, summarizeLoad } from './motion.js';
 import { buildGuidePage } from './outline.js';
@@ -243,7 +244,8 @@ async function sectionReference(
   }
   let animations: ExportAnimation[] | Error;
   try {
-    animations = findAnimations(modules, classes);
+    // The page's appear JSON holds the exact on-load timing the JS often only references by variable.
+    animations = mergeAppear(findAnimations(modules, classes), parseAppearAnimations(html));
   } catch (e) {
     animations = e as Error;
   }
