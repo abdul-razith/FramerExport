@@ -17,7 +17,7 @@ one page per task. You run each task and check it.
 | \`index.html\`, \`subpages/\` | The exported pages: the markup each section is built from. |
 | \`assets/\` | Images, fonts and videos. |
 | \`data/\`, \`scripts/\` | Framer CMS data and runtime — never copied into the project (\`scripts/vendor/\` holds the animation settings the guide reads). |
-| \`AGENTS.md\`, \`CLAUDE.md\` | The rules the agent follows (same text; Claude Code reads CLAUDE.md, agy reads AGENTS.md). |
+| \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, \`.cursorrules\`, \`.github/copilot-instructions.md\` | The rules the agent follows: the same text in the file each agent reads (agy and Codex: AGENTS.md, Claude Code: CLAUDE.md, Gemini CLI: GEMINI.md, Cursor, GitHub Copilot). |
 | \`ai-guide/site.md\` | Pages, sections, navigation, footer, shell parts, shared sections, CMS pages, task list. |
 | \`ai-guide/files.md\` | Which export file holds what; image names for the project. |
 | \`ai-guide/content.md\` | CMS collections, their items and fields. |
@@ -27,6 +27,8 @@ one page per task. You run each task and check it.
 | \`ai-guide/pages/<page>/sections/<id>-<name>/\` | Per section: \`ref.md\` (where it is in the export, widths, content, Framer animation settings, interactive states), \`markup*.html\` (its export markup per width), \`styles.css\` (its export CSS by width), 900px screenshot slices, \`states/\`. |
 | \`ai-guide/shell/\` | The same, for parts shared by every page (header, footer, loader, page background). |
 | \`ai-guide/sections.json\` | Section boxes per width, used by the compare script. |
+| \`ai-guide/motion/presets.ts\`, \`ai-guide/motion/Appear.tsx\` | Every Framer animation with its exact timing, and the component that plays it; copied to \`src/components/motion/\` in Task 0. |
+| \`ai-guide/scripts/check.mjs\`, \`ai-guide/scripts/gate.mjs\` | \`npm run check\` (the AGENTS.md rules as failures) and \`npm run gate\` (done: check, plus the scores compare and parity recorded in \`ai-guide/results/\`). |
 | \`ai-guide/plan.md\` | The tasks, as a superpowers plan with checkboxes. |
 | \`ai-guide/checklist.md\` | What to check after each task. |
 | \`ai-guide/scripts/compare.mjs\` | Scores each section of your page against the original (90% gate) and saves side-by-side images. |

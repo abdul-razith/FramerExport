@@ -51,7 +51,7 @@ import { renderPlan, writePlanFile } from './plan.js';
 import { parityEntry, type ParitySources } from './parity-sources.js';
 import { recordPage } from './record.js';
 import { renderContentMd, renderFilesMd, renderSiteMd, renderTokensMd } from './site-docs.js';
-import { AGENTS_MD } from './templates/agents.js';
+import { writeAgentFiles } from './agent-files.js';
 import { CHECKLIST_MD } from './templates/checklist.js';
 import { COMPARE_MJS } from './templates/compare.js';
 import { PARITY_MJS } from './templates/parity.js';
@@ -727,8 +727,7 @@ export async function runAiGuide(
       log(
         'AI guide: plan.md has ticked steps, so the new plan was written to ai-guide/plan.new.md'
       );
-    await fs.writeFile(path.join(exportDir, 'AGENTS.md'), AGENTS_MD);
-    await fs.writeFile(path.join(exportDir, 'CLAUDE.md'), AGENTS_MD);
+    await writeAgentFiles(exportDir);
     log(
       `AI guide written to ${guideDir} — open the export folder in Claude Code or agy (see ai-guide/README.md)`
     );
