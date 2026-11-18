@@ -216,14 +216,16 @@ test('each page task ends with a parity step before Verify', () => {
   const num = (l: string) => Number(l.match(/Step (\d+):/)![1]);
   const parity = steps.find((l) => l.includes('**Step') && l.includes(': Parity**'))!;
   const verify = steps.find((l) => l.includes(': Verify**'))!;
-  assert.ok(parity.includes('`npm run parity -- /`') && parity.includes('ai-guide/parity/index.md') && parity.includes('empty'), parity);
+  assert.ok(parity.includes('`npm run parity -- /`') && parity.includes('ai-guide/parity/index.md') && parity.includes('advisory'), parity);
   assert.equal(num(parity), num(verify) - 1);
   const blog = md.slice(md.indexOf('Blog collection'));
   const cparity = blog.split('\n').find((l) => l.includes(': Parity**'))!;
   assert.ok(cparity.includes('`npm run parity -- /blog`') && cparity.includes('`npm run parity -- /blog/post-a`'), cparity);
 });
 
-test('AGENTS.md and the checklist require an empty parity report', () => {
+test('AGENTS.md and the checklist require parity without layout or interaction items, and gate ✓', () => {
   assert.ok(AGENTS_MD.includes('npm run parity'));
   assert.ok(CHECKLIST_MD.includes('npm run parity'));
+  assert.ok(CHECKLIST_MD.includes('npm run gate'));
+  assert.ok(!CHECKLIST_MD.includes('.md` empty'), 'no "empty report" rule left');
 });

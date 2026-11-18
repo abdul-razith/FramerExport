@@ -36,8 +36,13 @@ const lineOf = (text, index) => text.slice(0, index).split('\n').length;
 const inside = (file, dir) => !path.relative(dir, file).startsWith('..');
 
 const files = walk(src).map((file) => ({ file, text: fs.readFileSync(file, 'utf8') }));
-const components = files.filter((f) => inside(f.file, path.join(src, 'components')) && /\.(tsx|jsx)$/.test(f.file));
+const jsx = files.filter((f) => /\.(tsx|jsx)$/.test(f.file));
+const components = jsx.filter((f) => inside(f.file, path.join(src, 'components')));
 const motionDir = path.join(src, 'components', 'motion');
+// The two motion files copied from ai-guide/motion/ hold the Framer timing; nothing else may type it.
+const COPIED = ['Appear.tsx', 'presets.ts'];
+const isCopied = (file) => path.dirname(file) === motionDir && COPIED.includes(path.basename(file));
+const allows = [];
 
 // Page text, from the Content part of every ref.md ("Text:" lines).
 function refFiles(dir, out = []) {
@@ -64,7 +69,7 @@ for (const ref of [...refFiles(path.join(guide, 'pages')), ...refFiles(path.join
 const decode = (s) => s.replace(/&amp;/g, '&').replace(/&apos;|&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"').replace(/&nbsp;/g, ' ').replace(/[‘’]/g, "'");
 const pageText = [...texts].map(decode);
 
-for (const { file, text } of components) {
+for (const { file, text } of jsx) {
   for (const m of text.matchAll(/class(?:Name)?=["'{][^\n]*?\b(framer-[a-z0-9-]+|preset-[a-z0-9]{6,7})\b/g)) {
     report(file, lineOf(text, m.index), 'no-framer-names', m[1] + ': name the style after its role and use a token or text utility');
   }
@@ -77,14 +82,22 @@ for (const { file, text } of components) {
       report(file, lineOf(text, m.index + 1 + m[1].search(/\S/)), 'content-in-content', '"' + words + '" is page text: take it from src/content through props');
     }
   }
-  if (!inside(file, motionDir)) {
+  if (!isCopied(file)) {
     const lines = text.split('\n');
     // An interaction timing with no preset (hover, menu, accordion) is allowed with a stated reason
     // on the line above: // check-allow no-typed-timing: <reason>
-    const allowed = (n) => /check-allow no-typed-timing:\s*\S/.test(lines[n - 2] || '') || /check-allow no-typed-timing:\s*\S/.test(lines[n - 1] || '');
+    const ALLOW = /check-allow no-typed-timing:\s*(\S.*?)\s*(\*\/|\}|$)/;
+    const allowed = (n) => (lines[n - 1] || '').match(ALLOW) || (lines[n - 2] || '').match(ALLOW);
+    const listed = new Set();
     for (const m of text.matchAll(/\b(duration|delay)\s*[:=]\s*\{?\s*\d/g)) {
       const n = lineOf(text, m.index);
-      if (allowed(n)) continue;
+      const allow = allowed(n);
+      if (allow) {
+        const where = path.relative(app, file).split(path.sep).join('/') + ':' + n;
+        if (!listed.has(where)) allows.push('check-allow ' + where + ' ' + allow[1]);
+        listed.add(where);
+        continue;
+      }
       report(file, n, 'no-typed-timing', m[1] + ' typed by hand: use <Appear preset="..."> from src/components/motion (an interaction with no preset: add // check-allow no-typed-timing: <reason> above it)');
     }
   }
@@ -124,6 +137,17 @@ if (fs.existsSync(sectionsFile)) {
   }
 }
 
+// The copied motion files stay as generated: their values are Framer's timing.
+for (const name of COPIED) {
+  const original = path.join(guide, 'motion', name);
+  if (!fs.existsSync(original)) continue;
+  const copy = path.join(motionDir, name);
+  const norm = (f) => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
+  if (!fs.existsSync(copy)) problems.push('src/components/motion/' + name + ':0 motion-unchanged missing: copy ai-guide/motion/' + name + ' unchanged (plan Task 0)');
+  else if (norm(copy) !== norm(original)) problems.push('src/components/motion/' + name + ':1 motion-unchanged differs from ai-guide/motion/' + name + ': copy it again unchanged');
+}
+
+if (allows.length) console.log(allows.join('\n'));
 if (problems.length) {
   console.log(problems.join('\n'));
   console.log('\ncheck ✗ ' + problems.length + ' problem' + (problems.length === 1 ? '' : 's'));

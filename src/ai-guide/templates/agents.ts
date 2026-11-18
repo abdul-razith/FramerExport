@@ -26,7 +26,8 @@ clean, editable Next.js project that looks and moves like the original. You buil
    animation linked to scroll position; Lenis for smooth scroll; \`@next/mdx\` for CMS content.
 3. **Structure.** \`src/components/layout\` (Navbar, Footer, Loader…), \`src/components/sections/<page>\`
    (e.g. \`HomeHeroSection\`), \`src/components/ui\` (Button, Tag, Card…), \`src/components/motion\`
-   (FadeIn, Reveal, TypingText…), \`src/content/<page>.ts\`, \`src/content/<collection>/<slug>.mdx\`,
+   (\`Appear.tsx\` and \`presets.ts\` copied unchanged from \`ai-guide/motion/\`, plus motion components
+   that use them), \`src/content/<page>.ts\`, \`src/content/<collection>/<slug>.mdx\`,
    \`src/lib/\`.
 4. **Build from the export's code.** Each section has a folder (\`ai-guide/pages/<page>/sections/<id>-<name>/\`,
    shell parts in \`ai-guide/shell/\`) with \`ref.md\`, \`markup*.html\` (the export's markup for the
@@ -49,8 +50,11 @@ clean, editable Next.js project that looks and moves like the original. You buil
    "generated" (clocks, counters) is built as a small component, not content.
 7. **Animation.** An animation whose \`ref.md\` line ends with \`preset: <key>\` is built with
    \`<Appear preset="<key>">\` from \`src/components/motion/\`: never type a duration, delay or ease
-   for it, the preset holds Framer's exact values. For the others, use the Framer settings in each
-   \`ref.md\` \`## Animations\` part and check them against the page's \`motion.md\` and frames. Animate only transform and
+   for it, the preset holds Framer's exact values. For the others (no preset, hover, open/closed),
+   use the Framer settings in each \`ref.md\` \`## Animations\` or \`## Interactive\` part and check
+   them against the page's \`motion.md\` and frames; mark each timing you type with
+   \`// check-allow no-typed-timing: <reason>\` on the line above, naming the ref.md it comes from
+   (\`npm run gate\` lists them). Animate only transform and
    opacity. Respect \`prefers-reduced-motion\` (no movement, content visible). Rebuild every state in
    \`## Interactive\` (hover, open/closed) to match its screenshots. Build a section's animations in
    the same step as the section, not later: a section whose ref.md lists animations is only done
@@ -58,10 +62,13 @@ clean, editable Next.js project that looks and moves like the original. You buil
 8. **Measure.** Put \`data-section="<id>"\` on each section's root element and \`data-live\` on
    generated elements, then run \`npm run compare -- <route> --section <id>\` (with \`npm run dev\`
    running). A section is done at **90% or more at 1440, 1024 and 390**. Fix and compare again, at
-   most 3 fix rounds; if it is still below, write down its scores and the reason and move on.
-   Then \`npm run parity -- <route>\` compares the whole page with the original site (section
-   spacing, everything that moves, hover changes) and writes \`ai-guide/parity/<page>.md\`, each item
-   pointing into the export; a page is done when that report is empty.
+   most 3 fix rounds; if it is still below, add it to \`ai-guide/results/accepted.json\` with the
+   reason and move on (accepted only at 80% or more at every width). Then
+   \`npm run parity -- <route>\` compares the whole page with the original site (section spacing,
+   everything that moves, hover changes) and writes \`ai-guide/parity/<page>.md\`, each item
+   pointing into the export. Layout and interaction items must be fixed (the gate fails on them);
+   motion items are advisory: fix those that point at your code, a constant start offset is the
+   original's load time.
 9. **Done means.** In \`nextjs-app/\`: \`npm run build\` and \`npm run lint\` pass, then \`npm run gate\`
    exits 0. The gate reads the numbers \`npm run compare\` and \`npm run parity\` recorded in
    \`ai-guide/results/\` (scores you type into \`plan.md\` do not count) and runs \`npm run check\`,

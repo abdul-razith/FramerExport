@@ -188,7 +188,8 @@ try {
       const refBox = s.boxes && s.boxes[width];
       const mine = found.sections[s.id];
       if (!mine || !refBox) {
-        r.scores[width] = 'not found';
+        // Hidden at this width on both sites (a desktop-only part, say) is a match, not a miss.
+        r.scores[width] = !mine && !refBox ? 'absent' : 'not found';
         continue;
       }
       const res = score(crop(ref, refBox), crop(shot, mine));
@@ -210,7 +211,7 @@ for (const [id, r] of results) {
     const v = r.scores[w];
     return w + ': ' + (typeof v === 'number' ? v.toFixed(1) + '%' : v ?? 'skipped');
   });
-  const ok = WIDTHS.every(([, w]) => typeof r.scores[w] === 'number' && r.scores[w] >= PASS);
+  const ok = WIDTHS.every(([, w]) => r.scores[w] === 'absent' || (typeof r.scores[w] === 'number' && r.scores[w] >= PASS));
   const motion = r.motion ? '  motion ' + (moved.has(id) ? '✓' : '✗') : '';
   console.log(id + ' ' + (r.name || '') + '  ' + cells.join('  ') + (ok ? '' : ' ✗') + motion);
 }

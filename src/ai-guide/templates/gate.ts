@@ -20,12 +20,17 @@ function files(dir, out = []) {
   return out;
 }
 
-/** sha256 of every file under <appDir>/src, by relative path. */
+/** Root files that change what the site renders. */
+const ROOT_FILES = /^(next\.config\.[cm]?[jt]s|package\.json|postcss\.config\.[cm]?[jt]s|tailwind\.config\.[cm]?[jt]s|tsconfig\.json)$/;
+
+/** sha256 of everything that renders the site: src/, public/ and the root config files, by relative path. */
 export function srcHash(appDir = process.cwd()) {
-  const src = path.join(appDir, 'src');
   const h = crypto.createHash('sha256');
-  for (const f of files(src).sort()) {
-    h.update(path.relative(src, f).split(path.sep).join('/') + '\0');
+  const roots = fs.existsSync(appDir) ? fs.readdirSync(appDir).filter((n) => ROOT_FILES.test(n)).map((n) => path.join(appDir, n)) : [];
+  const all = [...files(path.join(appDir, 'src')), ...files(path.join(appDir, 'public')), ...roots];
+  const rel = (f) => path.relative(appDir, f).split(path.sep).join('/');
+  for (const f of all.sort((a, b) => (rel(a) < rel(b) ? -1 : rel(a) > rel(b) ? 1 : 0))) {
+    h.update(rel(f) + '\0');
     h.update(fs.readFileSync(f));
     h.update('\0');
   }
@@ -69,12 +74,16 @@ import { readResults, srcHash } from './results.mjs';
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 const guide = path.resolve(scripts, '..');
 const PASS = 90;
+const FLOOR = 80;
 const WIDTHS = ['1440', '1024', '390'];
 const problems = [];
 const notes = [];
 
 const check = spawnSync(process.execPath, [path.join(scripts, 'check.mjs')], { cwd: process.cwd(), encoding: 'utf8' });
-if (check.status !== 0) problems.push((check.stdout + check.stderr).trim());
+const checkLines = (check.stdout + check.stderr).split(/\r?\n/);
+// Timing typed by hand under a check-allow: shown with its reason, every run.
+notes.push(...checkLines.filter((l) => l.startsWith('check-allow ')));
+if (check.status !== 0) problems.push(checkLines.filter((l) => l.trim() && !l.startsWith('check-allow ')).join('\n'));
 
 let pages = {};
 try {
@@ -106,9 +115,13 @@ for (const [route, page] of Object.entries(pages)) {
       continue;
     }
     const scores = WIDTHS.map((w) => w + ': ' + (typeof r.scores[w] === 'number' ? r.scores[w].toFixed(1) : r.scores[w] || 'missing'));
-    const low = WIDTHS.some((w) => !(typeof r.scores[w] === 'number' && r.scores[w] >= PASS));
+    const passes = (v) => v === 'absent' || (typeof v === 'number' && v >= PASS);
+    const low = WIDTHS.some((w) => !passes(r.scores[w]));
+    // Acceptance is for close calls only: every width measured, none under FLOOR.
+    const acceptable = WIDTHS.every((w) => r.scores[w] === 'absent' || (typeof r.scores[w] === 'number' && r.scores[w] >= FLOOR));
     const reason = accepted[route + '#' + s.id];
-    if (low && reason) notes.push('accepted ' + route + '#' + s.id + ' (' + scores.join('  ') + '): ' + reason);
+    if (low && reason && acceptable) notes.push('accepted ' + route + '#' + s.id + ' (' + scores.join('  ') + '): ' + reason);
+    else if (low && reason) problems.push(route + ' ' + label + '  ' + scores.join('  ') + '  cannot be accepted: every width must be measured and at least ' + FLOOR + '%');
     else if (low) problems.push(route + ' ' + label + '  ' + scores.join('  ') + '  below ' + PASS + '%');
     if (s.motion && r.motion !== true) problems.push(route + ' ' + label + '  motion ✗ (its ref.md lists animations, nothing moved)');
   }

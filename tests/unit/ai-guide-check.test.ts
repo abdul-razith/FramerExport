@@ -15,6 +15,7 @@ function project(files: Record<string, string>, texts = ['We’re getting marrie
     writeFileSync(p, body);
   };
   put('ai-guide/scripts/check.mjs', CHECK_MJS);
+  mkdirSync(path.join(root, 'ai-guide', 'motion'), { recursive: true });
   put('ai-guide/sections.json', JSON.stringify({ '/': { slug: 'index', sections: [{ id: '01', name: 'Hero' }] } }));
   put('ai-guide/pages/index/sections/01-hero/ref.md', ['# 01 Hero — /', '', '## Content', '', 'Text:', ...texts.map((t) => `- "${t}"`), '', '## Animations', ''].join('\n'));
   for (const [rel, body] of Object.entries(files)) put(`nextjs-app/${rel}`, body);
@@ -126,4 +127,30 @@ test('no-typed-timing flags a duration typed in a section, not in components/mot
   assert.equal(r.code, 1);
   assert.match(r.out, /Fade\.tsx:2 no-typed-timing/);
   assert.doesNotMatch(r.out, /Appear\.tsx/);
+});
+
+test('final review 2: rules apply to every file under src/, not only src/components', () => {
+  const r = check(project({ ...clean, 'src/app/page.tsx': 'export const metadata = { title: "Clara & Theo" };\nexport default () => (\n  <main><h1>Clara</h1><img src="a.png" alt="" /></main>\n);' }));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /src\/app\/page\.tsx:3 content-in-content/);
+  assert.match(r.out, /src\/app\/page\.tsx:3 no-raw-img/);
+  assert.doesNotMatch(r.out, /page\.tsx:1/, 'metadata strings are not JSX text');
+});
+
+test('final review 3: only the copied Appear.tsx and presets.ts may hold timing in components/motion', () => {
+  const r = check(project({ ...clean, 'src/components/motion/Mine.tsx': 'export const M = () => (\n  <motion.div transition={{ duration: 2.6, delay: 0.1 }} />\n);' }));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Mine\.tsx:2 no-typed-timing/);
+});
+
+test('final review 3: the copied motion files must match ai-guide/motion (line endings aside)', () => {
+  const guideMotion = { 'presets.ts': 'export const presets = {\n  "hero-title": {}\n} as const;\n' };
+  const ok = project({ ...clean, 'src/components/motion/presets.ts': guideMotion['presets.ts'].replace(/\n/g, '\r\n') });
+  writeFileSync(path.join(ok, 'ai-guide', 'motion', 'presets.ts'), guideMotion['presets.ts']);
+  assert.equal(check(ok).code, 0, check(ok).out);
+  const edited = project({ ...clean, 'src/components/motion/presets.ts': guideMotion['presets.ts'].replace('{}', '{ "duration": 9 }') });
+  writeFileSync(path.join(edited, 'ai-guide', 'motion', 'presets.ts'), guideMotion['presets.ts']);
+  const r = check(edited);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /motion-unchanged .*presets\.ts/);
 });

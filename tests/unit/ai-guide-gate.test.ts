@@ -130,3 +130,53 @@ test('Task 0 adds npm run gate and AGENTS makes it the definition of done', () =
   assert.ok(renderPlan(fixtureSite()).includes('"gate": "node ../ai-guide/scripts/gate.mjs"'));
   assert.ok(AGENTS_MD.includes('`npm run gate`'));
 });
+
+test('final review 6: accepted.json cannot accept a missing section or a score under 80%', async () => {
+  for (const scores of [{ 1440: 99, 1024: 'not found', 390: 97 }, { 1440: 99, 1024: 70, 390: 97 }]) {
+    const root = project();
+    await record(root, scores as never);
+    writeFileSync(path.join(root, 'ai-guide', 'results', 'accepted.json'), JSON.stringify({ '/#01': 'reason' }));
+    const r = gate(root);
+    assert.equal(r.code, 1, JSON.stringify(scores));
+    assert.match(r.out, /cannot be accepted/);
+  }
+});
+
+test('final review 9: a section absent at a width on both sites passes that width', async () => {
+  const root = project();
+  await record(root, { 1440: 99, 1024: 98, 390: 'absent' } as never);
+  assert.equal(gate(root).code, 0, gate(root).out);
+  assert.match(COMPARE_MJS, /'absent'/);
+});
+
+test('final review 8: changes to public/ or the root config make results stale', async () => {
+  const root = project();
+  await record(root);
+  mkdirSync(path.join(app(root), 'public', 'images'), { recursive: true });
+  writeFileSync(path.join(app(root), 'public', 'images', 'hero.jpg'), 'x');
+  assert.match(gate(root).out, /stale/);
+  const root2 = project();
+  await record(root2);
+  writeFileSync(path.join(app(root2), 'next.config.ts'), 'export default {};');
+  assert.match(gate(root2).out, /stale/);
+});
+
+test('final review 5: the gate lists every check-allow with its reason', async () => {
+  const root = project();
+  writeFileSync(path.join(app(root), 'src', 'components', 'Menu.tsx'), 'export const M = () => (\n  // check-allow no-typed-timing: menu open/close, header ref.md Interactive\n  <motion.div transition={{ duration: 0.3 }} />\n);\n');
+  await record(root);
+  const r = gate(root);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /check-allow .*Menu\.tsx:3 .*menu open\/close/);
+});
+
+test('final review 1, 4, 5: plan and AGENTS make gate ✓ the finish line and agree on parity and check-allow', () => {
+  const md = renderPlan(fixtureSite());
+  assert.match(md, /\*\*Step \d+: Verify\*\* — .*`npm run gate`/);
+  assert.doesNotMatch(md, /list any section still below with its scores and the reason/);
+  assert.match(md, /motion items .*advisory/);
+  assert.match(AGENTS_MD, /motion items .*advisory/);
+  assert.doesNotMatch(AGENTS_MD, /a page is done when that report is empty/);
+  assert.match(AGENTS_MD, /check-allow no-typed-timing: <reason>/);
+  assert.doesNotMatch(AGENTS_MD, /FadeIn, Reveal, TypingText/);
+});

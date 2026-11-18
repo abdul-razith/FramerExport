@@ -53,7 +53,7 @@ function verifyStep(n: number, routes: string[]): string {
     'Verify',
     `Use superpowers:verification-before-completion. In \`nextjs-app/\`: \`npm run build\` and \`npm run lint\` pass; ${routes
       .map((r) => compareCmd(r))
-      .join(', ')} with \`npm run dev\` running: every section of this task shows ${GATE}; list any section still below with its scores and the reason. Check the page at desktop and mobile width.`
+      .join(', ')} with \`npm run dev\` running, then \`npm run gate\`: it must print \`gate ✓\` (a section still below 90% after 3 fix rounds goes in \`ai-guide/results/accepted.json\` with its reason; the gate accepts it only at 80% or more at every width). Check the page at desktop and mobile width.`
   );
 }
 
@@ -84,7 +84,7 @@ function parityStep(n: number, pages: { route: string; slug: string }[]): string
     'Parity',
     `with \`npm run dev\` running, ${pages.map((p) => `\`npm run parity -- ${p.route}\``).join(' and ')}: fix every item in ${pages
       .map((p) => `\`ai-guide/parity/${p.slug}.md\``)
-      .join(' and ')} from its pointer into the export (spacing, motion, hover), then run it again. Done when the report is empty (items under "Cannot match" stay).`
+      .join(' and ')} from its pointer into the export (spacing, motion, hover), then run it again. Done when it has no layout or interaction items (the gate fails on those); motion items are advisory: fix those that point at your code, while a constant start offset is the original's load time (items under "Cannot match" stay).`
   );
 }
 
