@@ -16,6 +16,8 @@ export interface SectionRefInput {
   /** Text style presets the markup uses (their rules are in ai-guide/text-styles.css). */
   presets?: string[];
   animations: ExportAnimation[] | Error;
+  /** Motion preset key per animation (ai-guide/motion/presets.ts), when it has exact settings. */
+  presetKeys?: Map<ExportAnimation, string>;
   recorded: MotionEntry[];
   states: InteractionState[];
   /** Screenshot slices per width, file names inside the section folder. */
@@ -110,7 +112,8 @@ export function renderSectionRef(input: SectionRefInput): string {
   else {
     out.push("Framer's own settings, read from the export's JS (exact values):");
     for (const a of input.animations) {
-      out.push(`- ${a.layer ? `**${a.layer}** (\`${a.className}\`)` : `\`${a.className}\``} — ${describeAnimation(a)}`);
+      const preset = input.presetKeys?.get(a);
+      out.push(`- ${a.layer ? `**${a.layer}** (\`${a.className}\`)` : `\`${a.className}\``} — ${describeAnimation(a)}${preset ? ` · preset: \`${preset}\`` : ''}`);
       // Custom code has no settings to list: its source is the spec (minified, as exported).
       if (a.kind === 'override' && a.override) out.push('', '```js', a.override.code, '```', '');
     }

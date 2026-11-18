@@ -40,7 +40,8 @@ import { findAnimations, loadVendorModules, type ExportAnimation } from './expor
 import { mergeAppear, parseAppearAnimations } from './appear-transitions.js';
 import { recordInteractions, type InteractionState } from './interactions.js';
 import { motionFromNodes, moversToEntries, renderMotionMd, summarizeLoad } from './motion.js';
-import { buildGuidePage } from './outline.js';
+import { buildGuidePage, slugify } from './outline.js';
+import { APPEAR_TSX, buildMotionPresets, renderPresetsModule, type MotionPreset } from './motion-presets.js';
 import { markupFileNames, renderSectionRef, sectionDirName, sectionMotion } from './section-ref.js';
 import { sectionsJson, WIDTH_KEY, type WidthKey } from './sections-json.js';
 import { splitPage } from './split.js';
@@ -389,6 +390,8 @@ async function build(
   const paritySources: ParitySources = {};
   const allRules: CssRule[] = [];
   const presets = new Set<string>();
+  const motionPresets: MotionPreset[] = [];
+  const presetKeysTaken = new Set<string>();
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -452,6 +455,12 @@ async function build(
         const refs = await Promise.all(
           targets.map((t) => sectionReference(t.section, html, rules, tokens, modules, entries))
         );
+        // Exact Framer timing as data: ai-guide/motion/presets.ts, named per section in each ref.md.
+        const { presets: pagePresets, keyOf: presetKeys } = buildMotionPresets(
+          refs.map((r, i) => ({ section: slugify(targets[i].section.name), animations: r.animations instanceof Error ? [] : r.animations })),
+          presetKeysTaken
+        );
+        motionPresets.push(...pagePresets);
         let states: InteractionState[] = [];
         if (recorded) {
           try {
@@ -535,6 +544,7 @@ async function build(
                 css: r.css,
                 presets: r.presets,
                 animations: r.animations,
+                presetKeys,
                 recorded: r.recorded,
                 states: states.filter((s) => s.section === t.section.id),
                 slices,
@@ -684,6 +694,9 @@ Use the export file \`${page.exportFile}\` and the live site for this page.
   await fs.writeFile(path.join(guideDir, 'scripts', 'compare.mjs'), COMPARE_MJS);
   await fs.writeFile(path.join(guideDir, 'scripts', 'parity.mjs'), PARITY_MJS);
   await fs.writeFile(path.join(guideDir, 'scripts', 'parity-lib.mjs'), PARITY_LIB_MJS);
+  await fs.mkdir(path.join(guideDir, 'motion'), { recursive: true });
+  await fs.writeFile(path.join(guideDir, 'motion', 'presets.ts'), renderPresetsModule(motionPresets));
+  await fs.writeFile(path.join(guideDir, 'motion', 'Appear.tsx'), APPEAR_TSX);
   await fs.rm(path.join(guideDir, '.capture'), { recursive: true, force: true });
   return renderPlan(site);
 }

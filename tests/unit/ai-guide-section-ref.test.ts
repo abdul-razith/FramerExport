@@ -32,6 +32,13 @@ function input(extra: Partial<SectionRefInput> = {}): SectionRefInput {
   };
 }
 
+test('an animation with a motion preset names its key in ref.md', () => {
+  const i = input();
+  const [title] = i.animations as Exclude<SectionRefInput['animations'], Error>;
+  const md = renderSectionRef({ ...i, presetKeys: new Map([[title, 'hero-title']]) });
+  assert.ok(md.includes('preset: `hero-title`'), md);
+});
+
 test('ref.md has every heading in order', () => {
   const md = renderSectionRef(input());
   const heads = md.split('\n').filter((l) => l.startsWith('#'));

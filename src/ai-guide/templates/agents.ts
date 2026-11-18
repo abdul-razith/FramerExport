@@ -47,8 +47,10 @@ clean, editable Next.js project that looks and moves like the original. You buil
    the \`## Content\` part of each \`ref.md\`; components get content through props. Copy images from
    \`assets/\` to \`public/images/\` with the readable names in \`ai-guide/files.md\`. Text marked
    "generated" (clocks, counters) is built as a small component, not content.
-7. **Animation.** Use the Framer settings in each \`ref.md\` \`## Animations\` part (exact values and
-   timing) and check them against the page's \`motion.md\` and frames. Animate only transform and
+7. **Animation.** An animation whose \`ref.md\` line ends with \`preset: <key>\` is built with
+   \`<Appear preset="<key>">\` from \`src/components/motion/\`: never type a duration, delay or ease
+   for it, the preset holds Framer's exact values. For the others, use the Framer settings in each
+   \`ref.md\` \`## Animations\` part and check them against the page's \`motion.md\` and frames. Animate only transform and
    opacity. Respect \`prefers-reduced-motion\` (no movement, content visible). Rebuild every state in
    \`## Interactive\` (hover, open/closed) to match its screenshots. Build a section's animations in
    the same step as the section, not later: a section whose ref.md lists animations is only done
