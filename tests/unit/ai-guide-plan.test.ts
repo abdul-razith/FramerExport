@@ -8,7 +8,29 @@ import { renderContentMd, renderSiteMd } from '../../src/ai-guide/site-docs.js';
 import { AGENTS_MD } from '../../src/ai-guide/templates/agents.js';
 import { CHECKLIST_MD } from '../../src/ai-guide/templates/checklist.js';
 import { renderReadme } from '../../src/ai-guide/templates/readme.js';
-import { fixtureSite } from './ai-guide-fixture.js';
+import { fixtureSite, section } from './ai-guide-fixture.js';
+
+test('numbered sibling sections become one step that builds one shared component', () => {
+  const site = fixtureSite();
+  site.pages[0].sections = [
+    section(1, 'Hero Section'),
+    section(2, 'Gallery — Print 1'),
+    section(3, 'Gallery — Print 2'),
+    section(4, 'Gallery — Print 3'),
+    section(5, 'Questions'),
+  ];
+  const md = renderPlan(site);
+  assert.match(md, /- \[ \] \*\*Step 3: 02–04 Gallery — Print 1…3\*\* — /);
+  assert.ok(md.includes('one component `src/components/sections/home/HomeGalleryPrint.tsx`, used 3 times'), md);
+  for (const id of ['02', '03', '04']) assert.ok(md.includes(`\`npm run compare -- / --section ${id}\``), id);
+  assert.match(md, /- \[ \] \*\*Step 4: 05 Questions\*\*/);
+  assert.doesNotMatch(md, /HomeGalleryPrint1\.tsx/);
+});
+
+test('Task 0 adds npm run check and AGENTS makes it part of done', () => {
+  assert.ok(renderPlan(fixtureSite()).includes('"check": "node ../ai-guide/scripts/check.mjs"'));
+  assert.ok(AGENTS_MD.includes('`npm run check`'));
+});
 
 test('one task per page: setup, shell, each regular page, each collection, review', () => {
   assert.deepEqual(

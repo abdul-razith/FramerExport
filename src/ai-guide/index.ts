@@ -56,6 +56,7 @@ import { CHECKLIST_MD } from './templates/checklist.js';
 import { COMPARE_MJS } from './templates/compare.js';
 import { PARITY_MJS } from './templates/parity.js';
 import { PARITY_LIB_MJS } from './templates/parity-lib.js';
+import { CHECK_MJS } from './templates/check.js';
 import { renderReadme } from './templates/readme.js';
 import {
   pageSlug,
@@ -694,6 +695,7 @@ Use the export file \`${page.exportFile}\` and the live site for this page.
   await fs.writeFile(path.join(guideDir, 'scripts', 'compare.mjs'), COMPARE_MJS);
   await fs.writeFile(path.join(guideDir, 'scripts', 'parity.mjs'), PARITY_MJS);
   await fs.writeFile(path.join(guideDir, 'scripts', 'parity-lib.mjs'), PARITY_LIB_MJS);
+  await fs.writeFile(path.join(guideDir, 'scripts', 'check.mjs'), CHECK_MJS);
   await fs.mkdir(path.join(guideDir, 'motion'), { recursive: true });
   await fs.writeFile(path.join(guideDir, 'motion', 'presets.ts'), renderPresetsModule(motionPresets));
   await fs.writeFile(path.join(guideDir, 'motion', 'Appear.tsx'), APPEAR_TSX);

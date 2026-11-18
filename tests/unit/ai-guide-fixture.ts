@@ -2,7 +2,7 @@ import type { GuidePage, GuideSection, GuideSite } from '../../src/ai-guide/type
 import { collectTokens } from '../../src/nextjs/tokens.js';
 import type { Node } from '../../src/nextjs/model.js';
 
-const section = (index: number, name: string, extra: Partial<GuideSection> = {}): GuideSection => ({
+export const section = (index: number, name: string, extra: Partial<GuideSection> = {}): GuideSection => ({
   index,
   id: String(index).padStart(2, '0'),
   name,

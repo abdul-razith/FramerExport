@@ -62,7 +62,9 @@ clean, editable Next.js project that looks and moves like the original. You buil
    Then \`npm run parity -- <route>\` compares the whole page with the original site (section
    spacing, everything that moves, hover changes) and writes \`ai-guide/parity/<page>.md\`, each item
    pointing into the export; a page is done when that report is empty.
-9. **Done means.** In \`nextjs-app/\`: \`npm run build\` and \`npm run lint\` pass; every section of the
+9. **Done means.** In \`nextjs-app/\`: \`npm run build\`, \`npm run lint\` and \`npm run check\` pass
+   (\`npm run check\` turns rules 5–7 into failures: Framer class names, \`<img>\`, page text in components,
+   duplicate components, missing \`data-section\`, timing typed by hand); every section of the
    task reached the 90% gate or is listed with its scores and reason; only the files the task names
    were changed.
 10. **Never.** Add a dependency the task does not name without saying why; edit the export or

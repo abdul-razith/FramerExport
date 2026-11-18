@@ -88,6 +88,33 @@ function parityStep(n: number, pages: { route: string; slug: string }[]): string
   );
 }
 
+/** `Gallery — Print 3` → stem `Gallery — Print`, number 3. */
+const NUMBERED = /^(.*\S)\s+(\d+)$/;
+
+/** Consecutive sections whose names differ only by a trailing number form one group; others stand alone. */
+function numberedGroups(sections: GuideSection[]): GuideSection[][] {
+  const groups: GuideSection[][] = [];
+  for (const s of sections) {
+    const last = groups.at(-1);
+    const stem = s.name.match(NUMBERED)?.[1];
+    if (stem && last && last[0].name.match(NUMBERED)?.[1] === stem) last.push(s);
+    else groups.push([s]);
+  }
+  return groups;
+}
+
+/** Numbered siblings (`Print 1…5`): one component, used once per section, each compared on its own. */
+function groupStep(n: number, group: GuideSection[], stem: string, base: string, component: string, content: string, route: string): string {
+  const first = group[0], last = group.at(-1)!;
+  const nums = (s: GuideSection) => s.name.match(NUMBERED)![2];
+  const motion = group.some((s) => s.motion?.length);
+  return step(
+    n,
+    `${first.id}–${last.id} ${stem} ${nums(first)}…${nums(last)}`,
+    `read ${group.map((s) => `\`${base}/sections/${sectionDirName(s)}/\``).join(', ')} → build one component \`${component}\`, used ${group.length} times, with what differs (content, rotation, offsets) as props from \`${content}\` and each instance's \`data-section\` (${group.map((s) => `"${s.id}"`).join(', ')}) on its root${motion ? ' → animate each from its ref.md `## Animations` part (presets where listed)' : ''} → ${group.map((s) => compareCmd(route, s.id)).join(', ')} → fix and compare again, at most 3 fix rounds, until each is ${GATE}${motion ? ' and `motion ✓`' : ''} → tick this step and write each section's three scores after it.`
+  );
+}
+
 /** The per-section loop: read the export references, build, compare, fix (at most 3 rounds). */
 function sectionStep(n: number, s: GuideSection, dir: string, component: string, content: string, route: string): string {
   const naming = s.generic ? ' (the layer name is generic: choose a meaningful component name)' : '';
@@ -107,7 +134,7 @@ function setupTask(site: GuideSite): string[] {
     '',
     step(1, 'Create the project', `in the export folder run \`${CREATE_APP}\`. It creates \`nextjs-app/\` with TypeScript, Tailwind, ESLint, the App Router, a \`src/\` folder, the \`@/*\` alias and a \`.gitignore\`.`),
     step(2, 'Install', `in \`nextjs-app/\`: \`${INSTALL}\` and \`${INSTALL_DEV}\` (latest versions; the last three are for \`npm run compare\`).`),
-    step(3, 'Configure', 'MDX in `next.config.ts` with `@next/mdx` (`pageExtensions` includes `md` and `mdx`) and `src/mdx-components.tsx`; add the scripts `"compare": "node ../ai-guide/scripts/compare.mjs"` and `"parity": "node ../ai-guide/scripts/parity.mjs"` to `package.json`; copy `presets.ts` and `Appear.tsx` from `ai-guide/motion/` to `src/components/motion/` unchanged (the exact Framer timing every animated section uses).'),
+    step(3, 'Configure', 'MDX in `next.config.ts` with `@next/mdx` (`pageExtensions` includes `md` and `mdx`) and `src/mdx-components.tsx`; add the scripts `"compare": "node ../ai-guide/scripts/compare.mjs"` , `"parity": "node ../ai-guide/scripts/parity.mjs"` and `"check": "node ../ai-guide/scripts/check.mjs"` to `package.json`; copy `presets.ts` and `Appear.tsx` from `ai-guide/motion/` to `src/components/motion/` unchanged (the exact Framer timing every animated section uses).'),
     step(4, 'Tokens', 'every colour, font, radius and shadow from `ai-guide/tokens.md` into `@theme` in `src/app/globals.css`; custom variants `tablet` = `@media (min-width: 810px) and (max-width: 1199px)` and `mobile` = `@media (max-width: 809px)` (the same ranges as Framer, so a tablet class never leaks into mobile).'),
     step(5, 'Text styles', 'turn each Framer text preset in `ai-guide/text-styles.css` into one Tailwind `@utility` in `src/app/globals.css`, named after its role (`text-heading-1`, `text-body`…), keeping its exact values per width; note in a comment which preset class each one replaces.'),
     step(6, 'Fonts', 'copy the font files listed in `ai-guide/files.md` to `public/fonts/` and declare them with `@font-face` in `src/app/fonts.css`, imported by `src/app/layout.tsx`.'),
@@ -154,11 +181,17 @@ function pageTask(page: GuidePage): string[] {
     '',
     step(1, 'Content', `\`${content}\` with every text, image and link of the page, from the \`## Content\` part of each section's ref.md, keyed by section.`),
   ];
-  page.sections.forEach((s, i) => {
+  let n = 2;
+  for (const group of numberedGroups(page.sections)) {
+    if (group.length > 1) {
+      const stem = group[0].name.replace(NUMBERED, '$1');
+      lines.push(groupStep(n++, group, stem, base, `src/components/sections/${folder}/${prefix}${pascal(stem)}.tsx`, content, page.route));
+      continue;
+    }
+    const s = group[0];
     const name = s.generic ? `${prefix}<Name>` : `${prefix}${pascal(s.name)}`;
-    lines.push(sectionStep(i + 2, s, `${base}/sections/${sectionDirName(s)}`, `src/components/sections/${folder}/${name}.tsx`, content, page.route));
-  });
-  let n = page.sections.length + 2;
+    lines.push(sectionStep(n++, s, `${base}/sections/${sectionDirName(s)}`, `src/components/sections/${folder}/${name}.tsx`, content, page.route));
+  }
   lines.push(animationsStep(n++, [`${base}/motion.md`], [page.route]));
   lines.push(step(n++, 'Interactive states', 'every state in the `## Interactive` part of the section ref.md files (hover, open/closed), matching its before/after screenshots.'));
   lines.push(step(n++, 'Page', `\`${appFile}\` renders the sections in order with metadata.`));
