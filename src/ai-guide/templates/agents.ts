@@ -62,12 +62,16 @@ clean, editable Next.js project that looks and moves like the original. You buil
    Then \`npm run parity -- <route>\` compares the whole page with the original site (section
    spacing, everything that moves, hover changes) and writes \`ai-guide/parity/<page>.md\`, each item
    pointing into the export; a page is done when that report is empty.
-9. **Done means.** In \`nextjs-app/\`: \`npm run build\`, \`npm run lint\` and \`npm run check\` pass
-   (\`npm run check\` turns rules 5–7 into failures: Framer class names, \`<img>\`, page text in components,
-   duplicate components, missing \`data-section\`, timing typed by hand); every section of the
-   task reached the 90% gate or is listed with its scores and reason; only the files the task names
-   were changed.
+9. **Done means.** In \`nextjs-app/\`: \`npm run build\` and \`npm run lint\` pass, then \`npm run gate\`
+   exits 0. The gate reads the numbers \`npm run compare\` and \`npm run parity\` recorded in
+   \`ai-guide/results/\` (scores you type into \`plan.md\` do not count) and runs \`npm run check\`,
+   which turns rules 5–7 into failures: Framer class names, \`<img>\`, page text in components,
+   duplicate components, missing \`data-section\`, timing typed by hand. A section still below 90%
+   after 3 fix rounds goes in \`ai-guide/results/accepted.json\` as \`{ "<route>#<id>": "<reason>" }\`.
+   Only the files the task names were changed.
 10. **Never.** Add a dependency the task does not name without saying why; edit the export or
-   \`ai-guide/\` (except ticking boxes in \`plan.md\`, and the images \`npm run compare\` writes to
-   \`ai-guide/compare/\`); invent content; leave placeholder text or TODOs.
+   \`ai-guide/\` (except ticking boxes in \`plan.md\`, \`ai-guide/results/accepted.json\`, and what
+   \`npm run compare\` and \`npm run parity\` write themselves to \`ai-guide/compare/\`,
+   \`ai-guide/parity/\` and \`ai-guide/results/\`); edit \`ai-guide/results/<page>.json\` by
+   hand; invent content; leave placeholder text or TODOs.
 `;

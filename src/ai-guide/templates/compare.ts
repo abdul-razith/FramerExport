@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { writeResults } from './results.mjs';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const puppeteer = require('puppeteer');
@@ -213,6 +214,13 @@ for (const [id, r] of results) {
   const motion = r.motion ? '  motion ' + (moved.has(id) ? '✓' : '✗') : '';
   console.log(id + ' ' + (r.name || '') + '  ' + cells.join('  ') + (ok ? '' : ' ✗') + motion);
 }
+// The numbers npm run gate reads (ai-guide/results/<page>.json): only the sections measured in this run.
+const measured = {};
+for (const [id, r] of results) {
+  if (!Object.keys(r.scores).length) continue;
+  measured[id] = { scores: r.scores, motion: r.motion ? moved.has(id) : null };
+}
+if (Object.keys(measured).length) writeResults(guideDir, slug, { sections: measured });
 if (results.size) console.log('✗ = below ' + PASS + '% at some width. Images: ai-guide/compare/' + slug + '-<id>-<width>.png (original | yours | differences)');
 if ([...results].some(([id, r]) => r.motion && !moved.has(id)))
   console.log('motion ✗ = its ref.md lists animations (## Animations) but nothing in it moved: build them before ticking the step.');

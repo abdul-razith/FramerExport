@@ -7,6 +7,7 @@ import { PNG } from 'pngjs';
 import { cropPng, sliceSection } from '../../src/ai-guide/crops.js';
 import { COMPARE_MJS } from '../../src/ai-guide/templates/compare.js';
 import { PARITY_MJS } from '../../src/ai-guide/templates/parity.js';
+import { RESULTS_MJS } from '../../src/ai-guide/templates/gate.js';
 
 const tmpDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'ai-guide-crops-'));
 
@@ -46,8 +47,9 @@ test('cropPng clamps to the image and skips empty boxes', async () => {
   assert.equal(await fs.stat(path.join(dir, 'b.png')).then(() => true, () => false), false);
 });
 
-test('the compare script is self-contained', () => {
-  assert.doesNotMatch(COMPARE_MJS, /from ['"]\.\.?\//);
+test('the compare script imports only results.mjs, written beside it', () => {
+  const imports = [...COMPARE_MJS.matchAll(/from ['"](\.\.?\/[^'"]+)['"]/g)].map((m) => m[1]);
+  assert.deepEqual(imports, ['./results.mjs']);
   for (const w of ['1440', '1024', '390']) assert.ok(COMPARE_MJS.includes(w));
 });
 
@@ -60,8 +62,10 @@ test('the compare script is valid JavaScript', async () => {
 
 test('compare.mjs reads the route even after Git Bash rewrote it into a Windows path', async () => {
   const { spawnSync } = await import('node:child_process');
-  const file = path.join(await tmpDir(), 'compare.mjs');
+  const dir = await tmpDir();
+  const file = path.join(dir, 'compare.mjs');
   await fs.writeFile(file, COMPARE_MJS);
+  await fs.writeFile(path.join(dir, 'results.mjs'), RESULTS_MJS);
   const run = (arg: string) =>
     spawnSync(process.execPath, [file, arg, '--base', 'http://127.0.0.1:9'], { cwd: process.cwd(), encoding: 'utf8' });
   assert.match(run('C:/Program Files/Git/about').stderr, /http:\/\/127\.0\.0\.1:9\/about/);
@@ -80,7 +84,7 @@ test('sliceSection cuts a tall box into 900px slices', async () => {
 
 test('the parity script imports only its lib and is valid JavaScript', async () => {
   const imports = [...PARITY_MJS.matchAll(/from ['"](\.\.?\/[^'"]+)['"]/g)].map((m) => m[1]);
-  assert.deepEqual(imports, ['./parity-lib.mjs']);
+  assert.deepEqual(imports, ['./parity-lib.mjs', './results.mjs']);
   const { execFileSync } = await import('node:child_process');
   const file = path.join(await tmpDir(), 'parity.mjs');
   await fs.writeFile(file, PARITY_MJS);

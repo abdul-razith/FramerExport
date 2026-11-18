@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { interactionDiffs, layoutDiffs, motionDiffs, renderReport } from './parity-lib.mjs';
+import { writeResults } from './results.mjs';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const puppeteer = require('puppeteer');
@@ -521,6 +522,16 @@ const report = renderReport(route, result, sources);
 // --dump: what was measured on both sites, to see why an item is (or is not) reported.
 if (dump) fs.writeFileSync(path.join(outDir, slug + '.raw.json'), JSON.stringify(raw, null, 1));
 fs.writeFileSync(path.join(outDir, slug + '.md'), report);
+// The counts npm run gate reads; a width that could not be measured counts as a layout difference.
+const totals = { layout: 0, motion: 0, interaction: 0 };
+for (const w of WIDTHS) {
+  const r = result.widths[w];
+  if (r.error) totals.layout++;
+  totals.layout += r.layout.filter((d) => !d.inherited).length;
+  totals.motion += r.motion.length;
+  totals.interaction += r.interaction.length;
+}
+writeResults(guideDir, slug, { parity: totals });
 for (const w of WIDTHS) {
   const r = result.widths[w];
   console.log(w + ': ' + (r.error ? r.error : 'layout ' + r.layout.filter((d) => !d.inherited).length + ', motion ' + r.motion.length + ', interaction ' + r.interaction.length));
