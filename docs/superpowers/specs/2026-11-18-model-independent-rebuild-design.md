@@ -84,7 +84,10 @@ For a fair model comparison, export once and give every model a copy of the same
 
 ## Open questions and risks
 
-- **Converter quality is unknown.** Task 3 Step 1 measures `to-nextjs` scores before any change. If most
+- **Converter quality — measured 2026-11-18:** whole page 98.2 / 91.5 / 92.2% (1440 / 1024 / 390), but no
+  section is measurable (no `data-section`, one 1,848-line component). Task 3 is therefore limited to the
+  measurement; aligning `to-nextjs` output with the guide's sections needs its own spec. Original note:
+  Task 3 Step 1 measures `to-nextjs` scores before any change. If most
   sections fall below 90%, Task 3 shrinks to the sections that pass.
 - **In-view transitions.** Task 1 covers on-load (appear) animations from the HTML block. In-view
   (`enter`) transitions come from the JS bundle; some use variable references (`animate: ec`) the

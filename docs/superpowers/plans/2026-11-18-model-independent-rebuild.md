@@ -144,9 +144,13 @@ git commit -am "feat(ai-guide): emit motion presets from exact transitions"
 - Consumes: `MotionPreset` / `AnimationSpec.transition` from Task 2; `results/<route>.json` shape from Task 5 if Task 5 is done first.
 - Produces: `ai-guide/results/baseline.json` = `{ [sectionId]: { 1440: number; 1024: number; 390: number } }`; `planStepKind(sectionId: string, baseline: Baseline): 'refactor' | 'build'`.
 
-- [ ] **Step 1: Measure the baseline**
+- [x] **Step 1: Measure the baseline**
 
 Run `framer-export to-nextjs` on Clara & Theo and record per-section `compare` scores. Any section below 90% keeps today's "build from markup" step. Write the numbers into this plan under the step.
+
+**Result (2026-11-18, scratch copy of the Clara & Theo export):** build passes; whole-page similarity 98.22% at 1440, 91.49% at 1024, 92.17% at 390 (the converter's own 97% target is met at 1440 only). Per-section scores cannot be measured: the output has no `data-section` on any element (all 32 guide sections missing), puts most of the page in one 1,848-line `components/sections/Main.tsx` with generic names (`Section2`, `MainGroup3`), and uses `app/` at the root instead of `src/app/`. `npm run check` on it: 32 `data-section`, 12 `content-in-content`, 3 `no-framer-names`, 1 `no-duplicate-components`.
+
+**Ruling:** no section qualifies for a "refactor" step, so Steps 2–6 are not done here. Making the converter the starting point first needs the converter to emit one component per guide section with its `data-section` id and the guide's `src/` layout: a separate spec (`to-nextjs` section alignment).
 
 - [ ] **Step 2: Write the failing tests**
 
